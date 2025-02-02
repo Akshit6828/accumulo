@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -41,7 +41,6 @@ import org.apache.accumulo.core.client.security.SecurityErrorCode;
 import org.apache.accumulo.core.clientImpl.ClientContext;
 import org.apache.accumulo.core.conf.ClientProperty;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
 import org.apache.accumulo.core.data.ConstraintViolationSummary;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
@@ -50,10 +49,13 @@ import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.file.FileOperations;
 import org.apache.accumulo.core.file.FileSKVWriter;
 import org.apache.accumulo.core.file.rfile.RFile;
+import org.apache.accumulo.core.metadata.UnreferencedTabletFile;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.security.ColumnVisibility;
+import org.apache.accumulo.core.spi.crypto.NoCryptoServiceFactory;
 import org.apache.accumulo.core.util.FastFormat;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
 
 import com.beust.jcommander.Parameter;
@@ -79,6 +81,7 @@ public class TestIngest {
     public int stride;
     public String columnFamily = "colf";
     public ColumnVisibility columnVisibility = new ColumnVisibility();
+    public int flushAfterRows = 0;
 
     public IngestParams(Properties props) {
       clientProps = props;
@@ -116,7 +119,7 @@ public class TestIngest {
     int cols = 1;
 
     @Parameter(names = "--random", description = "insert random rows and use"
-        + " the given number to seed the psuedo-random number generator")
+        + " the given number to seed the pseudo-random number generator")
     Integer random = null;
 
     @Parameter(names = "--size", description = "the size of the value to ingest")
@@ -142,6 +145,10 @@ public class TestIngest {
         description = "place columns in this column family", converter = VisibilityConverter.class)
     ColumnVisibility columnVisibility = new ColumnVisibility();
 
+    @Parameter(names = {"-fr", "--flushAfterRows"},
+        description = "flush after N rows, 0 is default and means disabled")
+    int flushAfterRows = 0;
+
     protected void populateIngestPrams(IngestParams params) {
       params.createTable = createTable;
       params.numsplits = numsplits;
@@ -156,6 +163,7 @@ public class TestIngest {
       params.stride = stride;
       params.columnFamily = columnFamily;
       params.columnVisibility = columnVisibility;
+      params.flushAfterRows = flushAfterRows;
     }
 
     public IngestParams getIngestPrams() {
@@ -191,9 +199,13 @@ public class TestIngest {
   public static TreeSet<Text> getSplitPoints(long start, long end, long numsplits) {
     long splitSize = (end - start) / numsplits;
 
-    long pos = start + splitSize;
-
     TreeSet<Text> splits = new TreeSet<>();
+
+    if (splitSize < 1) {
+      return splits;
+    }
+
+    long pos = start + splitSize;
 
     while (pos < end) {
       splits.add(new Text(String.format("row_%010d", pos)));
@@ -224,8 +236,10 @@ public class TestIngest {
     return new Text(FastFormat.toZeroPaddedString(rowid + startRow, 10, 10, ROW_PREFIX));
   }
 
-  public static byte[] genRandomValue(Random random, byte[] dest, int seed, int row, int col) {
-    random.setSeed((row ^ seed) ^ col);
+  @SuppressFBWarnings(value = {"PREDICTABLE_RANDOM", "DMI_RANDOM_USED_ONLY_ONCE"},
+      justification = "predictable random with specific seed is intended for this test")
+  public static byte[] genRandomValue(byte[] dest, int seed, int row, int col) {
+    var random = new Random((row ^ seed) ^ col);
     random.nextBytes(dest);
     toPrintableChars(dest);
     return dest;
@@ -248,8 +262,6 @@ public class TestIngest {
     }
   }
 
-  @SuppressFBWarnings(value = "PREDICTABLE_RANDOM",
-      justification = "predictable random is okay for testing")
   public static void ingest(AccumuloClient accumuloClient, FileSystem fs, IngestParams params)
       throws IOException, AccumuloException, AccumuloSecurityException, TableNotFoundException,
       MutationsRejectedException, TableExistsException {
@@ -258,7 +270,6 @@ public class TestIngest {
     byte[][] bytevals = generateValues(params.dataSize);
 
     byte[] randomValue = new byte[params.dataSize];
-    Random random = new Random();
 
     long bytesWritten = 0;
 
@@ -270,8 +281,9 @@ public class TestIngest {
     if (params.outputFile != null) {
       ClientContext cc = (ClientContext) accumuloClient;
       writer = FileOperations.getInstance().newWriterBuilder()
-          .forFile(params.outputFile + "." + RFile.EXTENSION, fs, cc.getHadoopConf(),
-              CryptoServiceFactory.newDefaultInstance())
+          .forFile(
+              UnreferencedTabletFile.of(fs, new Path(params.outputFile + "." + RFile.EXTENSION)),
+              fs, cc.getHadoopConf(), NoCryptoServiceFactory.NONE)
           .withTableConfiguration(DefaultConfiguration.getInstance()).build();
       writer.startDefaultLocalityGroup();
     } else {
@@ -317,8 +329,7 @@ public class TestIngest {
           } else {
             byte[] value;
             if (params.random != null) {
-              value =
-                  genRandomValue(random, randomValue, params.random, rowid + params.startRow, j);
+              value = genRandomValue(randomValue, params.random, rowid + params.startRow, j);
             } else {
               value = bytevals[j % bytevals.length];
             }
@@ -341,8 +352,7 @@ public class TestIngest {
           } else {
             byte[] value;
             if (params.random != null) {
-              value =
-                  genRandomValue(random, randomValue, params.random, rowid + params.startRow, j);
+              value = genRandomValue(randomValue, params.random, rowid + params.startRow, j);
             } else {
               value = bytevals[j % bytevals.length];
             }
@@ -360,6 +370,10 @@ public class TestIngest {
       }
       if (bw != null) {
         bw.addMutation(m);
+        if ((params.flushAfterRows != 0) && (i % params.flushAfterRows == 0)) {
+          bw.flush();
+          accumuloClient.tableOperations().flush(params.tableName, null, null, true);
+        }
       }
     }
 

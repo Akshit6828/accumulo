@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,9 +18,9 @@
  */
 package org.apache.accumulo.core.iterators.system;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,10 +36,10 @@ import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
-import org.apache.accumulo.core.iterators.SortedMapIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.MultiIterator;
+import org.apache.accumulo.core.iteratorsImpl.system.SortedMapIterator;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class MultiIteratorTest {
 
@@ -73,43 +73,50 @@ public class MultiIteratorTest {
     }
 
     MultiIterator mi;
-    if (endRow == null && prevEndRow == null)
+    if (endRow == null && prevEndRow == null) {
       mi = new MultiIterator(iters, init);
-    else {
+    } else {
       Range range = new Range(prevEndRow, false, endRow, true);
-      if (init)
-        for (SortedKeyValueIterator<Key,Value> iter : iters)
+      if (init) {
+        for (SortedKeyValueIterator<Key,Value> iter : iters) {
           iter.seek(range, Set.of(), false);
+        }
+      }
       mi = new MultiIterator(iters, range);
 
-      if (init)
+      if (init) {
         mi.seek(range, Set.of(), false);
+      }
     }
 
-    if (seekKey != null)
+    if (seekKey != null) {
       mi.seek(new Range(seekKey, null), EMPTY_COL_FAMS, false);
-    else
+    } else {
       mi.seek(new Range(), EMPTY_COL_FAMS, false);
+    }
 
     int i = start;
     while (mi.hasTop()) {
-      if (incrRow)
+      if (incrRow) {
         assertEquals(newKey(i, 0), mi.getTopKey());
-      else
+      } else {
         assertEquals(newKey(0, i), mi.getTopKey());
+      }
 
       assertEquals("v" + i, mi.getTopValue().toString());
 
       mi.next();
-      if (incrRow)
+      if (incrRow) {
         i++;
-      else
+      } else {
         i--;
+      }
     }
 
-    assertEquals("start=" + start + " end=" + end + " seekKey=" + seekKey + " endRow=" + endRow
-        + " prevEndRow=" + prevEndRow + " init=" + init + " incrRow=" + incrRow + " maps=" + maps,
-        end, i);
+    assertEquals(end, i,
+        "start=" + start + " end=" + end + " seekKey=" + seekKey + " endRow=" + endRow
+            + " prevEndRow=" + prevEndRow + " init=" + init + " incrRow=" + incrRow + " maps="
+            + maps);
   }
 
   void verify(int start, Key seekKey, List<TreeMap<Key,Value>> maps) throws IOException {
@@ -153,10 +160,11 @@ public class MultiIteratorTest {
     List<TreeMap<Key,Value>> tmpList = new ArrayList<>(2);
 
     for (int i = 0; i < 8; i++) {
-      if (i % 2 == 0)
+      if (i % 2 == 0) {
         newKeyValue(tm1, 0, i, false, "v" + i);
-      else
+      } else {
         newKeyValue(tm2, 0, i, false, "v" + i);
+      }
     }
     tmpList.add(tm1);
     tmpList.add(tm2);
@@ -213,10 +221,11 @@ public class MultiIteratorTest {
     List<TreeMap<Key,Value>> tmpList = new ArrayList<>(2);
 
     for (int i = 0; i < 8; i++) {
-      if (i % 2 == 0)
+      if (i % 2 == 0) {
         newKeyValue(tm1, i, 0, false, "v" + i);
-      else
+      } else {
         newKeyValue(tm2, i, 0, false, "v" + i);
+      }
     }
 
     tmpList.add(tm1);
@@ -242,11 +251,13 @@ public class MultiIteratorTest {
 
           int start = Math.max(per + 1, seek);
 
-          if (start > er)
+          if (start > er) {
             end = start;
+          }
 
-          if (per >= 8)
+          if (per >= 8) {
             end = start;
+          }
 
           int noSeekStart = Math.max(0, per + 1);
 

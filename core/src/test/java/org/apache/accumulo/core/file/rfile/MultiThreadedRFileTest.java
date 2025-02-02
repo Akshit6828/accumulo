@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,32 +18,31 @@
  */
 package org.apache.accumulo.core.file.rfile;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.security.SecureRandom;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalInt;
-import java.util.Random;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.sample.Sampler;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory.ClassloaderType;
+import org.apache.accumulo.core.crypto.CryptoFactoryLoader;
 import org.apache.accumulo.core.data.ArrayByteSequence;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
@@ -64,9 +63,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,26 +75,22 @@ public class MultiThreadedRFileTest {
   private static final Logger LOG = LoggerFactory.getLogger(MultiThreadedRFileTest.class);
   private static final Collection<ByteSequence> EMPTY_COL_FAMS = new ArrayList<>();
 
-  @Rule
-  public TemporaryFolder tempFolder =
-      new TemporaryFolder(new File(System.getProperty("user.dir") + "/target"));
-
   private static void checkIndex(Reader reader) throws IOException {
     FileSKVIterator indexIter = reader.getIndex();
 
     if (indexIter.hasTop()) {
       Key lastKey = new Key(indexIter.getTopKey());
 
-      if (reader.getFirstKey().compareTo(lastKey) > 0) {
-        throw new RuntimeException(
-            "First key out of order " + reader.getFirstKey() + " " + lastKey);
+      if (reader.getFirstRow().compareTo(lastKey.getRow()) > 0) {
+        throw new IllegalStateException(
+            "First key out of order " + reader.getFirstRow() + " " + lastKey);
       }
 
       indexIter.next();
 
       while (indexIter.hasTop()) {
         if (lastKey.compareTo(indexIter.getTopKey()) > 0) {
-          throw new RuntimeException(
+          throw new IllegalStateException(
               "Indext out of order " + lastKey + " " + indexIter.getTopKey());
         }
 
@@ -106,8 +99,9 @@ public class MultiThreadedRFileTest {
 
       }
 
-      if (!reader.getLastKey().equals(lastKey)) {
-        throw new RuntimeException("Last key out of order " + reader.getLastKey() + " " + lastKey);
+      if (!reader.getLastRow().equals(lastKey.getRow())) {
+        throw new IllegalStateException(
+            "Last key out of order " + reader.getLastRow() + " " + lastKey);
       }
     }
   }
@@ -141,7 +135,7 @@ public class MultiThreadedRFileTest {
     public TestRFile deepCopy() throws IOException {
       TestRFile copy = new TestRFile(accumuloConfiguration);
       // does not copy any writer resources. This would be for read only.
-      copy.reader = (Reader) reader.deepCopy(null);
+      copy.reader = reader.deepCopy(null);
       copy.rfile = rfile;
       copy.iter = new ColumnFamilySkippingIterator(copy.reader);
       copy.deepCopy = true;
@@ -160,8 +154,8 @@ public class MultiThreadedRFileTest {
       FileSystem fs = FileSystem.newInstance(conf);
       Path path = new Path("file://" + rfile);
       dos = fs.create(path, true);
-      BCFile.Writer _cbw = new BCFile.Writer(dos, null, "gz", conf,
-          CryptoServiceFactory.newInstance(accumuloConfiguration, ClassloaderType.JAVA));
+      BCFile.Writer _cbw = new BCFile.Writer(dos, "gz", conf,
+          CryptoFactoryLoader.getServiceForServer(accumuloConfiguration));
       SamplerConfigurationImpl samplerConfig =
           SamplerConfigurationImpl.newSamplerConfig(accumuloConfiguration);
       Sampler sampler = null;
@@ -192,7 +186,7 @@ public class MultiThreadedRFileTest {
 
       // the caches used to obfuscate the multithreaded issues
       CachableBuilder b = new CachableBuilder().fsPath(fs, path).conf(conf)
-          .cryptoService(CryptoServiceFactory.newInstance(defaultConf, ClassloaderType.JAVA));
+          .cryptoService(CryptoFactoryLoader.getServiceForServer(defaultConf));
       reader = new RFile.Reader(new CachableBlockFile.Reader(b));
       iter = new ColumnFamilySkippingIterator(reader);
 
@@ -205,7 +199,8 @@ public class MultiThreadedRFileTest {
   }
 
   static Key newKey(String row, String cf, String cq, String cv, long ts) {
-    return new Key(row.getBytes(), cf.getBytes(), cq.getBytes(), cv.getBytes(), ts);
+    return new Key(row.getBytes(UTF_8), cf.getBytes(UTF_8), cq.getBytes(UTF_8), cv.getBytes(UTF_8),
+        ts);
   }
 
   static Value newValue(String val) {
@@ -238,10 +233,10 @@ public class MultiThreadedRFileTest {
 
       // now start up multiple RFile deepcopies
       int maxThreads = 10;
-      String name = "MultiThreadedRFileTestThread";
-      ThreadPoolExecutor pool = ThreadPools.createThreadPool(maxThreads + 1, maxThreads + 1, 5 * 60,
-          TimeUnit.SECONDS, name, new LinkedBlockingQueue<>(), OptionalInt.empty(), false);
-      pool.allowCoreThreadTimeOut(true);
+      String name = "test.rfile.multi.thread.pool";
+      ThreadPoolExecutor pool =
+          ThreadPools.getServerThreadPools().getPoolBuilder(name).numCoreThreads(maxThreads + 1)
+              .numMaxThreads(maxThreads + 1).withTimeOut(5, MINUTES).build();
       try {
         Runnable runnable = () -> {
           try {
@@ -255,12 +250,12 @@ public class MultiThreadedRFileTest {
           }
         };
         for (int i = 0; i < maxThreads; i++) {
-          pool.submit(runnable);
+          pool.execute(runnable);
         }
       } finally {
         pool.shutdown();
         try {
-          pool.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+          pool.awaitTermination(Long.MAX_VALUE, MILLISECONDS);
         } catch (InterruptedException e) {
           e.printStackTrace();
         }
@@ -293,41 +288,40 @@ public class MultiThreadedRFileTest {
   }
 
   private void validate(TestRFile trf) throws IOException {
-    Random random = new SecureRandom();
-    for (int iteration = 0; iteration < 10; iteration++) {
-      int part = random.nextInt(4);
+    RANDOM.get().ints(10, 0, 4).forEach(part -> {
+      try {
+        Range range = new Range(getKey(part, 0, 0), true, getKey(part, 4, 2048), true);
+        trf.iter.seek(range, EMPTY_COL_FAMS, false);
 
-      Range range = new Range(getKey(part, 0, 0), true, getKey(part, 4, 2048), true);
-      trf.iter.seek(range, EMPTY_COL_FAMS, false);
-
-      Key last = null;
-      for (int locality = 0; locality < 4; locality++) {
-        for (int i = 0; i < 2048; i++) {
-          Key key = getKey(part, locality, i);
-          Value value = getValue(i);
-          assertTrue("No record found for row " + part + " locality " + locality + " index " + i,
-              trf.iter.hasTop());
-          assertEquals(
-              "Invalid key found for row " + part + " locality " + locality + " index " + i, key,
-              trf.iter.getTopKey());
-          assertEquals(
-              "Invalie value found for row " + part + " locality " + locality + " index " + i,
-              value, trf.iter.getTopValue());
-          last = trf.iter.getTopKey();
-          trf.iter.next();
+        Key last = null;
+        for (int locality = 0; locality < 4; locality++) {
+          for (int i = 0; i < 2048; i++) {
+            Key key = getKey(part, locality, i);
+            Value value = getValue(i);
+            assertTrue(trf.iter.hasTop(),
+                "No record found for row " + part + " locality " + locality + " index " + i);
+            assertEquals(key, trf.iter.getTopKey(),
+                "Invalid key found for row " + part + " locality " + locality + " index " + i);
+            assertEquals(value, trf.iter.getTopValue(),
+                "Invalid value found for row " + part + " locality " + locality + " index " + i);
+            last = trf.iter.getTopKey();
+            trf.iter.next();
+          }
         }
-      }
-      if (trf.iter.hasTop()) {
-        assertFalse("Found " + trf.iter.getTopKey() + " after " + last + " in " + range,
-            trf.iter.hasTop());
-      }
+        if (trf.iter.hasTop()) {
+          assertFalse(trf.iter.hasTop(),
+              "Found " + trf.iter.getTopKey() + " after " + last + " in " + range);
+        }
 
-      range = new Range(getKey(4, 4, 0), true, null, true);
-      trf.iter.seek(range, EMPTY_COL_FAMS, false);
-      if (trf.iter.hasTop()) {
-        assertFalse("Found " + trf.iter.getTopKey() + " in " + range, trf.iter.hasTop());
+        range = new Range(getKey(4, 4, 0), true, null, true);
+        trf.iter.seek(range, EMPTY_COL_FAMS, false);
+        if (trf.iter.hasTop()) {
+          assertFalse(trf.iter.hasTop(), "Found " + trf.iter.getTopKey() + " in " + range);
+        }
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
       }
-    }
+    });
 
     Range range = new Range((Key) null, null);
     trf.iter.seek(range, EMPTY_COL_FAMS, false);
@@ -338,14 +332,12 @@ public class MultiThreadedRFileTest {
         for (int i = 0; i < 2048; i++) {
           Key key = getKey(part, locality, i);
           Value value = getValue(i);
-          assertTrue("No record found for row " + part + " locality " + locality + " index " + i,
-              trf.iter.hasTop());
-          assertEquals(
-              "Invalid key found for row " + part + " locality " + locality + " index " + i, key,
-              trf.iter.getTopKey());
-          assertEquals(
-              "Invalie value found for row " + part + " locality " + locality + " index " + i,
-              value, trf.iter.getTopValue());
+          assertTrue(trf.iter.hasTop(),
+              "No record found for row " + part + " locality " + locality + " index " + i);
+          assertEquals(key, trf.iter.getTopKey(),
+              "Invalid key found for row " + part + " locality " + locality + " index " + i);
+          assertEquals(value, trf.iter.getTopValue(),
+              "Invalid value found for row " + part + " locality " + locality + " index " + i);
           last = trf.iter.getTopKey();
           trf.iter.next();
         }
@@ -353,8 +345,8 @@ public class MultiThreadedRFileTest {
     }
 
     if (trf.iter.hasTop()) {
-      assertFalse("Found " + trf.iter.getTopKey() + " after " + last + " in " + range,
-          trf.iter.hasTop());
+      assertFalse(trf.iter.hasTop(),
+          "Found " + trf.iter.getTopKey() + " after " + last + " in " + range);
     }
   }
 

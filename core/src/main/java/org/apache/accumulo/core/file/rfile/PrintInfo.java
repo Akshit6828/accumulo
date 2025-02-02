@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -26,8 +26,7 @@ import java.util.Map;
 import java.util.function.BiFunction;
 
 import org.apache.accumulo.core.cli.ConfigOpts;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory.ClassloaderType;
+import org.apache.accumulo.core.crypto.CryptoFactoryLoader;
 import org.apache.accumulo.core.crypto.CryptoUtils;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
@@ -36,10 +35,14 @@ import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.file.FileSKVIterator;
 import org.apache.accumulo.core.file.blockfile.impl.CachableBlockFile.CachableBuilder;
 import org.apache.accumulo.core.file.rfile.RFile.Reader;
+import org.apache.accumulo.core.file.rfile.bcfile.PrintBCInfo;
 import org.apache.accumulo.core.file.rfile.bcfile.Utils;
+import org.apache.accumulo.core.spi.crypto.CryptoEnvironment;
+import org.apache.accumulo.core.spi.crypto.CryptoService;
 import org.apache.accumulo.core.spi.crypto.NoFileEncrypter;
 import org.apache.accumulo.core.summary.SummaryReader;
 import org.apache.accumulo.core.util.LocalityGroupUtil;
+import org.apache.accumulo.core.util.NumUtil;
 import org.apache.accumulo.start.spi.KeywordExecutable;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
@@ -106,10 +109,11 @@ public class PrintInfo implements KeywordExecutable {
     }
 
     public void print(String indent) {
-      System.out.println(indent + "Up to size      count      %-age");
+      System.out.println(indent + "Up to size      Count      %-age");
       for (int i = 1; i < countBuckets.length; i++) {
-        System.out.println(String.format("%s%11.0f : %10d %6.2f%%", indent, Math.pow(10, i),
-            countBuckets[i], sizeBuckets[i] * 100. / totalSize));
+        System.out.printf("%s%11s : %10d %6.2f%%%n", indent,
+            NumUtil.bigNumberForQuantity((long) Math.pow(10, i)), countBuckets[i],
+            sizeBuckets[i] * 100. / totalSize);
       }
     }
   }
@@ -149,9 +153,8 @@ public class PrintInfo implements KeywordExecutable {
   protected Class<? extends BiFunction<Key,Value,String>> getFormatter(String formatterClazz)
       throws ClassNotFoundException {
     @SuppressWarnings("unchecked")
-    Class<? extends BiFunction<Key,Value,String>> clazz =
-        (Class<? extends BiFunction<Key,Value,String>>) this.getClass().getClassLoader()
-            .loadClass(formatterClazz).asSubclass(BiFunction.class);
+    var clazz = (Class<? extends BiFunction<Key,Value,String>>) this.getClass().getClassLoader()
+        .loadClass(formatterClazz).asSubclass(BiFunction.class);
     return clazz;
   }
 
@@ -179,10 +182,6 @@ public class PrintInfo implements KeywordExecutable {
       log.debug("Adding Hadoop configuration file {}", confFile);
       conf.addResource(new Path(confFile));
     }
-
-    FileSystem hadoopFs = FileSystem.get(conf);
-    FileSystem localFs = FileSystem.getLocal(conf);
-
     LogHistogram kvHistogram = new LogHistogram();
 
     KeyStats dataKeyStats = new KeyStats();
@@ -190,21 +189,15 @@ public class PrintInfo implements KeywordExecutable {
 
     for (String arg : opts.files) {
       Path path = new Path(arg);
-      FileSystem fs;
-      if (arg.contains(":")) {
-        fs = path.getFileSystem(conf);
-      } else {
-        log.warn(
-            "Attempting to find file across filesystems. Consider providing URI instead of path");
-        fs = hadoopFs.exists(path) ? hadoopFs : localFs; // fall back to local
-      }
+      FileSystem fs = resolveFS(log, conf, path);
       System.out
           .println("Reading file: " + path.makeQualified(fs.getUri(), fs.getWorkingDirectory()));
 
       printCryptoParams(path, fs);
 
-      CachableBuilder cb = new CachableBuilder().fsPath(fs, path).conf(conf)
-          .cryptoService(CryptoServiceFactory.newInstance(siteConfig, ClassloaderType.JAVA));
+      CryptoService cs = CryptoFactoryLoader.getServiceForClient(CryptoEnvironment.Scope.TABLE,
+          siteConfig.getAllCryptoProperties());
+      CachableBuilder cb = new CachableBuilder().fsPath(fs, path).conf(conf).cryptoService(cs);
       Reader iter = new RFile.Reader(cb);
       MetricsGatherer<Map<String,ArrayList<VisibilityMetric>>> vmg = new VisMetricsGatherer();
 
@@ -217,7 +210,9 @@ public class PrintInfo implements KeywordExecutable {
       String propsPath = opts.getPropertiesPath();
       String[] mainArgs =
           propsPath == null ? new String[] {arg} : new String[] {"-props", propsPath, arg};
-      org.apache.accumulo.core.file.rfile.bcfile.PrintInfo.main(mainArgs);
+      PrintBCInfo printBCInfo = new PrintBCInfo(mainArgs);
+      printBCInfo.setCryptoService(cs);
+      printBCInfo.printMetaBlockInfo();
 
       Map<String,ArrayList<ByteSequence>> localityGroupCF = null;
 
@@ -264,8 +259,9 @@ public class PrintInfo implements KeywordExecutable {
             Value value = dataIter.getTopValue();
             if (formatter != null) {
               System.out.println(formatter.apply(key, value));
-              if (System.out.checkError())
+              if (System.out.checkError()) {
                 return;
+              }
             }
 
             if (opts.histogram) {
@@ -311,6 +307,20 @@ public class PrintInfo implements KeywordExecutable {
     }
   }
 
+  public static FileSystem resolveFS(Logger log, Configuration conf, Path file) throws IOException {
+    FileSystem hadoopFs = FileSystem.get(conf);
+    FileSystem localFs = FileSystem.getLocal(conf);
+    FileSystem fs;
+    if (file.toString().contains(":")) {
+      fs = file.getFileSystem(conf);
+    } else {
+      log.warn(
+          "Attempting to find file across filesystems. Consider providing URI instead of path");
+      fs = hadoopFs.exists(file) ? hadoopFs : localFs; // fall back to local
+    }
+    return fs;
+  }
+
   /**
    * Print the unencrypted parameters that tell the Crypto Service how to decrypt the file. This
    * information is useful for debugging if and how a file was encrypted.
@@ -319,7 +329,7 @@ public class PrintInfo implements KeywordExecutable {
     byte[] noCryptoBytes = new NoFileEncrypter().getDecryptionParameters();
     try (FSDataInputStream fsDis = fs.open(path)) {
       long fileLength = fs.getFileStatus(path).getLen();
-      fsDis.seek(fileLength - 16 - Utils.Version.size() - (Long.BYTES));
+      fsDis.seek(fileLength - 16 - Utils.Version.size() - Long.BYTES);
       long cryptoParamOffset = fsDis.readLong();
       fsDis.seek(cryptoParamOffset);
       byte[] cryptoParams = CryptoUtils.readParams(fsDis);
@@ -330,7 +340,7 @@ public class PrintInfo implements KeywordExecutable {
             + Key.toPrintableString(cryptoParams, 0, cryptoParams.length, cryptoParams.length));
       }
     } catch (IOException ioe) {
-      log.error("Error reading crypto params", ioe);
+      System.out.println("Unable to read crypto params");
     }
   }
 }

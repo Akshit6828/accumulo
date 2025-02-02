@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,28 +28,17 @@ public class CurrentTabletResults {
   // Variable names become JSON keys
   public Double currentMinorAvg;
   public Double currentMinorStdDev;
-  public Double currentMajorAvg;
-  public Double currentMajorStdDev;
 
   public CurrentTabletResults() {}
 
   /**
    * Stores new current results for the tablet
    *
-   * @param currentMinorAvg
-   *          minor compaction average
-   * @param currentMinorStdDev
-   *          minor compaction standard deviation
-   * @param currentMajorAvg
-   *          major compaction average
-   * @param currentMajorStdDev
-   *          major compaction standard deviation
+   * @param currentMinorAvg minor compaction average
+   * @param currentMinorStdDev minor compaction standard deviation
    */
-  public CurrentTabletResults(Double currentMinorAvg, Double currentMinorStdDev,
-      Double currentMajorAvg, Double currentMajorStdDev) {
+  public CurrentTabletResults(Double currentMinorAvg, Double currentMinorStdDev) {
     this.currentMinorAvg = currentMinorAvg;
     this.currentMinorStdDev = currentMinorStdDev;
-    this.currentMajorAvg = currentMajorAvg;
-    this.currentMajorStdDev = currentMajorStdDev;
   }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -54,8 +54,8 @@ import org.apache.accumulo.core.util.ComparablePair;
 public class PairLexicoder<A extends Comparable<A>,B extends Comparable<B>>
     extends AbstractLexicoder<ComparablePair<A,B>> {
 
-  private Lexicoder<A> firstLexicoder;
-  private Lexicoder<B> secondLexicoder;
+  private final Lexicoder<A> firstLexicoder;
+  private final Lexicoder<B> secondLexicoder;
 
   public PairLexicoder(Lexicoder<A> firstLexicoder, Lexicoder<B> secondLexicoder) {
     this.firstLexicoder = firstLexicoder;
@@ -80,7 +80,7 @@ public class PairLexicoder<A extends Comparable<A>,B extends Comparable<B>>
 
     byte[][] fields = split(data, offset, len);
     if (fields.length != 2) {
-      throw new RuntimeException("Data does not have 2 fields, it has " + fields.length);
+      throw new IllegalArgumentException("Data does not have 2 fields, it has " + fields.length);
     }
 
     return new ComparablePair<>(firstLexicoder.decode(unescape(fields[0])),

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -31,6 +31,7 @@ import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.IteratorSetting;
+import org.apache.accumulo.core.client.ScannerBase.ConsistencyLevel;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.conf.ClientProperty;
 import org.apache.accumulo.core.data.Range;
@@ -45,7 +46,7 @@ public class InputFormatBuilderImpl<T>
     implements InputFormatBuilder, InputFormatBuilder.ClientParams<T>,
     InputFormatBuilder.TableParams<T>, InputFormatBuilder.InputFormatOptions<T> {
 
-  private Class<?> callingClass;
+  private final Class<?> callingClass;
   private Properties clientProps;
   private String clientPropsPath;
   private String currentTable;
@@ -175,6 +176,12 @@ public class InputFormatBuilderImpl<T>
   }
 
   @Override
+  public InputFormatOptions<T> consistencyLevel(ConsistencyLevel level) {
+    tableConfigMap.get(currentTable).setConsistencyLevel(level);
+    return this;
+  }
+
+  @Override
   public void store(T j) throws AccumuloException, AccumuloSecurityException {
     if (j instanceof Job) {
       store((Job) j);
@@ -209,10 +216,12 @@ public class InputFormatBuilderImpl<T>
           config.setScanAuths(c.securityOperations().getUserAuthorizations(principal));
         }
       }
-      InputConfigurator.setScanAuthorizations(callingClass, conf, config.getScanAuths().get());
+      InputConfigurator.setScanAuthorizations(callingClass, conf,
+          config.getScanAuths().orElseThrow());
       // all optional values
       if (config.getContext().isPresent()) {
-        InputConfigurator.setClassLoaderContext(callingClass, conf, config.getContext().get());
+        InputConfigurator.setClassLoaderContext(callingClass, conf,
+            config.getContext().orElseThrow());
       }
       if (!config.getRanges().isEmpty()) {
         InputConfigurator.setRanges(callingClass, conf, config.getRanges());
@@ -235,6 +244,9 @@ public class InputFormatBuilderImpl<T>
       InputConfigurator.setLocalIterators(callingClass, conf, config.shouldUseLocalIterators());
       InputConfigurator.setOfflineTableScan(callingClass, conf, config.isOfflineScan());
       InputConfigurator.setBatchScan(callingClass, conf, config.shouldBatchScan());
+      if (config.getConsistencyLevel() != null) {
+        InputConfigurator.setConsistencyLevel(callingClass, conf, config.getConsistencyLevel());
+      }
     } else {
       InputConfigurator.setInputTableConfigs(callingClass, conf, tableConfigMap);
     }
@@ -247,4 +259,5 @@ public class InputFormatBuilderImpl<T>
   private void store(JobConf jobConf) throws AccumuloException, AccumuloSecurityException {
     _store(jobConf);
   }
+
 }

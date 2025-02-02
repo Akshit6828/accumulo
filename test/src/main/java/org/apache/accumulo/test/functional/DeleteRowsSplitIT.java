@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,16 +19,15 @@
 package org.apache.accumulo.test.functional;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.SortedSet;
 import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
@@ -40,17 +39,12 @@ import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 // attempt to reproduce ACCUMULO-315
 public class DeleteRowsSplitIT extends AccumuloClusterHarness {
-
-  @Override
-  protected int defaultTimeoutSeconds() {
-    return 4 * 60;
-  }
 
   private static final Logger log = LoggerFactory.getLogger(DeleteRowsSplitIT.class);
 
@@ -62,6 +56,11 @@ public class DeleteRowsSplitIT extends AccumuloClusterHarness {
       SPLITS.add(new Text(new byte[] {b}));
       ROWS.add(new String(new byte[] {b}, UTF_8));
     }
+  }
+
+  @Override
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(4);
   }
 
   @Test
@@ -101,7 +100,7 @@ public class DeleteRowsSplitIT extends AccumuloClusterHarness {
         });
         t.start();
 
-        sleepUninterruptibly(test * 2, TimeUnit.MILLISECONDS);
+        Thread.sleep(test * 2);
 
         client.tableOperations().deleteRows(tableName, start, end);
 
@@ -127,7 +126,7 @@ public class DeleteRowsSplitIT extends AccumuloClusterHarness {
   private void generateRandomRange(Text start, Text end) {
     List<String> bunch = new ArrayList<>(ROWS);
     Collections.shuffle(bunch);
-    if (bunch.get(0).compareTo((bunch.get(1))) < 0) {
+    if (bunch.get(0).compareTo(bunch.get(1)) < 0) {
       start.set(bunch.get(0));
       end.set(bunch.get(1));
     } else {

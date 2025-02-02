@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,16 +18,16 @@
  */
 package org.apache.accumulo.hadoop.its.mapred;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static com.google.common.collect.MoreCollectors.onlyElement;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Iterator;
-import java.util.Map.Entry;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
@@ -58,14 +58,14 @@ import org.apache.hadoop.mapred.RecordWriter;
 import org.apache.hadoop.mapred.Reporter;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class AccumuloOutputFormatIT extends ConfigurableMacBase {
 
   @Override
   protected void configure(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
     cfg.setProperty(Property.TSERV_SESSION_MAXIDLE, "1");
-    cfg.setNumTservers(1);
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(1);
   }
 
   // Prevent regression of ACCUMULO-3709.
@@ -73,7 +73,8 @@ public class AccumuloOutputFormatIT extends ConfigurableMacBase {
   public void testMapred() throws Exception {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProperties()).build()) {
       // create a table and put some data in it
-      client.tableOperations().create(testName.getMethodName());
+      final String tableName = testName();
+      client.tableOperations().create(tableName);
 
       JobConf job = new JobConf();
       BatchWriterConfig batchConfig = new BatchWriterConfig();
@@ -95,7 +96,7 @@ public class AccumuloOutputFormatIT extends ConfigurableMacBase {
           for (int j = 0; j < 3; j++) {
             m.put("cf1", "cq" + j, i + "_" + j);
           }
-          writer.write(new Text(testName.getMethodName()), m);
+          writer.write(new Text(tableName), m);
         }
 
       } catch (Exception e) {
@@ -103,16 +104,11 @@ public class AccumuloOutputFormatIT extends ConfigurableMacBase {
         // we don't want the exception to come from write
       }
 
-      client.securityOperations().revokeTablePermission("root", testName.getMethodName(),
-          TablePermission.WRITE);
+      client.securityOperations().revokeTablePermission("root", tableName, TablePermission.WRITE);
 
-      try {
-        writer.close(null);
-        fail("Did not throw exception");
-      } catch (IOException ex) {
-        log.info(ex.getMessage(), ex);
-        assertTrue(ex.getCause() instanceof MutationsRejectedException);
-      }
+      var ex = assertThrows(IOException.class, () -> writer.close(null));
+      log.info(ex.getMessage(), ex);
+      assertTrue(ex.getCause() instanceof MutationsRejectedException);
     }
   }
 
@@ -128,10 +124,11 @@ public class AccumuloOutputFormatIT extends ConfigurableMacBase {
       public void map(Key k, Value v, OutputCollector<Text,Mutation> output, Reporter reporter) {
         finalOutput = output;
         try {
-          if (key != null)
-            assertEquals(key.getRow().toString(), new String(v.get()));
+          if (key != null) {
+            assertEquals(key.getRow().toString(), new String(v.get(), UTF_8));
+          }
           assertEquals(k.getRow(), new Text(String.format("%09x", count + 1)));
-          assertEquals(new String(v.get()), String.format("%09x", count));
+          assertEquals(new String(v.get(), UTF_8), String.format("%09x", count));
         } catch (AssertionError e) {
           e1 = e;
         }
@@ -208,24 +205,22 @@ public class AccumuloOutputFormatIT extends ConfigurableMacBase {
       String table2 = instanceName + "_t2";
       c.tableOperations().create(table1);
       c.tableOperations().create(table2);
-      BatchWriter bw = c.createBatchWriter(table1);
-      for (int i = 0; i < 100; i++) {
-        Mutation m = new Mutation(new Text(String.format("%09x", i + 1)));
-        m.put("", "", String.format("%09x", i));
-        bw.addMutation(m);
+      try (BatchWriter bw = c.createBatchWriter(table1)) {
+        for (int i = 0; i < 100; i++) {
+          Mutation m = new Mutation(new Text(String.format("%09x", i + 1)));
+          m.put("", "", String.format("%09x", i));
+          bw.addMutation(m);
+        }
       }
-      bw.close();
 
       MRTester.main(new String[] {"root", ROOT_PASSWORD, table1, table2, instanceName,
           getCluster().getZooKeepers()});
       assertNull(e1);
 
       try (Scanner scanner = c.createScanner(table2, new Authorizations())) {
-        Iterator<Entry<Key,Value>> iter = scanner.iterator();
-        assertTrue(iter.hasNext());
-        Entry<Key,Value> entry = iter.next();
-        assertEquals(Integer.parseInt(new String(entry.getValue().get())), 100);
-        assertFalse(iter.hasNext());
+        int i = scanner.stream().map(Map.Entry::getValue).map(Value::get)
+            .map(e -> new String(e, UTF_8)).map(Integer::parseInt).collect(onlyElement());
+        assertEquals(100, i);
       }
     }
   }

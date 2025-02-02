@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,14 +23,6 @@ import org.apache.accumulo.core.data.TableId;
 public class TableOfflineException extends RuntimeException {
 
   private static final long serialVersionUID = 1L;
-
-  /**
-   * @deprecated since 2.0.0, replaced by {@link #TableOfflineException(String)}
-   */
-  @Deprecated(since = "2.0.0")
-  public TableOfflineException(Instance instance, String tableId) {
-    super("Table with ID (" + tableId + ") is offline");
-  }
 
   /**
    * @since 2.0.0

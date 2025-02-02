@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,8 +18,9 @@
  */
 package org.apache.accumulo.test;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -31,20 +32,24 @@ import org.apache.accumulo.core.client.BatchWriter;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.Range;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.RootTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.minicluster.ServerType;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.accumulo.test.functional.ConfigurableMacBase;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.Iterators;
 
 // ACCUMULO-3211
 public class MetaRecoveryIT extends ConfigurableMacBase {
+
+  @Override
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(4);
+  }
 
   @Override
   protected void configure(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
@@ -53,11 +58,6 @@ public class MetaRecoveryIT extends ConfigurableMacBase {
     cfg.setProperty(Property.GC_CYCLE_START, "1s");
     cfg.setProperty(Property.INSTANCE_ZK_TIMEOUT, "15s");
     cfg.setProperty(Property.TSERV_WAL_MAX_SIZE, "1048576");
-  }
-
-  @Override
-  protected int defaultTimeoutSeconds() {
-    return 4 * 60;
   }
 
   @Test
@@ -78,14 +78,14 @@ public class MetaRecoveryIT extends ConfigurableMacBase {
         log.info("Data written to table {}", i);
         i++;
       }
-      c.tableOperations().flush(MetadataTable.NAME, null, null, true);
-      c.tableOperations().flush(RootTable.NAME, null, null, true);
+      c.tableOperations().flush(AccumuloTable.METADATA.tableName(), null, null, true);
+      c.tableOperations().flush(AccumuloTable.ROOT.tableName(), null, null, true);
       SortedSet<Text> splits = new TreeSet<>();
       for (i = 1; i < tables.length; i++) {
         splits.add(new Text("" + i));
       }
-      c.tableOperations().addSplits(MetadataTable.NAME, splits);
-      log.info("Added {} splits to {}", splits.size(), MetadataTable.NAME);
+      c.tableOperations().addSplits(AccumuloTable.METADATA.tableName(), splits);
+      log.info("Added {} splits to {}", splits.size(), AccumuloTable.METADATA.tableName());
       c.instanceOperations().waitForBalance();
       log.info("Restarting");
       getCluster().getClusterControl().kill(ServerType.TABLET_SERVER, "localhost");

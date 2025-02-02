@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,7 +27,6 @@ import org.apache.accumulo.core.iterators.user.GrepIterator;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.util.format.Formatter;
 import org.apache.accumulo.core.util.format.FormatterConfig;
-import org.apache.accumulo.core.util.interpret.ScanInterpreter;
 import org.apache.accumulo.shell.Shell;
 import org.apache.accumulo.shell.Shell.PrintFile;
 import org.apache.commons.cli.CommandLine;
@@ -50,8 +49,21 @@ public class GrepCommand extends ScanCommand {
       if (cl.getArgList().isEmpty()) {
         throw new MissingArgumentException("No terms specified");
       }
+      // Configure formatting options
+      final FormatterConfig config = new FormatterConfig();
+      config.setPrintTimestamps(cl.hasOption(timestampOpt.getOpt()));
+      if (cl.hasOption(showFewOpt.getOpt())) {
+        final String showLength = cl.getOptionValue(showFewOpt.getOpt());
+        try {
+          final int length = Integer.parseInt(showLength);
+          config.setShownLength(length);
+        } catch (NumberFormatException nfe) {
+          Shell.log.error("Arg must be an integer.", nfe);
+        } catch (IllegalArgumentException iae) {
+          Shell.log.error("Invalid length argument", iae);
+        }
+      }
       final Class<? extends Formatter> formatter = getFormatter(cl, tableName, shellState);
-      final ScanInterpreter interpeter = getInterpreter(cl, tableName, shellState);
 
       // handle first argument, if present, the authorizations list to
       // scan with
@@ -68,9 +80,11 @@ public class GrepCommand extends ScanCommand {
       final Authorizations auths = getAuths(cl, shellState);
       final BatchScanner scanner =
           shellState.getAccumuloClient().createBatchScanner(tableName, auths, numThreads);
-      scanner.setRanges(Collections.singletonList(getRange(cl, interpeter)));
+      scanner.setRanges(Collections.singletonList(getRange(cl)));
 
       scanner.setTimeout(getTimeout(cl), TimeUnit.MILLISECONDS);
+
+      scanner.setConsistencyLevel(getConsistency(cl));
 
       setupSampling(tableName, cl, shellState, scanner);
       addScanIterators(shellState, cl, scanner, "");
@@ -81,11 +95,9 @@ public class GrepCommand extends ScanCommand {
       }
       try {
         // handle columns
-        fetchColumns(cl, scanner, interpeter);
+        fetchColumns(cl, scanner);
 
         // output the records
-        final FormatterConfig config = new FormatterConfig();
-        config.setPrintTimestamps(cl.hasOption(timestampOpt.getOpt()));
         printRecords(cl, shellState, config, scanner, formatter, printFile);
       } finally {
         scanner.close();
@@ -104,13 +116,15 @@ public class GrepCommand extends ScanCommand {
     final IteratorSetting grep = new IteratorSetting(prio, name, GrepIterator.class);
     GrepIterator.setTerm(grep, term);
     GrepIterator.setNegate(grep, negate);
+    GrepIterator.matchColumnVisibility(grep, true); // override GrepIterator default
     scanner.addScanIterator(grep);
   }
 
   @Override
   public String description() {
-    return "searches each row, column family, column qualifier and value in a"
-        + " table for a substring (not a regular expression), in parallel, on the" + " server side";
+    return "searches each row, column family, column qualifier, visibility (since 2.1.3),"
+        + " and value in a table for a substring (not a regular expression), in parallel,"
+        + " on the server side";
   }
 
   @Override

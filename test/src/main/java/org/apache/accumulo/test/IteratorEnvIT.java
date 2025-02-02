@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,9 +18,10 @@
  */
 package org.apache.accumulo.test;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Iterator;
@@ -42,13 +43,12 @@ import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.iterators.WrappingIterator;
-import org.apache.accumulo.core.spi.common.ServiceEnvironment;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.hadoop.conf.Configuration;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Test that objects in IteratorEnvironment returned from the server are as expected.
@@ -56,13 +56,13 @@ import org.junit.Test;
 public class IteratorEnvIT extends AccumuloClusterHarness {
 
   @Override
-  public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
-    cfg.setNumTservers(1);
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(1);
   }
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 60;
+  public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(1);
   }
 
   private AccumuloClient client;
@@ -148,47 +148,44 @@ public class IteratorEnvIT extends AccumuloClusterHarness {
       IteratorEnvironment env) {
     TableId expectedTableId = TableId.of(opts.get("expected.table.id"));
 
-    // verify getServiceEnv() and getPluginEnv() are the same objects,
-    // so further checks only need to use getPluginEnv()
-    @SuppressWarnings("deprecation")
-    ServiceEnvironment serviceEnv = env.getServiceEnv();
     PluginEnvironment pluginEnv = env.getPluginEnv();
-    if (serviceEnv != pluginEnv)
-      throw new RuntimeException("Test failed - assertSame(getServiceEnv(),getPluginEnv())");
 
-    // verify property exists on the table config (deprecated and new),
+    // verify property exists on the table config,
     // with and without custom prefix, but not in the system config
-    @SuppressWarnings("deprecation")
-    String accTableConf = env.getConfig().get("table.custom.iterator.env.test");
-    if (!"value1".equals(accTableConf))
-      throw new RuntimeException("Test failed - Expected table property not found in getConfig().");
     var tableConf = pluginEnv.getConfiguration(env.getTableId());
-    if (!"value1".equals(tableConf.get("table.custom.iterator.env.test")))
+    if (!"value1".equals(tableConf.get("table.custom.iterator.env.test"))) {
       throw new RuntimeException("Test failed - Expected table property not found in table conf.");
-    if (!"value1".equals(tableConf.getTableCustom("iterator.env.test")))
+    }
+    if (!"value1".equals(tableConf.getTableCustom("iterator.env.test"))) {
       throw new RuntimeException("Test failed - Expected table property not found in table conf.");
+    }
     var systemConf = pluginEnv.getConfiguration();
-    if (systemConf.get("table.custom.iterator.env.test") != null)
+    if (systemConf.get("table.custom.iterator.env.test") != null) {
       throw new RuntimeException("Test failed - Unexpected table property found in system conf.");
+    }
 
     // check other environment settings
-    if (!scope.equals(env.getIteratorScope()))
+    if (!scope.equals(env.getIteratorScope())) {
       throw new RuntimeException("Test failed - Error getting iterator scope");
-    if (env.isSamplingEnabled())
+    }
+    if (env.isSamplingEnabled()) {
       throw new RuntimeException("Test failed - isSamplingEnabled returned true, expected false");
-    if (!expectedTableId.equals(env.getTableId()))
+    }
+    if (!expectedTableId.equals(env.getTableId())) {
       throw new RuntimeException("Test failed - Error getting Table ID");
+    }
   }
 
-  @Before
+  @BeforeEach
   public void setup() {
     client = Accumulo.newClient().from(getClientProps()).build();
   }
 
-  @After
+  @AfterEach
   public void finish() {
-    if (client != null)
+    if (client != null) {
       client.close();
+    }
   }
 
   @Test

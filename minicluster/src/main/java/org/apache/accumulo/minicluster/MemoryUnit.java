@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -46,8 +46,9 @@ public enum MemoryUnit {
 
   public static MemoryUnit fromSuffix(String suffix) {
     for (MemoryUnit memoryUnit : MemoryUnit.values()) {
-      if (memoryUnit.suffix.equals(suffix))
+      if (memoryUnit.suffix.equals(suffix)) {
         return memoryUnit;
+      }
     }
     return null;
   }

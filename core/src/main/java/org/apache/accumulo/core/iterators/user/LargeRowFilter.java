@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -58,8 +58,8 @@ public class LargeRowFilter implements SortedKeyValueIterator<Key,Value>, Option
   private SortedKeyValueIterator<Key,Value> source;
 
   // a cache of keys
-  private ArrayList<Key> keys = new ArrayList<>();
-  private ArrayList<Value> values = new ArrayList<>();
+  private final ArrayList<Key> keys = new ArrayList<>();
+  private final ArrayList<Value> values = new ArrayList<>();
 
   private int currentPosition;
 
@@ -226,11 +226,13 @@ public class LargeRowFilter implements SortedKeyValueIterator<Key,Value>, Option
 
       // it is possible that all or some of the data read for the current
       // row is before the start of the range
-      while (currentPosition < keys.size() && range.beforeStartKey(keys.get(currentPosition)))
+      while (currentPosition < keys.size() && range.beforeStartKey(keys.get(currentPosition))) {
         currentPosition++;
+      }
 
-      if (currentPosition == keys.size())
+      if (currentPosition == keys.size()) {
         readNextRow();
+      }
 
     } else {
       source.seek(range, columnFamilies, inclusive);
@@ -257,7 +259,7 @@ public class LargeRowFilter implements SortedKeyValueIterator<Key,Value>, Option
   @Override
   public IteratorOptions describeOptions() {
     String description =
-        "This iterator suppresses rows that exceed a specified" + " number of columns. Once\n"
+        "This iterator suppresses rows that exceed a specified number of columns. Once\n"
             + "a row exceeds the threshold, a marker is emitted and the row is always\n"
             + "suppressed by this iterator after that point in time.\n"
             + " This iterator works in a similar way to the RowDeletingIterator. See its\n"
@@ -273,9 +275,10 @@ public class LargeRowFilter implements SortedKeyValueIterator<Key,Value>, Option
           "Bad # of options, must supply: " + MAX_COLUMNS + " as value");
     }
 
-    if (!options.containsKey(MAX_COLUMNS))
+    if (!options.containsKey(MAX_COLUMNS)) {
       throw new IllegalArgumentException(
           "Bad # of options, must supply: " + MAX_COLUMNS + " as value");
+    }
     try {
       maxColumns = Integer.parseInt(options.get(MAX_COLUMNS));
     } catch (Exception e) {
@@ -289,10 +292,8 @@ public class LargeRowFilter implements SortedKeyValueIterator<Key,Value>, Option
   /**
    * A convenience method for setting the maximum number of columns to keep.
    *
-   * @param is
-   *          IteratorSetting object to configure.
-   * @param maxColumns
-   *          number of columns to keep.
+   * @param is IteratorSetting object to configure.
+   * @param maxColumns number of columns to keep.
    */
   public static void setMaxColumns(IteratorSetting is, int maxColumns) {
     is.addOption(MAX_COLUMNS, Integer.toString(maxColumns));

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -84,9 +84,12 @@ public class RowColumnSampler extends AbstractHashSampler {
 
   @Override
   public void validateOptions(Map<String,String> config) {
+    // The required base options are validated in the super class.
     super.validateOptions(config);
+    // RowColumnSampler specific options are validated here.
     for (String option : config.keySet()) {
-      checkArgument(VALID_OPTIONS.contains(option), "Unknown option : %s", option);
+      checkArgument(VALID_OPTIONS.contains(option) || REQUIRED_SAMPLER_OPTIONS.contains(option),
+          "Unknown option : %s", option);
     }
   }
 

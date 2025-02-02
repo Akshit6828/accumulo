@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,6 +22,8 @@ import java.io.Serializable;
 import java.util.Map;
 
 import org.apache.accumulo.core.client.admin.InitialTableState;
+import org.apache.accumulo.core.client.admin.TabletAvailability;
+import org.apache.accumulo.core.client.admin.TabletMergeability;
 import org.apache.accumulo.core.client.admin.TimeType;
 import org.apache.accumulo.core.data.NamespaceId;
 import org.apache.accumulo.core.data.TableId;
@@ -47,6 +49,18 @@ public class TableInfo implements Serializable {
   private String splitDirsFile;
 
   public Map<String,String> props;
+
+  private TabletAvailability initialTabletAvailability;
+
+  private TabletMergeability defaultTabletMergeability;
+
+  public TabletAvailability getInitialTabletAvailability() {
+    return initialTabletAvailability;
+  }
+
+  public void setInitialTabletAvailability(TabletAvailability initialTabletAvailability) {
+    this.initialTabletAvailability = initialTabletAvailability;
+  }
 
   public String getTableName() {
     return tableName;
@@ -122,4 +136,11 @@ public class TableInfo implements Serializable {
     this.initialSplitSize = initialSplitSize;
   }
 
+  public TabletMergeability getDefaultTabletMergeability() {
+    return defaultTabletMergeability;
+  }
+
+  public void setDefaultTabletMergeability(TabletMergeability defaultTabletMergeability) {
+    this.defaultTabletMergeability = defaultTabletMergeability;
+  }
 }

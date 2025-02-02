@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,6 +19,7 @@
 package org.apache.accumulo.core.clientImpl;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.accumulo.core.util.threads.ThreadPoolNames.ACCUMULO_POOL_PREFIX;
 
 import java.lang.ref.Cleaner.Cleanable;
 import java.util.ArrayList;
@@ -36,7 +37,6 @@ import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.util.cleaner.CleanerUtil;
-import org.apache.accumulo.core.util.threads.ThreadPools;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,8 +72,10 @@ public class TabletServerBatchReader extends ScannerOptions implements BatchScan
     this.tableName = tableName;
     this.numThreads = numQueryThreads;
 
-    queryThreadPool = ThreadPools.createFixedThreadPool(numQueryThreads,
-        "batch scanner " + batchReaderInstance + "-", false);
+    queryThreadPool = context.threadPools()
+        .getPoolBuilder(
+            ACCUMULO_POOL_PREFIX.poolName + ".client.batch.scanner." + batchReaderInstance)
+        .numCoreThreads(numQueryThreads).build();
     // Call shutdown on this thread pool in case the caller does not call close().
     cleanable = CleanerUtil.shutdownThreadPoolExecutor(queryThreadPool, closed, log);
   }
@@ -117,6 +119,6 @@ public class TabletServerBatchReader extends ScannerOptions implements BatchScan
     }
 
     return new TabletServerBatchReaderIterator(context, tableId, tableName, authorizations, ranges,
-        numThreads, queryThreadPool, this, timeOut);
+        numThreads, queryThreadPool, this, retryTimeout);
   }
 }

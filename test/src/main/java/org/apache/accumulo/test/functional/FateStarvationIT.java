@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,29 +18,49 @@
  */
 package org.apache.accumulo.test.functional;
 
-import java.security.SecureRandom;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
+import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.admin.NewTableConfiguration;
-import org.apache.accumulo.core.clientImpl.ClientContext;
+import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
+import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.accumulo.test.TestIngest;
 import org.apache.accumulo.test.TestIngest.IngestParams;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/**
- * See ACCUMULO-779
- */
+import com.google.common.base.Preconditions;
+
 public class FateStarvationIT extends AccumuloClusterHarness {
 
+  private static final Logger log = LoggerFactory.getLogger(FateStarvationIT.class);
+
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 2 * 60;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(4);
+  }
+
+  @Override
+  public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
+    // Add this check in case the config changes
+    Preconditions.checkState(Property.COMPACTION_SERVICE_DEFAULT_GROUPS.getDefaultValue()
+        .contains(Constants.DEFAULT_RESOURCE_GROUP_NAME));
+    // This test creates around ~1300 compaction task, so start more compactors. There is randomness
+    // so the exact number of task varies.
+    cfg.getClusterServerConfiguration()
+        .addCompactorResourceGroup(Constants.DEFAULT_RESOURCE_GROUP_NAME, 4);
   }
 
   @Test
@@ -56,22 +76,36 @@ public class FateStarvationIT extends AccumuloClusterHarness {
       params.dataSize = 50;
       params.cols = 1;
       TestIngest.ingest(c, params);
+      log.debug("Ingest complete");
 
       c.tableOperations().flush(tableName, null, null, true);
+      log.debug("Flush complete");
 
       List<Text> splits = new ArrayList<>(TestIngest.getSplitPoints(0, 100000, 67));
-      Random rand = new SecureRandom();
+
+      List<Future<?>> futures = new ArrayList<>();
+      var executor = Executors.newCachedThreadPool();
 
       for (int i = 0; i < 100; i++) {
-        int idx1 = rand.nextInt(splits.size() - 1);
-        int idx2 = rand.nextInt(splits.size() - (idx1 + 1)) + idx1 + 1;
+        int idx1 = RANDOM.get().nextInt(splits.size() - 1);
+        int idx2 = RANDOM.get().nextInt(splits.size() - (idx1 + 1)) + idx1 + 1;
 
-        c.tableOperations().compact(tableName, splits.get(idx1), splits.get(idx2), false, false);
+        var future = executor.submit(() -> {
+          c.tableOperations().compact(tableName, splits.get(idx1), splits.get(idx2), false, true);
+          return null;
+        });
+
+        futures.add(future);
       }
 
-      c.tableOperations().offline(tableName);
+      log.debug("Started compactions");
 
-      FunctionalTestUtils.assertNoDanglingFateLocks((ClientContext) c, getCluster());
+      // wait for all compactions to complete
+      for (var future : futures) {
+        future.get();
+      }
+
+      FunctionalTestUtils.assertNoDanglingFateLocks(getCluster());
     }
   }
 }

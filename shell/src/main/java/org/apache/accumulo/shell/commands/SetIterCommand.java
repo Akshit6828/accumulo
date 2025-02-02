@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -40,7 +40,7 @@ import org.apache.accumulo.core.iterators.user.AgeOffFilter;
 import org.apache.accumulo.core.iterators.user.RegExFilter;
 import org.apache.accumulo.core.iterators.user.ReqVisFilter;
 import org.apache.accumulo.core.iterators.user.VersioningIterator;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.shell.Shell;
 import org.apache.accumulo.shell.Shell.Command;
 import org.apache.accumulo.shell.ShellCommandException;
@@ -92,7 +92,7 @@ public class SetIterCommand extends Command {
     String configuredName;
     try {
       if (profileOpt != null && (currentTableName == null || currentTableName.isBlank())) {
-        tmpTable = MetadataTable.NAME;
+        tmpTable = AccumuloTable.METADATA.tableName();
         shellState.setTableName(tmpTable);
         tables = cl.hasOption(OptUtil.tableOpt().getOpt()) || !currentTableName.isEmpty();
       }
@@ -201,13 +201,14 @@ public class SetIterCommand extends Command {
       final PrintWriter writer, final String className, final Map<String,String> options)
       throws IOException, ShellCommandException {
     String input;
-    @SuppressWarnings("rawtypes")
-    SortedKeyValueIterator untypedInstance;
-    @SuppressWarnings("rawtypes")
-    Class<? extends SortedKeyValueIterator> clazz;
+    SortedKeyValueIterator<Key,Value> skvi;
+    String clazzName;
     try {
-      clazz = classloader.loadClass(className).asSubclass(SortedKeyValueIterator.class);
-      untypedInstance = clazz.getDeclaredConstructor().newInstance();
+      @SuppressWarnings("unchecked")
+      var clazz = (Class<? extends SortedKeyValueIterator<Key,Value>>) classloader
+          .loadClass(className).asSubclass(SortedKeyValueIterator.class);
+      clazzName = clazz.getName();
+      skvi = clazz.getDeclaredConstructor().newInstance();
     } catch (ReflectiveOperationException e) {
       StringBuilder msg = new StringBuilder("Unable to load ").append(className);
       if (className.indexOf('.') < 0) {
@@ -222,8 +223,6 @@ public class SetIterCommand extends Command {
       throw new ShellCommandException(ErrorCode.INITIALIZATION_FAILURE, msg);
     }
 
-    @SuppressWarnings("unchecked")
-    SortedKeyValueIterator<Key,Value> skvi = untypedInstance;
     OptionDescriber iterOptions = null;
     if (OptionDescriber.class.isAssignableFrom(skvi.getClass())) {
       iterOptions = (OptionDescriber) skvi;
@@ -288,8 +287,9 @@ public class SetIterCommand extends Command {
                 input = new String(input);
               }
 
-              if (input.isEmpty())
+              if (input.isEmpty()) {
                 break;
+              }
 
               String[] sa = input.split(" ", 2);
               localOptions.put(sa[0], sa[1]);
@@ -298,14 +298,15 @@ public class SetIterCommand extends Command {
         }
 
         options.putAll(localOptions);
-        if (!iterOptions.validateOptions(options))
-          writer.println("invalid options for " + clazz.getName());
+        if (!iterOptions.validateOptions(options)) {
+          writer.println("invalid options for " + clazzName);
+        }
 
       } while (!iterOptions.validateOptions(options));
     } else {
       writer.flush();
       writer.println("The iterator class does not implement OptionDescriber."
-          + " Consider this for better iterator configuration using this setiter" + " command.");
+          + " Consider this for better iterator configuration using this setiter command.");
       iteratorName = reader.readLine("Name for iterator (enter to skip): ");
       if (iteratorName == null) {
         writer.println();

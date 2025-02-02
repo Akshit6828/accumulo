@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -32,13 +32,15 @@ class MemKeyComparator implements Comparator<Key>, Serializable {
     int cmp = k1.compareTo(k2);
 
     if (cmp == 0) {
-      if (k1 instanceof MemKey)
-        if (k2 instanceof MemKey)
+      if (k1 instanceof MemKey) {
+        if (k2 instanceof MemKey) {
           cmp = ((MemKey) k2).getKVCount() - ((MemKey) k1).getKVCount();
-        else
+        } else {
           cmp = 1;
-      else if (k2 instanceof MemKey)
+        }
+      } else if (k2 instanceof MemKey) {
         cmp = -1;
+      }
     }
 
     return cmp;

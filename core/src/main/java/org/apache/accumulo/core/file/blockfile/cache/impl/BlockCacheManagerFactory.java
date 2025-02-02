@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -31,17 +31,15 @@ public class BlockCacheManagerFactory {
 
   /**
    * Get the BlockCacheFactory specified by the property 'tserver.cache.factory.class' using the
-   * AccumuloVFSClassLoader
+   * System class loader
    *
-   * @param conf
-   *          accumulo configuration
+   * @param conf accumulo configuration
    * @return block cache manager instance
-   * @throws Exception
-   *           error loading block cache manager implementation class
+   * @throws ReflectiveOperationException error loading block cache manager implementation class
    */
   public static synchronized BlockCacheManager getInstance(AccumuloConfiguration conf)
-      throws Exception {
-    String impl = conf.get(Property.TSERV_CACHE_MANAGER_IMPL);
+      throws ReflectiveOperationException {
+    String impl = conf.get(Property.GENERAL_CACHE_MANAGER_IMPL);
     Class<? extends BlockCacheManager> clazz =
         ClassLoaderUtil.loadClass(impl, BlockCacheManager.class);
     LOG.info("Created new block cache manager of type: {}", clazz.getSimpleName());
@@ -51,15 +49,13 @@ public class BlockCacheManagerFactory {
   /**
    * Get the BlockCacheFactory specified by the property 'tserver.cache.factory.class'
    *
-   * @param conf
-   *          accumulo configuration
+   * @param conf accumulo configuration
    * @return block cache manager instance
-   * @throws Exception
-   *           error loading block cache manager implementation class
+   * @throws ReflectiveOperationException error loading block cache manager implementation class
    */
   public static synchronized BlockCacheManager getClientInstance(AccumuloConfiguration conf)
-      throws Exception {
-    String impl = conf.get(Property.TSERV_CACHE_MANAGER_IMPL);
+      throws ReflectiveOperationException {
+    String impl = conf.get(Property.GENERAL_CACHE_MANAGER_IMPL);
     Class<? extends BlockCacheManager> clazz =
         Class.forName(impl).asSubclass(BlockCacheManager.class);
     LOG.info("Created new block cache factory of type: {}", clazz.getSimpleName());

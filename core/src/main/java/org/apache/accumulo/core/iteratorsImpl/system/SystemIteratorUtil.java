@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -32,10 +32,6 @@ import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.tabletserver.thrift.IteratorConfig;
 import org.apache.accumulo.core.tabletserver.thrift.TIteratorSetting;
-import org.apache.thrift.TDeserializer;
-import org.apache.thrift.TException;
-import org.apache.thrift.TSerializer;
-import org.apache.thrift.protocol.TBinaryProtocol;
 
 /**
  * System utility class. Not for client use.
@@ -60,40 +56,6 @@ public class SystemIteratorUtil {
     }
 
     return new IteratorConfig(tisList);
-  }
-
-  public static List<IteratorSetting> toIteratorSettings(IteratorConfig ic) {
-    List<IteratorSetting> ret = new ArrayList<>();
-    for (TIteratorSetting tIteratorSetting : ic.getIterators()) {
-      ret.add(toIteratorSetting(tIteratorSetting));
-    }
-
-    return ret;
-  }
-
-  public static byte[] encodeIteratorSettings(IteratorConfig iterators) {
-    TSerializer tser = new TSerializer(new TBinaryProtocol.Factory());
-
-    try {
-      return tser.serialize(iterators);
-    } catch (TException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
-  public static byte[] encodeIteratorSettings(List<IteratorSetting> iterators) {
-    return encodeIteratorSettings(toIteratorConfig(iterators));
-  }
-
-  public static List<IteratorSetting> decodeIteratorSettings(byte[] enc) {
-    TDeserializer tdser = new TDeserializer(new TBinaryProtocol.Factory());
-    IteratorConfig ic = new IteratorConfig();
-    try {
-      tdser.deserialize(ic, enc);
-    } catch (TException e) {
-      throw new RuntimeException(e);
-    }
-    return toIteratorSettings(ic);
   }
 
   public static SortedKeyValueIterator<Key,Value> setupSystemScanIterators(

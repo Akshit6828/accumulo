@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,20 +18,23 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.junit.Assert.assertTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.Socket;
+import java.time.Duration;
 import java.util.Properties;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.conf.ClientProperty;
-import org.apache.accumulo.core.util.HostAndPort;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.hadoop.conf.Configuration;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.net.HostAndPort;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
@@ -39,13 +42,14 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 public class WatchTheWatchCountIT extends ConfigurableMacBase {
   private static final Logger log = LoggerFactory.getLogger(WatchTheWatchCountIT.class);
 
-  public int defaultOverrideSeconds() {
-    return 60;
+  @Override
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(1);
   }
 
   @Override
   public void configure(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
-    cfg.setNumTservers(3);
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(3);
   }
 
   @SuppressFBWarnings(value = "UNENCRYPTED_SOCKET",
@@ -60,29 +64,32 @@ public class WatchTheWatchCountIT extends ConfigurableMacBase {
       }
       c.tableOperations().list();
       String zooKeepers = ClientProperty.INSTANCE_ZOOKEEPERS.getValue(props);
-      final long MIN = 475L;
-      final long MAX = 700L;
+      // expect about 30-45 base + about 12 per table in a single-node 3-tserver instance
+      final long MIN = 75L;
+      final long MAX = 300L;
       long total = 0;
       final HostAndPort hostAndPort = HostAndPort.fromString(zooKeepers);
       for (int i = 0; i < 5; i++) {
         try (Socket socket = new Socket(hostAndPort.getHost(), hostAndPort.getPort())) {
-          socket.getOutputStream().write("wchs\n".getBytes(), 0, 5);
+          socket.getOutputStream().write("wchs\n".getBytes(UTF_8), 0, 5);
           byte[] buffer = new byte[1024];
           int n = socket.getInputStream().read(buffer);
-          String response = new String(buffer, 0, n);
+          String response = new String(buffer, 0, n, UTF_8);
           total = Long.parseLong(response.split(":")[1].trim());
           log.info("Total: {}", total);
           if (total > MIN && total < MAX) {
             break;
           }
-          log.debug("Expected number of watchers to be contained in ({}, {}), but"
-              + " actually was {}. Sleeping and retrying", MIN, MAX, total);
+          log.debug("Expected number of watchers to be contained in ({}, {}), currently have {}"
+              + ". Sleeping and retrying", MIN, MAX, total);
           Thread.sleep(5000);
         }
       }
+      log.info("Number of watchers to be expected in range: ({}, {}), currently have {}", MIN, MAX,
+          total);
 
-      assertTrue("Expected number of watchers to be contained in (" + MIN + ", " + MAX
-          + "), but actually was " + total, total > MIN && total < MAX);
+      assertTrue(total > MIN && total < MAX, "Expected number of watchers to be contained in ("
+          + MIN + ", " + MAX + "), but actually was " + total);
 
     }
   }

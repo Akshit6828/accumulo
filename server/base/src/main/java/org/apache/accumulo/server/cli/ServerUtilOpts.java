@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -29,13 +29,9 @@ public class ServerUtilOpts extends ClientOpts {
 
   public synchronized ServerContext getServerContext() {
     if (context == null) {
-      if (getClientConfigFile() == null) {
-        context = new ServerContext(SiteConfiguration.auto());
-      } else {
-        ClientInfo info = ClientInfo.from(getClientProps());
-        context = ServerContext.override(SiteConfiguration.auto(), info.getInstanceName(),
-            info.getZooKeepers(), info.getZooKeepersSessionTimeOut());
-      }
+      context = getClientConfigFile() == null ? new ServerContext(SiteConfiguration.auto())
+          : ServerContext.withClientInfo(SiteConfiguration.auto(),
+              ClientInfo.from(getClientProps()));
     }
     return context;
   }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,10 +18,10 @@
  */
 package org.apache.accumulo.server.util;
 
-import java.security.SecureRandom;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+
 import java.util.Iterator;
 import java.util.Properties;
-import java.util.Random;
 
 import org.apache.accumulo.core.cli.ClientOpts;
 import org.apache.accumulo.core.client.Accumulo;
@@ -30,23 +30,25 @@ import org.apache.accumulo.core.client.BatchWriter;
 import org.apache.accumulo.core.conf.ClientProperty;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.Value;
+import org.apache.accumulo.core.trace.TraceUtil;
 import org.apache.hadoop.io.Text;
-import org.apache.htrace.TraceScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.beust.jcommander.Parameter;
 
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
+
 public class RandomWriter {
 
-  private static int num_columns_per_row = 1;
-  private static int num_payload_bytes = 1024;
+  private static final int num_columns_per_row = 1;
+  private static final int num_payload_bytes = 1024;
   private static final Logger log = LoggerFactory.getLogger(RandomWriter.class);
 
   public static class RandomMutationGenerator implements Iterable<Mutation>, Iterator<Mutation> {
-    private long max_mutations;
+    private final long max_mutations;
     private int mutations_so_far = 0;
-    private Random r = new SecureRandom();
     private static final Logger log = LoggerFactory.getLogger(RandomMutationGenerator.class);
 
     public RandomMutationGenerator(long num_mutations) {
@@ -60,13 +62,13 @@ public class RandomWriter {
 
     @Override
     public Mutation next() {
-      Text row_value =
-          new Text(Long.toString(((r.nextLong() & 0x7fffffffffffffffL) / 177) % 100000000000L));
+      Text row_value = new Text(
+          Long.toString(((RANDOM.get().nextLong() & 0x7fffffffffffffffL) / 177) % 100000000000L));
       Mutation m = new Mutation(row_value);
       for (int column = 0; column < num_columns_per_row; column++) {
         Text column_fam = new Text("col_fam");
         byte[] bytes = new byte[num_payload_bytes];
-        r.nextBytes(bytes);
+        RANDOM.get().nextBytes(bytes);
         m.put(column_fam, new Text("" + column), new Value(bytes));
       }
       mutations_so_far++;
@@ -91,13 +93,16 @@ public class RandomWriter {
     @Parameter(names = "--count", description = "number of mutations to write", required = true)
     long count;
     @Parameter(names = "--table", description = "table to use")
-    String tableName = "test_write_table";
+    final String tableName = "test_write_table";
   }
 
   public static void main(String[] args) throws Exception {
     Opts opts = new Opts();
     opts.principal = "root";
-    try (TraceScope clientSpan = opts.parseArgsAndTrace(RandomWriter.class.getName(), args)) {
+    opts.parseArgs(RandomWriter.class.getName(), args);
+
+    Span span = TraceUtil.startSpan(RandomWriter.class, "main");
+    try (Scope scope = span.makeCurrent()) {
       long start = System.currentTimeMillis();
       Properties clientProps = opts.getClientProps();
       String principal = ClientProperty.AUTH_PRINCIPAL.getValue(clientProps);
@@ -114,6 +119,8 @@ public class RandomWriter {
 
       log.info("stopping at {}", stop);
       log.info("elapsed: {}", (((double) stop - (double) start) / 1000.0));
+    } finally {
+      span.end();
     }
   }
 

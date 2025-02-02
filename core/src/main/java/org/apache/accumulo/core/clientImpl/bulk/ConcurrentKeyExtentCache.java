@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,7 +23,6 @@ import static org.apache.accumulo.core.metadata.schema.TabletMetadata.ColumnType
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Objects;
@@ -35,25 +34,31 @@ import org.apache.accumulo.core.clientImpl.ClientContext;
 import org.apache.accumulo.core.clientImpl.bulk.BulkImport.KeyExtentCache;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
+import org.apache.accumulo.core.metadata.schema.TabletDeletedException;
 import org.apache.accumulo.core.metadata.schema.TabletMetadata;
 import org.apache.accumulo.core.metadata.schema.TabletsMetadata;
 import org.apache.hadoop.io.Text;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
 
 class ConcurrentKeyExtentCache implements KeyExtentCache {
 
+  private static final Logger log = LoggerFactory.getLogger(ConcurrentKeyExtentCache.class);
+
   private static final Text MAX = new Text();
 
-  private Set<Text> rowsToLookup = Collections.synchronizedSet(new HashSet<>());
+  private final Set<Text> rowsToLookup = Collections.synchronizedSet(new HashSet<>());
 
-  List<Text> lookupRows = new ArrayList<>();
+  final List<Text> lookupRows = new ArrayList<>();
 
-  private ConcurrentSkipListMap<Text,KeyExtent> extents = new ConcurrentSkipListMap<>((t1, t2) -> {
-    return (t1 == t2) ? 0 : (t1 == MAX ? 1 : (t2 == MAX ? -1 : t1.compareTo(t2)));
-  });
-  private TableId tableId;
-  private ClientContext ctx;
+  private final ConcurrentSkipListMap<Text,KeyExtent> extents =
+      new ConcurrentSkipListMap<>((t1, t2) -> {
+        return (t1 == t2) ? 0 : (t1 == MAX ? 1 : (t2 == MAX ? -1 : t1.compareTo(t2)));
+      });
+  private final TableId tableId;
+  private final ClientContext ctx;
 
   ConcurrentKeyExtentCache(TableId tableId, ClientContext ctx) {
     this.tableId = tableId;
@@ -83,16 +88,19 @@ class ConcurrentKeyExtentCache implements KeyExtentCache {
 
   @VisibleForTesting
   protected Stream<KeyExtent> lookupExtents(Text row) {
-    return TabletsMetadata.builder(ctx).forTable(tableId).overlapping(row, null).checkConsistency()
-        .fetch(PREV_ROW).build().stream().limit(100).map(TabletMetadata::getExtent);
+    TabletsMetadata tabletsMetadata = TabletsMetadata.builder(ctx).forTable(tableId)
+        .overlapping(row, true, null).checkConsistency().fetch(PREV_ROW).build();
+    return tabletsMetadata.stream().limit(100).map(TabletMetadata::getExtent);
   }
 
   @Override
   public KeyExtent lookup(Text row) {
     while (true) {
+
       KeyExtent ke = getFromCache(row);
-      if (ke != null)
+      if (ke != null) {
         return ke;
+      }
 
       // If a metadata lookup is currently in progress, then multiple threads can queue up their
       // rows. The next lookup will process all queued. Processing multiple at once can be more
@@ -120,12 +128,16 @@ class ConcurrentKeyExtentCache implements KeyExtentCache {
 
         for (Text lookupRow : lookupRows) {
           if (getFromCache(lookupRow) == null) {
-            Iterator<KeyExtent> iter = lookupExtents(lookupRow).iterator();
-            while (iter.hasNext()) {
-              KeyExtent ke2 = iter.next();
-              if (inCache(ke2))
+            while (true) {
+              try (Stream<KeyExtent> keyExtentStream = lookupExtents(lookupRow)) {
+                keyExtentStream.takeWhile(ke2 -> !inCache(ke2)).forEach(this::updateCache);
                 break;
-              updateCache(ke2);
+              } catch (TabletDeletedException tde) {
+                // tablets were merged away in the table, start over and try again
+                log.debug("While trying to obtain a tablet location for bulk import, a tablet was "
+                    + "deleted. If this was caused by a concurrent merge tablet "
+                    + "operation, this is okay. Otherwise, it could be a problem.", tde);
+              }
             }
           }
         }

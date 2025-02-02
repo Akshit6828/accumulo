@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.UUID;
 
 import org.apache.accumulo.core.clientImpl.lexicoder.FixedByteArrayOutputStream;
@@ -36,7 +37,7 @@ public class UUIDLexicoder extends AbstractLexicoder<UUID> {
   /**
    * {@inheritDoc}
    *
-   * @see <a href="http://www.ietf.org/rfc/rfc4122.txt"> RFC 4122: A Universally Unique IDentifier
+   * @see <a href="https://www.ietf.org/rfc/rfc4122.txt"> RFC 4122: A Universally Unique IDentifier
    *      (UUID) URN Namespace, "Rules for Lexical Equivalence" in Section 3.</a>
    */
   @Override
@@ -52,7 +53,7 @@ public class UUIDLexicoder extends AbstractLexicoder<UUID> {
 
       return ret;
     } catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new UncheckedIOException(e);
     }
   }
 
@@ -69,7 +70,7 @@ public class UUIDLexicoder extends AbstractLexicoder<UUID> {
       DataInputStream in = new DataInputStream(new ByteArrayInputStream(b, offset, len));
       return new UUID(in.readLong() ^ 0x8000000000000000L, in.readLong() ^ 0x8000000000000000L);
     } catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new UncheckedIOException(e);
     }
   }
 

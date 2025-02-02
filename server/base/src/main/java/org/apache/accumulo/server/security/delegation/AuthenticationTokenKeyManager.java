@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -36,8 +36,8 @@ public class AuthenticationTokenKeyManager implements Runnable {
   private final ZooAuthenticationKeyDistributor keyDistributor;
 
   private long lastKeyUpdate = 0;
-  private long keyUpdateInterval;
-  private long tokenMaxLifetime;
+  private final long keyUpdateInterval;
+  private final long tokenMaxLifetime;
   private int idSeq = 0;
   private volatile boolean keepRunning = true, initialized = false;
 
@@ -45,15 +45,12 @@ public class AuthenticationTokenKeyManager implements Runnable {
    * Construct the key manager which will generate new AuthenticationKeys to generate and verify
    * delegation tokens
    *
-   * @param mgr
-   *          The SecretManager in use
-   * @param dist
-   *          The implementation to distribute AuthenticationKeys to ZooKeeper
-   * @param keyUpdateInterval
-   *          The frequency, in milliseconds, that new AuthenticationKeys are created
-   * @param tokenMaxLifetime
-   *          The lifetime, in milliseconds, of generated AuthenticationKeys (and subsequently
-   *          delegation tokens).
+   * @param mgr The SecretManager in use
+   * @param dist The implementation to distribute AuthenticationKeys to ZooKeeper
+   * @param keyUpdateInterval The frequency, in milliseconds, that new AuthenticationKeys are
+   *        created
+   * @param tokenMaxLifetime The lifetime, in milliseconds, of generated AuthenticationKeys (and
+   *        subsequently delegation tokens).
    */
   public AuthenticationTokenKeyManager(AuthenticationTokenSecretManager mgr,
       ZooAuthenticationKeyDistributor dist, long keyUpdateInterval, long tokenMaxLifetime) {
@@ -139,8 +136,7 @@ public class AuthenticationTokenKeyManager implements Runnable {
   /**
    * Internal "run" method which performs the actual work.
    *
-   * @param now
-   *          The current time in millis since epoch.
+   * @param now The current time in millis since epoch.
    */
   void _run(long now) {
     // clear any expired keys
@@ -166,7 +162,7 @@ public class AuthenticationTokenKeyManager implements Runnable {
         keyDistributor.advertise(newKey);
       } catch (KeeperException | InterruptedException e) {
         log.error("Failed to advertise AuthenticationKey in ZooKeeper. Exiting.", e);
-        throw new RuntimeException(e);
+        throw new IllegalStateException(e);
       }
 
       lastKeyUpdate = now;

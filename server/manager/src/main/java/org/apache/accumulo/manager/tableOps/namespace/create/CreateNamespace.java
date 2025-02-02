@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -21,7 +21,8 @@ package org.apache.accumulo.manager.tableOps.namespace.create;
 import java.util.Map;
 
 import org.apache.accumulo.core.data.NamespaceId;
-import org.apache.accumulo.fate.Repo;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.Repo;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tableOps.ManagerRepo;
 import org.apache.accumulo.manager.tableOps.Utils;
@@ -29,7 +30,7 @@ import org.apache.accumulo.manager.tableOps.Utils;
 public class CreateNamespace extends ManagerRepo {
   private static final long serialVersionUID = 1L;
 
-  private NamespaceInfo namespaceInfo;
+  private final NamespaceInfo namespaceInfo;
 
   public CreateNamespace(String user, String namespaceName, Map<String,String> props) {
     namespaceInfo = new NamespaceInfo();
@@ -39,12 +40,12 @@ public class CreateNamespace extends ManagerRepo {
   }
 
   @Override
-  public long isReady(long tid, Manager environment) {
+  public long isReady(FateId fateId, Manager environment) {
     return 0;
   }
 
   @Override
-  public Repo<Manager> call(long tid, Manager manager) throws Exception {
+  public Repo<Manager> call(FateId fateId, Manager manager) throws Exception {
     Utils.getIdLock().lock();
     try {
       namespaceInfo.namespaceId =
@@ -57,7 +58,7 @@ public class CreateNamespace extends ManagerRepo {
   }
 
   @Override
-  public void undo(long tid, Manager env) {
+  public void undo(FateId fateId, Manager env) {
     // nothing to do, the namespace id was allocated!
   }
 

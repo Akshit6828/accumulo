@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -78,8 +78,7 @@ public interface Constraint {
   /**
    * Gets a short, one-sentence description of what a given violation code means.
    *
-   * @param violationCode
-   *          numeric violation code
+   * @param violationCode numeric violation code
    * @return matching violation description
    */
   String getViolationDescription(short violationCode);
@@ -90,14 +89,8 @@ public interface Constraint {
    *
    * Violation codes must be non-negative. Negative violation codes are reserved for system use.
    *
-   * New API equivalent of
-   * {@link org.apache.accumulo.core.constraints.Constraint#check(org.apache.accumulo.core.constraints.Constraint.Environment, Mutation)}
-   * but renamed to prevent ambiguous method call errors.
-   *
-   * @param env
-   *          constraint environment
-   * @param mutation
-   *          mutation to check
+   * @param env constraint environment
+   * @param mutation mutation to check
    * @return list of violation codes, or null if none
    */
   List<Short> check(Environment env, Mutation mutation);

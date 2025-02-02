@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -34,11 +34,12 @@ import java.util.ServiceLoader;
  *
  * <p>
  * One way to easily create META-INF/services files is to use the
- * <a href="https://github.com/google/auto/tree/master/service">AutoService</a> annotation.
+ * <a href="https://github.com/google/auto/tree/main/service">AutoService</a> annotation.
  *
  * <p>
- * If the implementing class also wishes to have a redundant main method, it may be useful to simply
- * implement main as:<br>
+ * It generally should be avoided, but if the implementing class also must have a redundant main
+ * method, it may be useful to simply implement main as the following to ensure consistency of
+ * behavior when executing the main method and when executing using the keyword:<br>
  * {@code new MyImplementingClass().execute(args);}
  */
 public interface KeywordExecutable {
@@ -74,8 +75,7 @@ public interface KeywordExecutable {
   /**
    * Execute the item with the given arguments.
    *
-   * @param args
-   *          command-line arguments to pass to the executed class
+   * @param args command-line arguments to pass to the executed class
    */
   void execute(final String[] args) throws Exception;
 

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,7 @@
  */
 package org.apache.accumulo.monitor.rest.bulkImports;
 
-import org.apache.accumulo.core.master.thrift.TabletServerStatus;
+import org.apache.accumulo.core.manager.thrift.TabletServerStatus;
 
 /**
  * Stores tserver bulk import information
@@ -37,12 +37,9 @@ public class TabletServerBulkImportInformation {
   /**
    * Creates a new tserver bulk import object
    *
-   * @param server
-   *          server name
-   * @param importSize
-   *          import size
-   * @param oldestAge
-   *          tserver bulk import age
+   * @param server server name
+   * @param importSize import size
+   * @param oldestAge tserver bulk import age
    */
   public TabletServerBulkImportInformation(TabletServerStatus server, int importSize,
       long oldestAge) {

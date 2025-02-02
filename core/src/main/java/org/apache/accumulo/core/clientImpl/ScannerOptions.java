@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,6 +20,7 @@ package org.apache.accumulo.core.clientImpl;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,9 +53,9 @@ public class ScannerOptions implements ScannerBase {
 
   protected SortedSet<Column> fetchedColumns = new TreeSet<>();
 
-  protected long timeOut = Long.MAX_VALUE;
+  protected long retryTimeout = Long.MAX_VALUE;
 
-  protected long batchTimeOut = Long.MAX_VALUE;
+  protected long batchTimeout = Long.MAX_VALUE;
 
   private String regexIterName = null;
 
@@ -63,6 +64,8 @@ public class ScannerOptions implements ScannerBase {
   protected String classLoaderContext = null;
 
   protected Map<String,String> executionHints = Collections.emptyMap();
+
+  private ConsistencyLevel consistencyLevel = ConsistencyLevel.IMMEDIATE;
 
   protected ScannerOptions() {}
 
@@ -177,10 +180,12 @@ public class ScannerOptions implements ScannerBase {
         }
 
         dst.samplerConfig = src.samplerConfig;
-        dst.batchTimeOut = src.batchTimeOut;
+        dst.batchTimeout = src.batchTimeout;
 
         // its an immutable map, so can avoid copy here
         dst.executionHints = src.executionHints;
+
+        dst.consistencyLevel = src.consistencyLevel;
       }
     }
   }
@@ -192,20 +197,20 @@ public class ScannerOptions implements ScannerBase {
 
   @Override
   public synchronized void setTimeout(long timeout, TimeUnit timeUnit) {
-    if (timeOut < 0) {
-      throw new IllegalArgumentException("TimeOut must be positive : " + timeOut);
+    if (timeout < 0) {
+      throw new IllegalArgumentException("retry timeout must be positive : " + timeout);
     }
 
     if (timeout == 0) {
-      this.timeOut = Long.MAX_VALUE;
+      this.retryTimeout = Long.MAX_VALUE;
     } else {
-      this.timeOut = timeUnit.toMillis(timeout);
+      this.retryTimeout = timeUnit.toMillis(timeout);
     }
   }
 
   @Override
   public synchronized long getTimeout(TimeUnit timeunit) {
-    return timeunit.convert(timeOut, TimeUnit.MILLISECONDS);
+    return timeunit.convert(retryTimeout, MILLISECONDS);
   }
 
   @Override
@@ -236,19 +241,19 @@ public class ScannerOptions implements ScannerBase {
 
   @Override
   public void setBatchTimeout(long timeout, TimeUnit timeUnit) {
-    if (timeOut < 0) {
-      throw new IllegalArgumentException("Batch timeout must be positive : " + timeOut);
+    if (timeout < 0) {
+      throw new IllegalArgumentException("Batch timeout must be positive : " + timeout);
     }
     if (timeout == 0) {
-      this.batchTimeOut = Long.MAX_VALUE;
+      this.batchTimeout = Long.MAX_VALUE;
     } else {
-      this.batchTimeOut = timeUnit.toMillis(timeout);
+      this.batchTimeout = timeUnit.toMillis(timeout);
     }
   }
 
   @Override
   public long getBatchTimeout(TimeUnit timeUnit) {
-    return timeUnit.convert(batchTimeOut, TimeUnit.MILLISECONDS);
+    return timeUnit.convert(batchTimeout, MILLISECONDS);
   }
 
   @Override
@@ -270,6 +275,16 @@ public class ScannerOptions implements ScannerBase {
   @Override
   public synchronized void setExecutionHints(Map<String,String> hints) {
     this.executionHints = Map.copyOf(Objects.requireNonNull(hints));
+  }
+
+  @Override
+  public ConsistencyLevel getConsistencyLevel() {
+    return consistencyLevel;
+  }
+
+  @Override
+  public void setConsistencyLevel(ConsistencyLevel level) {
+    this.consistencyLevel = Objects.requireNonNull(level);
   }
 
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,6 +20,7 @@ package org.apache.accumulo.core.client.admin;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 import java.util.concurrent.TimeUnit;
 
@@ -34,19 +35,17 @@ public class DelegationTokenConfig {
   private long lifetime = 0;
 
   /**
-   * Requests a specific lifetime for the token that is different than the default system lifetime.
+   * Requests a specific lifetime for the token that is different from the default system lifetime.
    * The lifetime must not exceed the secret key lifetime configured on the servers.
    *
-   * @param lifetime
-   *          Token lifetime
-   * @param unit
-   *          Unit of time for the lifetime
+   * @param lifetime Token lifetime
+   * @param unit Unit of time for the lifetime
    * @return this
    */
   public DelegationTokenConfig setTokenLifetime(long lifetime, TimeUnit unit) {
     checkArgument(lifetime >= 0, "Lifetime must be non-negative");
     requireNonNull(unit, "TimeUnit was null");
-    this.lifetime = TimeUnit.MILLISECONDS.convert(lifetime, unit);
+    this.lifetime = MILLISECONDS.convert(lifetime, unit);
     return this;
   }
 
@@ -54,13 +53,12 @@ public class DelegationTokenConfig {
    * The current token lifetime. A value of zero corresponds to using the system configured
    * lifetime.
    *
-   * @param unit
-   *          The unit of time the lifetime should be returned in
+   * @param unit The unit of time the lifetime should be returned in
    * @return Token lifetime in requested unit of time
    */
   public long getTokenLifetime(TimeUnit unit) {
     requireNonNull(unit);
-    return unit.convert(lifetime, TimeUnit.MILLISECONDS);
+    return unit.convert(lifetime, MILLISECONDS);
   }
 
   @Override

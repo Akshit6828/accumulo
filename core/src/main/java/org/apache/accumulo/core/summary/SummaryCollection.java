@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -82,7 +82,7 @@ public class SummaryCollection {
 
   }
 
-  private Map<SummarizerConfiguration,MergedSummary> mergedSummaries;
+  private final Map<SummarizerConfiguration,MergedSummary> mergedSummaries;
   private long totalFiles;
   private long deletedFiles;
 
@@ -120,10 +120,10 @@ public class SummaryCollection {
 
   static class FileSummary {
 
-    private SummarizerConfiguration conf;
-    private Map<String,Long> summary;
-    private boolean exceededBoundry;
-    private boolean exceededMaxSize;
+    private final SummarizerConfiguration conf;
+    private final Map<String,Long> summary;
+    private final boolean exceededBoundry;
+    private final boolean exceededMaxSize;
 
     FileSummary(SummarizerConfiguration conf, Map<String,Long> summary, boolean exceededBoundry) {
       this.conf = conf;

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,6 +23,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.thrift.TConfiguration;
 import org.apache.thrift.transport.TServerTransport;
 import org.apache.thrift.transport.TTransport;
 
@@ -129,7 +130,7 @@ public class Mocket {
 
   }
 
-  private class MocketServerTransport extends TServerTransport {
+  private static class MocketServerTransport extends TServerTransport {
 
     private final MocketTransport servTrans;
 
@@ -141,13 +142,13 @@ public class Mocket {
     public void listen() {}
 
     @Override
-    public void close() {
-      acceptImpl().close();
+    public TTransport accept() {
+      return servTrans;
     }
 
     @Override
-    protected TTransport acceptImpl() {
-      return servTrans;
+    public void close() {
+      servTrans.close();
     }
 
     @Override
@@ -170,6 +171,21 @@ public class Mocket {
     @Override
     public void write(byte[] buf, int off, int len) {
       output.write(buf, off, len);
+    }
+
+    @Override
+    public TConfiguration getConfiguration() {
+      return null;
+    }
+
+    @Override
+    public void updateKnownMessageSize(long size) {
+
+    }
+
+    @Override
+    public void checkReadBytesAvailable(long numBytes) {
+
     }
 
     @Override

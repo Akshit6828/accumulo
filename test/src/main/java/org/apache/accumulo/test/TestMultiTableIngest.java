@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -17,6 +17,8 @@
  * under the License.
  */
 package org.apache.accumulo.test;
+
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,7 +33,7 @@ import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.Value;
-import org.apache.accumulo.fate.util.UtilWaitThread;
+import org.apache.accumulo.test.util.Wait;
 import org.apache.hadoop.io.Text;
 
 import com.beust.jcommander.Parameter;
@@ -54,15 +56,15 @@ public class TestMultiTableIngest {
     int i = 0;
     for (String table : tableNames) {
       // wait for table to exist
-      while (!client.tableOperations().exists(table))
-        UtilWaitThread.sleep(100);
+      Wait.waitFor(() -> client.tableOperations().exists(table), SECONDS.toMillis(30), 100);
       try (Scanner scanner = client.createScanner(table, opts.auths)) {
         int count = i;
         for (Entry<Key,Value> elt : scanner) {
           String expected = String.format("%06d", count);
-          if (!elt.getKey().getRow().toString().equals(expected))
+          if (!elt.getKey().getRow().toString().equals(expected)) {
             throw new RuntimeException(
                 "entry " + elt + " does not match expected " + expected + " in table " + table);
+          }
           count += tableNames.size();
         }
         i++;
@@ -82,8 +84,9 @@ public class TestMultiTableIngest {
       }
 
       if (!opts.readonly) {
-        for (String table : tableNames)
+        for (String table : tableNames) {
           client.tableOperations().create(table);
+        }
 
         MultiTableBatchWriter b;
         try {
@@ -95,8 +98,7 @@ public class TestMultiTableIngest {
         // populate
         for (int i = 0; i < opts.count; i++) {
           Mutation m = new Mutation(new Text(String.format("%06d", i)));
-          m.put(new Text("col" + Integer.toString((i % 3) + 1)), new Text("qual"),
-              new Value("junk"));
+          m.put("col" + ((i % 3) + 1), "qual", "junk");
           b.getBatchWriter(tableNames.get(i % tableNames.size())).addMutation(m);
         }
         try {

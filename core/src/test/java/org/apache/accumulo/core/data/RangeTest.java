@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,11 +18,12 @@
  */
 package org.apache.accumulo.core.data;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -36,17 +37,19 @@ import java.util.List;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
 import org.apache.accumulo.core.dataImpl.thrift.TRange;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class RangeTest {
   private Range newRange(String k1, String k2) {
     Key ik1 = null;
-    if (k1 != null)
+    if (k1 != null) {
       ik1 = new Key(new Text(k1), 0L);
+    }
 
     Key ik2 = null;
-    if (k2 != null)
+    if (k2 != null) {
       ik2 = new Key(new Text(k2), 0L);
+    }
 
     return new Range(ik1, ik2);
   }
@@ -59,7 +62,7 @@ public class RangeTest {
     HashSet<Range> s1 = new HashSet<>(rl);
     HashSet<Range> s2 = new HashSet<>(expected);
 
-    assertEquals("got : " + rl + " expected : " + expected, s1, s2);
+    assertEquals(s1, s2, "got : " + rl + " expected : " + expected);
   }
 
   @Test
@@ -266,9 +269,9 @@ public class RangeTest {
 
   @Test
   public void testMergeOverlapping21() {
-    for (boolean b1 : new boolean[] {true, false})
-      for (boolean b2 : new boolean[] {true, false})
-        for (boolean b3 : new boolean[] {true, false})
+    for (boolean b1 : new boolean[] {true, false}) {
+      for (boolean b2 : new boolean[] {true, false}) {
+        for (boolean b3 : new boolean[] {true, false}) {
           for (boolean b4 : new boolean[] {true, false}) {
 
             // System.out.println("b1:"+b1+" b2:"+b2+" b3:"+b3+" b4:"+b4);
@@ -298,6 +301,9 @@ public class RangeTest {
                 new Range(new Key(new Text("a")), b1 || b3, new Key(new Text("n")), b2 || b4));
             check(Range.mergeOverlapping(rl), expected);
           }
+        }
+      }
+    }
 
   }
 
@@ -484,11 +490,13 @@ public class RangeTest {
     Text tr1 = null;
     Text tr2 = null;
 
-    if (r1 != null)
+    if (r1 != null) {
       tr1 = new Text(r1);
+    }
 
-    if (r2 != null)
+    if (r2 != null) {
       tr2 = new Text(r2);
+    }
 
     return new Range(tr1, r1i, tr2, r2i);
 
@@ -610,23 +618,16 @@ public class RangeTest {
     runClipTest(fence, range);
 
     // scanner was not handling edge case properly...
-    Range scanRange =
-        new Range(
-            new Key("10;007cdc5b0".getBytes(), "~tab".getBytes(), "~pr".getBytes(), "".getBytes(),
-                130962, false),
-            false, new Key(new Text("10<")).followingKey(PartialKey.ROW), false);
+    Range scanRange = new Range(
+        new Key("10;007cdc5b0".getBytes(UTF_8), "~tab".getBytes(UTF_8), "~pr".getBytes(UTF_8),
+            "".getBytes(UTF_8), 130962, false),
+        false, new Key(new Text("10<")).followingKey(PartialKey.ROW), false);
     // below is the proper check the scanner now does instead of just comparing the row bytes
     scanRange.afterEndKey(new Key(new Text("10<")).followingKey(PartialKey.ROW));
   }
 
   private void runClipTest(Range fence, Range range) {
-    try {
-      fence.clip(range);
-      fail();
-    } catch (IllegalArgumentException e) {
-
-    }
-
+    assertThrows(IllegalArgumentException.class, () -> fence.clip(range));
   }
 
   private void runClipTest(Range fence, Range range, Range expected) {
@@ -643,7 +644,7 @@ public class RangeTest {
   }
 
   private static Column newColumn(String cf, String cq) {
-    return new Column(cf.getBytes(), cq == null ? null : cq.getBytes(), null);
+    return new Column(cf.getBytes(UTF_8), cq == null ? null : cq.getBytes(UTF_8), null);
   }
 
   private static Column newColumn(String cf) {
@@ -883,10 +884,8 @@ public class RangeTest {
     ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
     Range r2 = new Range();
     try (DataInputStream dis = new DataInputStream(bais)) {
-      r2.readFields(dis);
-      fail("readFields allowed invalid range");
-    } catch (InvalidObjectException exc) {
-      /* good! */
+      assertThrows(InvalidObjectException.class, () -> r2.readFields(dis),
+          "readFields allowed invalid range");
     }
   }
 
@@ -903,11 +902,7 @@ public class RangeTest {
     Range r =
         new Range(new Key(new Text("soup")), true, false, new Key(new Text("nuts")), true, false);
     TRange tr = r.toThrift();
-    try {
-      new Range(tr);
-      fail("Thrift constructor allowed invalid range");
-    } catch (IllegalArgumentException exc) {
-      /* good! */
-    }
+    assertThrows(IllegalArgumentException.class, () -> new Range(tr),
+        "Thrift constructor allowed invalid range");
   }
 }

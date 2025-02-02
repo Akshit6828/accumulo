@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,12 +28,14 @@ import java.net.Socket;
 import java.net.SocketAddress;
 import java.nio.channels.spi.SelectorProvider;
 
-import org.apache.accumulo.core.util.HostAndPort;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.thrift.transport.TIOStreamTransport;
 import org.apache.thrift.transport.TTransport;
+import org.apache.thrift.transport.TTransportException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.net.HostAndPort;
 
 /**
  * A utility class for setting up a {@link TTransport} with various necessary configurations for
@@ -55,15 +57,12 @@ public class TTimeoutTransport {
    * Creates a Thrift TTransport to the given address with the given timeout. All created resources
    * are closed if an exception is thrown.
    *
-   * @param addr
-   *          The address to connect the client to
-   * @param timeoutMillis
-   *          The timeout in milliseconds for the connection
+   * @param addr The address to connect the client to
+   * @param timeoutMillis The timeout in milliseconds for the connection
    * @return A TTransport connected to the given <code>addr</code>
-   * @throws IOException
-   *           If the transport fails to be created/connected
+   * @throws TTransportException If the transport fails to be created/connected
    */
-  public static TTransport create(HostAndPort addr, long timeoutMillis) throws IOException {
+  public static TTransport create(HostAndPort addr, long timeoutMillis) throws TTransportException {
     return INSTANCE.createInternal(new InetSocketAddress(addr.getHost(), addr.getPort()),
         timeoutMillis);
   }
@@ -72,21 +71,19 @@ public class TTimeoutTransport {
    * Opens a socket to the given <code>addr</code>, configures the socket, and then creates a Thrift
    * transport using the socket.
    *
-   * @param addr
-   *          The address the socket should connect
-   * @param timeoutMillis
-   *          The socket timeout in milliseconds
+   * @param addr The address the socket should connect
+   * @param timeoutMillis The socket timeout in milliseconds
    * @return A TTransport instance to the given <code>addr</code>
-   * @throws IOException
-   *           If the Thrift client is failed to be connected/created
+   * @throws TTransportException If the Thrift client is failed to be connected/created
    */
-  TTransport createInternal(SocketAddress addr, long timeoutMillis) throws IOException {
+  TTransport createInternal(SocketAddress addr, long timeoutMillis) throws TTransportException {
     Socket socket = null;
     try {
-      socket = openSocket(addr);
+      socket = openSocket(addr, (int) timeoutMillis);
     } catch (IOException e) {
       // openSocket handles closing the Socket on error
-      throw e;
+      ThriftUtil.checkIOExceptionCause(e);
+      throw new TTransportException(e);
     }
 
     // Should be non-null
@@ -98,13 +95,23 @@ public class TTimeoutTransport {
       OutputStream output = wrapOutputStream(socket, timeoutMillis);
       return new TIOStreamTransport(input, output);
     } catch (IOException e) {
-      try {
-        socket.close();
-      } catch (IOException ioe) {
-        log.error("Failed to close socket after unsuccessful I/O stream setup", e);
-      }
-
+      closeSocket(socket, e);
+      ThriftUtil.checkIOExceptionCause(e);
+      throw new TTransportException(e);
+    } catch (TTransportException e) {
+      closeSocket(socket, e);
       throw e;
+    }
+  }
+
+  private void closeSocket(Socket socket, Exception e) {
+    try {
+      if (socket != null) {
+        socket.close();
+      }
+    } catch (IOException ioe) {
+      e.addSuppressed(ioe);
+      log.error("Failed to close socket after unsuccessful I/O stream setup", e);
     }
   }
 
@@ -121,26 +128,20 @@ public class TTimeoutTransport {
   /**
    * Opens and configures a {@link Socket} for Accumulo RPC.
    *
-   * @param addr
-   *          The address to connect the socket to
+   * @param addr The address to connect the socket to
+   * @param timeoutMillis The timeout in milliseconds to apply to the socket connect call
    * @return A socket connected to the given address, or null if the socket fails to connect
    */
-  Socket openSocket(SocketAddress addr) throws IOException {
+  Socket openSocket(SocketAddress addr, int timeoutMillis) throws IOException {
     Socket socket = null;
     try {
       socket = openSocketChannel();
       socket.setSoLinger(false, 0);
       socket.setTcpNoDelay(true);
-      socket.connect(addr);
+      socket.connect(addr, timeoutMillis);
       return socket;
     } catch (IOException e) {
-      try {
-        if (socket != null)
-          socket.close();
-      } catch (IOException ioe) {
-        log.error("Failed to close socket after unsuccessful open.", e);
-      }
-
+      closeSocket(socket, e);
       throw e;
     }
   }

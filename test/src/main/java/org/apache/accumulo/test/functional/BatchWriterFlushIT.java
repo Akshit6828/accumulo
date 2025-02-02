@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,12 +18,15 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
-import java.security.SecureRandom;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -31,11 +34,9 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.Random;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
@@ -51,7 +52,7 @@ import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.util.threads.ThreadPools;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.Iterators;
 
@@ -61,8 +62,8 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
   private static final int NUM_THREADS = 3;
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 90;
+  protected Duration defaultTimeout() {
+    return Duration.ofSeconds(90);
   }
 
   @Test
@@ -82,14 +83,14 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
     // should automatically flush after 2 seconds
     try (
         BatchWriter bw = client.createBatchWriter(tableName,
-            new BatchWriterConfig().setMaxLatency(1000, TimeUnit.MILLISECONDS));
+            new BatchWriterConfig().setMaxLatency(1000, MILLISECONDS));
         Scanner scanner = client.createScanner(tableName, Authorizations.EMPTY)) {
 
       Mutation m = new Mutation(new Text(String.format("r_%10d", 1)));
       m.put("cf", "cq", "1");
       bw.addMutation(m);
 
-      sleepUninterruptibly(500, TimeUnit.MILLISECONDS);
+      Thread.sleep(500);
 
       int count = Iterators.size(scanner.iterator());
 
@@ -97,7 +98,7 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
         throw new Exception("Flushed too soon");
       }
 
-      sleepUninterruptibly(1500, TimeUnit.MILLISECONDS);
+      Thread.sleep(1500);
 
       count = Iterators.size(scanner.iterator());
 
@@ -110,7 +111,6 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
   private void runFlushTest(AccumuloClient client, String tableName) throws Exception {
     BatchWriter bw = client.createBatchWriter(tableName);
     try (Scanner scanner = client.createScanner(tableName, Authorizations.EMPTY)) {
-      Random r = new SecureRandom();
 
       for (int i = 0; i < 4; i++) {
         for (int j = 0; j < NUM_TO_FLUSH; j++) {
@@ -126,19 +126,21 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
         // do a few random lookups into the data just flushed
 
         for (int k = 0; k < 10; k++) {
-          int rowToLookup = r.nextInt(NUM_TO_FLUSH) + i * NUM_TO_FLUSH;
+          int rowToLookup = RANDOM.get().nextInt(NUM_TO_FLUSH) + i * NUM_TO_FLUSH;
 
           scanner.setRange(new Range(new Text(String.format("r_%10d", rowToLookup))));
 
           Iterator<Entry<Key,Value>> iter = scanner.iterator();
 
-          if (!iter.hasNext())
+          if (!iter.hasNext()) {
             throw new Exception(" row " + rowToLookup + " not found after flush");
+          }
 
           Entry<Key,Value> entry = iter.next();
 
-          if (iter.hasNext())
+          if (iter.hasNext()) {
             throw new Exception("Scanner returned too much");
+          }
 
           verifyEntry(rowToLookup, entry);
         }
@@ -151,16 +153,18 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
         for (int j = 0; j < NUM_TO_FLUSH; j++) {
           int row = i * NUM_TO_FLUSH + j;
 
-          if (!iter.hasNext())
-            throw new Exception("Scan stopped permaturely at " + row);
+          if (!iter.hasNext()) {
+            throw new Exception("Scan stopped prematurely at " + row);
+          }
 
           Entry<Key,Value> entry = iter.next();
 
           verifyEntry(row, entry);
         }
 
-        if (iter.hasNext())
+        if (iter.hasNext()) {
           throw new Exception("Scanner returned too much");
+        }
 
       }
 
@@ -210,13 +214,13 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
         allMuts.add(muts);
       }
 
-      ThreadPoolExecutor threads =
-          ThreadPools.createFixedThreadPool(NUM_THREADS, "ClientThreads", false);
+      ThreadPoolExecutor threads = ThreadPools.getServerThreadPools()
+          .getPoolBuilder("batch.writer.client.flush").numCoreThreads(NUM_THREADS).build();
       threads.allowCoreThreadTimeOut(false);
       threads.prestartAllCoreThreads();
 
       BatchWriterConfig cfg = new BatchWriterConfig();
-      cfg.setMaxLatency(10, TimeUnit.SECONDS);
+      cfg.setMaxLatency(10, SECONDS);
       cfg.setMaxMemory(1 * 1024 * 1024);
       cfg.setMaxWriteThreads(NUM_THREADS);
       final BatchWriter bw = c.createBatchWriter(tableName, cfg);
@@ -236,7 +240,7 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
         });
       }
       threads.shutdown();
-      threads.awaitTermination(3, TimeUnit.MINUTES);
+      threads.awaitTermination(3, MINUTES);
       bw.close();
       try (Scanner scanner = c.createScanner(tableName, Authorizations.EMPTY)) {
         for (Entry<Key,Value> e : scanner) {
@@ -250,7 +254,7 @@ public class BatchWriterFlushIT extends AccumuloClusterHarness {
               break;
             }
           }
-          assertTrue("Mutation not found: " + m, found);
+          assertTrue(found, "Mutation not found: " + m);
         }
 
         for (int m = 0; m < NUM_THREADS; m++) {

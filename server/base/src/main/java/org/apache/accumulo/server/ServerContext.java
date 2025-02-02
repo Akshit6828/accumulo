@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,132 +19,174 @@
 package org.apache.accumulo.server;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Suppliers.memoize;
+import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.net.UnknownHostException;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
+import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.clientImpl.ClientContext;
+import org.apache.accumulo.core.clientImpl.ClientInfo;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.conf.SiteConfiguration;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory.ClassloaderType;
+import org.apache.accumulo.core.crypto.CryptoFactoryLoader;
+import org.apache.accumulo.core.data.InstanceId;
 import org.apache.accumulo.core.data.NamespaceId;
 import org.apache.accumulo.core.data.TableId;
+import org.apache.accumulo.core.fate.zookeeper.ZooUtil;
+import org.apache.accumulo.core.lock.ServiceLock;
 import org.apache.accumulo.core.metadata.schema.Ample;
+import org.apache.accumulo.core.metrics.MetricsInfo;
 import org.apache.accumulo.core.rpc.SslConnectionParams;
 import org.apache.accumulo.core.singletons.SingletonReservation;
-import org.apache.accumulo.core.spi.crypto.CryptoService;
-import org.apache.accumulo.fate.zookeeper.ZooCache;
-import org.apache.accumulo.fate.zookeeper.ZooReaderWriter;
+import org.apache.accumulo.core.spi.crypto.CryptoServiceFactory;
+import org.apache.accumulo.core.util.AddressUtil;
+import org.apache.accumulo.core.util.threads.ThreadPools;
+import org.apache.accumulo.core.util.threads.Threads;
 import org.apache.accumulo.server.conf.NamespaceConfiguration;
 import org.apache.accumulo.server.conf.ServerConfigurationFactory;
 import org.apache.accumulo.server.conf.TableConfiguration;
-import org.apache.accumulo.server.conf.ZooConfiguration;
+import org.apache.accumulo.server.conf.store.PropStore;
+import org.apache.accumulo.server.conf.store.impl.ZooPropStore;
 import org.apache.accumulo.server.fs.VolumeManager;
+import org.apache.accumulo.server.mem.LowMemoryDetector;
 import org.apache.accumulo.server.metadata.ServerAmpleImpl;
+import org.apache.accumulo.server.metrics.MetricsInfoImpl;
 import org.apache.accumulo.server.rpc.SaslServerConnectionParams;
 import org.apache.accumulo.server.rpc.ThriftServerType;
+import org.apache.accumulo.server.security.AuditedSecurityOperation;
+import org.apache.accumulo.server.security.SecurityOperation;
 import org.apache.accumulo.server.security.SecurityUtil;
 import org.apache.accumulo.server.security.delegation.AuthenticationTokenSecretManager;
 import org.apache.accumulo.server.tables.TableManager;
 import org.apache.accumulo.server.tablets.UniqueNameAllocator;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.zookeeper.KeeperException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Provides a server context for Accumulo server components that operate with the system credentials
  * and have access to the system files and configuration.
  */
 public class ServerContext extends ClientContext {
+  private static final Logger log = LoggerFactory.getLogger(ServerContext.class);
 
   private final ServerInfo info;
-  private final ZooReaderWriter zooReaderWriter;
-  private TableManager tableManager;
-  private UniqueNameAllocator nameAllocator;
-  private ServerConfigurationFactory serverConfFactory = null;
-  private DefaultConfiguration defaultConfig = null;
-  private AccumuloConfiguration systemConfig = null;
-  private AuthenticationTokenSecretManager secretManager;
-  private CryptoService cryptoService = null;
+  private final ServerDirs serverDirs;
+  private final Supplier<ZooPropStore> propStore;
+  private final Supplier<String> zkUserPath;
+
+  // lazily loaded resources, only loaded when needed
+  private final Supplier<TableManager> tableManager;
+  private final Supplier<UniqueNameAllocator> nameAllocator;
+  private final Supplier<ServerConfigurationFactory> serverConfFactory;
+  private final Supplier<AuthenticationTokenSecretManager> secretManager;
+  private final Supplier<ScheduledThreadPoolExecutor> sharedScheduledThreadPool;
+  private final Supplier<AuditedSecurityOperation> securityOperation;
+  private final Supplier<CryptoServiceFactory> cryptoFactorySupplier;
+  private final Supplier<LowMemoryDetector> lowMemoryDetector;
+  private final AtomicReference<ServiceLock> serverLock = new AtomicReference<>();
+  private final Supplier<MetricsInfo> metricsInfoSupplier;
 
   public ServerContext(SiteConfiguration siteConfig) {
-    this(new ServerInfo(siteConfig));
+    this(ServerInfo.fromServerConfig(siteConfig));
   }
 
   private ServerContext(ServerInfo info) {
-    super(SingletonReservation.noop(), info, info.getSiteConfiguration());
+    super(SingletonReservation.noop(), info, info.getSiteConfiguration(), Threads.UEH);
     this.info = info;
-    zooReaderWriter = new ZooReaderWriter(info.getSiteConfiguration());
+    serverDirs = info.getServerDirs();
+
+    // the PropStore shouldn't close the ZooKeeper, since ServerContext is responsible for that
+    @SuppressWarnings("resource")
+    var tmpPropStore = memoize(() -> ZooPropStore.initialize(getInstanceID(), getZooSession()));
+    propStore = tmpPropStore;
+    zkUserPath = memoize(() -> ZooUtil.getRoot(getInstanceID()) + Constants.ZUSERS);
+
+    tableManager = memoize(() -> new TableManager(this));
+    nameAllocator = memoize(() -> new UniqueNameAllocator(this));
+    serverConfFactory = memoize(() -> new ServerConfigurationFactory(this, getSiteConfiguration()));
+    secretManager = memoize(() -> new AuthenticationTokenSecretManager(getInstanceID(),
+        getConfiguration().getTimeInMillis(Property.GENERAL_DELEGATION_TOKEN_LIFETIME)));
+    cryptoFactorySupplier = memoize(() -> CryptoFactoryLoader.newInstance(getConfiguration()));
+    sharedScheduledThreadPool = memoize(() -> ThreadPools.getServerThreadPools()
+        .createGeneralScheduledExecutorService(getConfiguration()));
+    securityOperation =
+        memoize(() -> new AuditedSecurityOperation(this, SecurityOperation.getAuthorizor(this),
+            SecurityOperation.getAuthenticator(this), SecurityOperation.getPermHandler(this)));
+    lowMemoryDetector = memoize(() -> new LowMemoryDetector());
+    metricsInfoSupplier = memoize(() -> new MetricsInfoImpl(this));
   }
 
   /**
    * Used during initialization to set the instance name and ID.
    */
   public static ServerContext initialize(SiteConfiguration siteConfig, String instanceName,
-      String instanceID) {
-    return new ServerContext(new ServerInfo(siteConfig, instanceName, instanceID));
+      InstanceId instanceID) {
+    return new ServerContext(ServerInfo.initialize(siteConfig, instanceName, instanceID));
+  }
+
+  /**
+   * Used by server-side utilities that have a client configuration. The instance name is obtained
+   * from the client configuration, and the instanceId is looked up in ZooKeeper from the name.
+   */
+  public static ServerContext withClientInfo(SiteConfiguration siteConfig, ClientInfo info) {
+    return new ServerContext(ServerInfo.fromServerAndClientConfig(siteConfig, info));
   }
 
   /**
    * Override properties for testing
    */
-  public static ServerContext override(SiteConfiguration siteConfig, String instanceName,
+  public static ServerContext forTesting(SiteConfiguration siteConfig, String instanceName,
       String zooKeepers, int zkSessionTimeOut) {
     return new ServerContext(
-        new ServerInfo(siteConfig, instanceName, zooKeepers, zkSessionTimeOut));
-  }
-
-  @Override
-  public String getInstanceID() {
-    return info.getInstanceID();
-  }
-
-  /**
-   * Should only be called by the Tablet server
-   */
-  public synchronized void setupCrypto() throws CryptoService.CryptoException {
-    if (cryptoService != null) {
-      throw new CryptoService.CryptoException("Crypto Service " + cryptoService.getClass().getName()
-          + " already exists and cannot be setup again");
-    }
-
-    AccumuloConfiguration acuConf = getConfiguration();
-    cryptoService = CryptoServiceFactory.newInstance(acuConf, ClassloaderType.ACCUMULO);
+        ServerInfo.forTesting(siteConfig, instanceName, zooKeepers, zkSessionTimeOut));
   }
 
   public SiteConfiguration getSiteConfiguration() {
     return info.getSiteConfiguration();
   }
 
-  public synchronized ServerConfigurationFactory getServerConfFactory() {
-    if (serverConfFactory == null) {
-      serverConfFactory = new ServerConfigurationFactory(this, info.getSiteConfiguration());
-    }
-    return serverConfFactory;
-  }
-
   @Override
   public AccumuloConfiguration getConfiguration() {
-    if (systemConfig == null) {
-      ZooCache propCache = new ZooCache(getZooKeepers(), getZooKeepersSessionTimeOut());
-      systemConfig = new ZooConfiguration(this, propCache, getSiteConfiguration());
-    }
-    return systemConfig;
+    return serverConfFactory.get().getSystemConfiguration();
   }
 
   public TableConfiguration getTableConfiguration(TableId id) {
-    return getServerConfFactory().getTableConfiguration(id);
+    return serverConfFactory.get().getTableConfiguration(id);
   }
 
   public NamespaceConfiguration getNamespaceConfiguration(NamespaceId namespaceId) {
-    return getServerConfFactory().getNamespaceConfiguration(namespaceId);
+    return serverConfFactory.get().getNamespaceConfiguration(namespaceId);
   }
 
   public DefaultConfiguration getDefaultConfiguration() {
-    if (defaultConfig == null) {
-      defaultConfig = DefaultConfiguration.getInstance();
-    }
-    return defaultConfig;
+    return DefaultConfiguration.getInstance();
+  }
+
+  public ServerDirs getServerDirs() {
+    return serverDirs;
   }
 
   /**
@@ -153,7 +195,7 @@ public class ServerContext extends ClientContext {
    */
   // Should be private, but package-protected so EasyMock will work
   void enforceKerberosLogin() {
-    final AccumuloConfiguration conf = getServerConfFactory().getSiteConfiguration();
+    final AccumuloConfiguration conf = getSiteConfiguration();
     // Unwrap _HOST into the FQDN to make the kerberos principal we'll compare against
     final String kerberosPrincipal =
         SecurityUtil.getServerPrincipal(conf.get(Property.GENERAL_KERBEROS_PRINCIPAL));
@@ -163,7 +205,7 @@ public class ServerContext extends ClientContext {
       // currentUser() like KerberosToken
       loginUser = UserGroupInformation.getLoginUser();
     } catch (IOException e) {
-      throw new RuntimeException("Could not get login user", e);
+      throw new UncheckedIOException("Could not get login user", e);
     }
 
     checkArgument(loginUser.hasKerberosCredentials(), "Server does not have Kerberos credentials");
@@ -175,10 +217,6 @@ public class ServerContext extends ClientContext {
     return info.getVolumeManager();
   }
 
-  public ZooReaderWriter getZooReaderWriter() {
-    return zooReaderWriter;
-  }
-
   /**
    * Retrieve the SSL/TLS configuration for starting up a listening service
    */
@@ -188,11 +226,11 @@ public class ServerContext extends ClientContext {
 
   @Override
   public SaslServerConnectionParams getSaslParams() {
-    AccumuloConfiguration conf = getServerConfFactory().getSiteConfiguration();
+    AccumuloConfiguration conf = getSiteConfiguration();
     if (!conf.getBoolean(Property.INSTANCE_RPC_SASL_ENABLED)) {
       return null;
     }
-    return new SaslServerConnectionParams(conf, getCredentials().getToken(), secretManager);
+    return new SaslServerConnectionParams(conf, getCredentials().getToken(), getSecretManager());
   }
 
   /**
@@ -223,33 +261,20 @@ public class ServerContext extends ClientContext {
     }
   }
 
-  public void setSecretManager(AuthenticationTokenSecretManager secretManager) {
-    this.secretManager = secretManager;
-  }
-
   public AuthenticationTokenSecretManager getSecretManager() {
-    return secretManager;
+    return secretManager.get();
   }
 
-  public synchronized TableManager getTableManager() {
-    if (tableManager == null) {
-      tableManager = new TableManager(this);
-    }
-    return tableManager;
+  public TableManager getTableManager() {
+    return tableManager.get();
   }
 
-  public synchronized UniqueNameAllocator getUniqueNameAllocator() {
-    if (nameAllocator == null) {
-      nameAllocator = new UniqueNameAllocator(this);
-    }
-    return nameAllocator;
+  public UniqueNameAllocator getUniqueNameAllocator() {
+    return nameAllocator.get();
   }
 
-  public CryptoService getCryptoService() {
-    if (cryptoService == null) {
-      throw new CryptoService.CryptoException("Crypto service not initialized.");
-    }
-    return cryptoService;
+  public CryptoServiceFactory getCryptoFactory() {
+    return cryptoFactorySupplier.get();
   }
 
   @Override
@@ -257,4 +282,207 @@ public class ServerContext extends ClientContext {
     return new ServerAmpleImpl(this);
   }
 
+  public Set<String> getBaseUris() {
+    return serverDirs.getBaseUris();
+  }
+
+  public Map<Path,Path> getVolumeReplacements() {
+    return serverDirs.getVolumeReplacements();
+  }
+
+  public Set<String> getTablesDirs() {
+    return serverDirs.getTablesDirs();
+  }
+
+  public Set<String> getRecoveryDirs() {
+    return serverDirs.getRecoveryDirs();
+  }
+
+  /**
+   * Check to see if this version of Accumulo can run against or upgrade the passed in data version.
+   */
+  public static void ensureDataVersionCompatible(int dataVersion) {
+    if (!AccumuloDataVersion.CAN_RUN.contains(dataVersion)) {
+      throw new IllegalStateException("This version of accumulo (" + Constants.VERSION
+          + ") is not compatible with files stored using data version " + dataVersion
+          + ". Please upgrade from " + AccumuloDataVersion.oldestUpgradeableVersionName()
+          + " or later.");
+    }
+  }
+
+  public void waitForZookeeperAndHdfs() {
+    log.info("Attempting to talk to zookeeper");
+    while (true) {
+      try {
+        getZooSession().asReaderWriter().getChildren(Constants.ZROOT);
+        break;
+      } catch (InterruptedException | KeeperException ex) {
+        log.info("Waiting for accumulo to be initialized");
+        sleepUninterruptibly(1, SECONDS);
+      }
+    }
+    log.info("ZooKeeper connected and initialized, attempting to talk to HDFS");
+    long sleep = 1000;
+    int unknownHostTries = 3;
+    while (true) {
+      try {
+        if (getVolumeManager().isReady()) {
+          break;
+        }
+        log.warn("Waiting for the NameNode to leave safemode");
+      } catch (IOException ex) {
+        log.warn("Unable to connect to HDFS", ex);
+      } catch (IllegalArgumentException e) {
+        /* Unwrap the UnknownHostException so we can deal with it directly */
+        if (e.getCause() instanceof UnknownHostException) {
+          if (unknownHostTries > 0) {
+            log.warn("Unable to connect to HDFS, will retry. cause: ", e.getCause());
+            /*
+             * We need to make sure our sleep period is long enough to avoid getting a cached
+             * failure of the host lookup.
+             */
+            int ttl = AddressUtil.getAddressCacheNegativeTtl((UnknownHostException) e.getCause());
+            sleep = Math.max(sleep, (ttl + 1) * 1000L);
+          } else {
+            log.error("Unable to connect to HDFS and exceeded the maximum number of retries.", e);
+            throw e;
+          }
+          unknownHostTries--;
+        } else {
+          throw e;
+        }
+      }
+      log.info("Backing off due to failure; current sleep period is {} seconds", sleep / 1000.);
+      sleepUninterruptibly(sleep, TimeUnit.MILLISECONDS);
+      /* Back off to give transient failures more time to clear. */
+      sleep = Math.min(MINUTES.toMillis(1), sleep * 2);
+    }
+    log.info("Connected to HDFS");
+  }
+
+  /**
+   * Wait for ZK and hdfs, check data version and some properties, and start thread to monitor
+   * swappiness. Should only be called once during server start up.
+   */
+  public void init(String application) {
+    final AccumuloConfiguration conf = getConfiguration();
+
+    log.info("{} starting", application);
+    log.info("Instance {}", getInstanceID());
+    // It doesn't matter which Volume is used as they should all have the data version stored
+    int dataVersion = serverDirs.getAccumuloPersistentVersion(getVolumeManager().getFirst());
+    log.info("Data Version {}", dataVersion);
+    waitForZookeeperAndHdfs();
+
+    ensureDataVersionCompatible(dataVersion);
+
+    TreeMap<String,String> sortedProps = new TreeMap<>();
+    for (Map.Entry<String,String> entry : conf) {
+      sortedProps.put(entry.getKey(), entry.getValue());
+    }
+
+    for (Map.Entry<String,String> entry : sortedProps.entrySet()) {
+      String key = entry.getKey();
+      log.info("{} = {}", key, (Property.isSensitive(key) ? "<hidden>" : entry.getValue()));
+      Property prop = Property.getPropertyByKey(key);
+      if (prop != null && conf.isPropertySet(prop)) {
+        if (prop.isDeprecated()) {
+          Property replacedBy = prop.replacedBy();
+          if (replacedBy != null) {
+            log.warn("{} is deprecated, use {} instead.", prop.getKey(), replacedBy.getKey());
+          } else {
+            log.warn("{} is deprecated", prop.getKey());
+          }
+        }
+      }
+    }
+
+    monitorSwappiness();
+
+    // Encourage users to configure TLS
+    final String SSL = "SSL";
+    for (Property sslProtocolProperty : Arrays.asList(Property.RPC_SSL_CLIENT_PROTOCOL,
+        Property.RPC_SSL_ENABLED_PROTOCOLS, Property.MONITOR_SSL_INCLUDE_PROTOCOLS)) {
+      String value = conf.get(sslProtocolProperty);
+      if (value.contains(SSL)) {
+        log.warn("It is recommended that {} only allow TLS", sslProtocolProperty);
+      }
+    }
+  }
+
+  private void monitorSwappiness() {
+    ScheduledFuture<?> future = getScheduledExecutor().scheduleWithFixedDelay(() -> {
+      try {
+        String procFile = "/proc/sys/vm/swappiness";
+        File swappiness = new File(procFile);
+        if (swappiness.exists() && swappiness.canRead()) {
+          try (InputStream is = new FileInputStream(procFile)) {
+            byte[] buffer = new byte[10];
+            int bytes = is.read(buffer);
+            String setting = new String(buffer, 0, bytes, UTF_8);
+            setting = setting.trim();
+            if (bytes > 0 && Integer.parseInt(setting) > 10) {
+              log.warn("System swappiness setting is greater than ten ({})"
+                  + " which can cause time-sensitive operations to be delayed."
+                  + " Accumulo is time sensitive because it needs to maintain"
+                  + " distributed lock agreement.", setting);
+            }
+          }
+        }
+      } catch (Exception t) {
+        log.error("", t);
+      }
+    }, SECONDS.toMillis(1), MINUTES.toMillis(10), TimeUnit.MILLISECONDS);
+    ThreadPools.watchNonCriticalScheduledTask(future);
+  }
+
+  public ScheduledThreadPoolExecutor getScheduledExecutor() {
+    return sharedScheduledThreadPool.get();
+  }
+
+  public PropStore getPropStore() {
+    return propStore.get();
+  }
+
+  @Override
+  protected long getTransportPoolMaxAgeMillis() {
+    return getClientTimeoutInMillis();
+  }
+
+  public AuditedSecurityOperation getSecurityOperation() {
+    return securityOperation.get();
+  }
+
+  public String zkUserPath() {
+    return zkUserPath.get();
+  }
+
+  public LowMemoryDetector getLowMemoryDetector() {
+    return lowMemoryDetector.get();
+  }
+
+  public void setServiceLock(ServiceLock lock) {
+    if (!serverLock.compareAndSet(null, lock)) {
+      throw new IllegalStateException("ServiceLock already set on ServerContext");
+    }
+  }
+
+  public ServiceLock getServiceLock() {
+    return serverLock.get();
+  }
+
+  /** Intended to be called from MiniAccumuloClusterImpl only as can be restarted **/
+  public void clearServiceLock() {
+    serverLock.set(null);
+  }
+
+  public MetricsInfo getMetricsInfo() {
+    return metricsInfoSupplier.get();
+  }
+
+  @Override
+  public void close() {
+    getMetricsInfo().close();
+    super.close();
+  }
 }

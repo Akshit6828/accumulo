@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,9 +19,9 @@
 package org.apache.accumulo.core.iterators.user;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -34,9 +34,9 @@ import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.DefaultIteratorEnvironment;
-import org.apache.accumulo.core.iterators.SortedMapIterator;
+import org.apache.accumulo.core.iteratorsImpl.system.SortedMapIterator;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class RegExFilterTest {
 
@@ -223,10 +223,11 @@ public class RegExFilterTest {
     rei.deepCopy(new DefaultIteratorEnvironment());
 
     // -----------------------------------------------------
-    String multiByteText = new String("\u6d67" + "\u6F68" + "\u7067");
-    String multiByteRegex = new String(".*" + "\u6F68" + ".*");
+    String multiByteText = new String("\u6d67\u6F68\u7067");
+    String multiByteRegex = new String(".*\u6F68.*");
 
-    Key k4 = new Key("boo4".getBytes(), "hoo".getBytes(), "20080203".getBytes(), "".getBytes(), 1L);
+    Key k4 = new Key("boo4".getBytes(UTF_8), "hoo".getBytes(UTF_8), "20080203".getBytes(UTF_8),
+        "".getBytes(UTF_8), 1L);
     Value inVal = new Value(multiByteText);
     tm.put(k4, inVal);
 
@@ -248,7 +249,7 @@ public class RegExFilterTest {
     TreeMap<Key,Value> tm = new TreeMap<>();
 
     String s1 = "first", s2 = "second";
-    byte[] b1 = s1.getBytes(), b2 = s2.getBytes(), ball;
+    byte[] b1 = s1.getBytes(UTF_8), b2 = s2.getBytes(UTF_8), ball;
     ball = new byte[b1.length + b2.length + 1];
     System.arraycopy(b1, 0, ball, 0, b1.length);
     ball[b1.length] = (byte) 0;
@@ -265,6 +266,6 @@ public class RegExFilterTest {
     filter.init(new SortedMapIterator(tm), is.getOptions(), null);
     filter.seek(new Range(), EMPTY_COL_FAMS, false);
 
-    assertTrue("iterator couldn't find a match when it should have", filter.hasTop());
+    assertTrue(filter.hasTop(), "iterator couldn't find a match when it should have");
   }
 }

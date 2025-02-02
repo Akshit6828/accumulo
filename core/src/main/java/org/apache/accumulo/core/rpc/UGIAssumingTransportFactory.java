@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -24,6 +24,7 @@ import java.security.PrivilegedAction;
 
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.thrift.transport.TTransport;
+import org.apache.thrift.transport.TTransportException;
 import org.apache.thrift.transport.TTransportFactory;
 
 /**
@@ -47,6 +48,12 @@ public class UGIAssumingTransportFactory extends TTransportFactory {
 
   @Override
   public TTransport getTransport(final TTransport trans) {
-    return ugi.doAs((PrivilegedAction<TTransport>) () -> wrapped.getTransport(trans));
+    return ugi.doAs((PrivilegedAction<TTransport>) () -> {
+      try {
+        return wrapped.getTransport(trans);
+      } catch (TTransportException e) {
+        throw new IllegalStateException(e);
+      }
+    });
   }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,14 +18,17 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Collection;
-import java.util.Random;
+import java.util.SortedMap;
 import java.util.SortedSet;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 
@@ -36,6 +39,7 @@ import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.TableExistsException;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.admin.NewTableConfiguration;
+import org.apache.accumulo.core.client.admin.TabletMergeability;
 import org.apache.accumulo.core.util.TextUtil;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.accumulo.minicluster.MemoryUnit;
@@ -44,16 +48,19 @@ import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.io.Text;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class CreateInitialSplitsIT extends AccumuloClusterHarness {
 
   private AccumuloClient client;
   private String tableName;
+
+  @Override
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(2);
+  }
 
   @Override
   public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration conf) {
@@ -63,17 +70,12 @@ public class CreateInitialSplitsIT extends AccumuloClusterHarness {
     conf.set("fs.file.impl", RawLocalFileSystem.class.getName());
   }
 
-  @Override
-  protected int defaultTimeoutSeconds() {
-    return 2 * 60;
-  }
-
-  @Before
+  @BeforeEach
   public void setupInitialSplits() {
     client = Accumulo.newClient().from(getClientProps()).build();
   }
 
-  @After
+  @AfterEach
   public void closeClient() {
     client.close();
   }
@@ -107,6 +109,36 @@ public class CreateInitialSplitsIT extends AccumuloClusterHarness {
       AccumuloException, TableNotFoundException {
     tableName = getUniqueNames(1)[0];
     runTest(generateNonBinarySplits(3000, 32));
+  }
+
+  @Test
+  public void testCreateInitialSplitsWithMergeability() throws TableExistsException,
+      AccumuloSecurityException, AccumuloException, TableNotFoundException {
+    tableName = getUniqueNames(1)[0];
+
+    SortedMap<Text,TabletMergeability> splits = new TreeMap<>();
+    var splitDuration = Duration.ofSeconds(10);
+    for (int i = 0; i < 10; i++) {
+      splits.put(encode(getRandomText(32), false), TabletMergeability.after(splitDuration));
+    }
+
+    NewTableConfiguration ntc = new NewTableConfiguration().withSplits(splits);
+    assertFalse(client.tableOperations().exists(tableName));
+    client.tableOperations().create(tableName, ntc);
+    assertTrue(client.tableOperations().exists(tableName));
+    Collection<Text> createdSplits = client.tableOperations().listSplits(tableName);
+    assertEquals(splits.keySet(), new TreeSet<>(createdSplits));
+
+    var tableId = getServerContext().getTableId(tableName);
+    try (var tablets = getServerContext().getAmple().readTablets().forTable(tableId).build()) {
+      // default tablet (null end row) should have a default TabletMergeability of never for user
+      // created tablets
+      assertTrue(tablets.stream()
+          .anyMatch(tm -> tm.getEndRow() == null && tm.getTabletMergeability().isNever()));
+      // other splits should be created with a duration of 10 seconds
+      assertEquals(10, tablets.stream().filter(tm -> tm.getTabletMergeability().getDelay()
+          .map(delay -> delay.equals(splitDuration)).orElse(false)).count());
+    }
   }
 
   @Test
@@ -207,15 +239,12 @@ public class CreateInitialSplitsIT extends AccumuloClusterHarness {
     return generateBinarySplits(numItems, len, false);
   }
 
-  @SuppressFBWarnings(value = "PREDICTABLE_RANDOM",
-      justification = "predictable random is okay for testing")
   private SortedSet<Text> generateBinarySplits(final int numItems, final int len,
       final boolean useB64) {
     SortedSet<Text> splits = new TreeSet<>();
-    Random rand = new Random();
     for (int i = 0; i < numItems; i++) {
       byte[] split = new byte[len];
-      rand.nextBytes(split);
+      RANDOM.get().nextBytes(split);
       splits.add(encode(new Text(split), useB64));
     }
     return splits;
@@ -230,8 +259,9 @@ public class CreateInitialSplitsIT extends AccumuloClusterHarness {
 
   private Text getRandomText(final int len) {
     int desiredLen = len;
-    if (len > 32)
+    if (len > 32) {
       desiredLen = 32;
+    }
     return new Text(
         String.valueOf(UUID.randomUUID()).replaceAll("-", "").substring(0, desiredLen - 1));
   }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -30,25 +30,14 @@ public class BulkImport {
 
   // Variable names become JSON key
   public List<BulkImportInformation> bulkImport = new ArrayList<>();
-  public List<TabletServerBulkImportInformation> tabletServerBulkImport = new ArrayList<>();
 
   /**
    * Adds a new bulk import to the array
    *
-   * @param bulkImport
-   *          new bulk import to add
+   * @param bulkImport new bulk import to add
    */
   public void addBulkImport(BulkImportInformation bulkImport) {
     this.bulkImport.add(bulkImport);
   }
 
-  /**
-   * Adds a new tserver bulk import to the array
-   *
-   * @param tabletServerBulkImport
-   *          new tserver bulk import to add
-   */
-  public void addTabletServerBulkImport(TabletServerBulkImportInformation tabletServerBulkImport) {
-    this.tabletServerBulkImport.add(tabletServerBulkImport);
-  }
 }

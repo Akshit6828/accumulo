@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -30,8 +30,7 @@ import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.RootTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.TabletColumnFamily;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.util.TextUtil;
@@ -64,14 +63,16 @@ public class GetSplitsCommand extends Command {
     try (PrintLine p =
         outputFile == null ? new PrintShell(shellState.getReader()) : new PrintFile(outputFile)) {
       if (verbose) {
-        String systemTableToCheck =
-            MetadataTable.NAME.equals(tableName) ? RootTable.NAME : MetadataTable.NAME;
+        String systemTableToCheck = AccumuloTable.METADATA.tableName().equals(tableName)
+            ? AccumuloTable.ROOT.tableName() : AccumuloTable.METADATA.tableName();
         final Scanner scanner =
             shellState.getAccumuloClient().createScanner(systemTableToCheck, Authorizations.EMPTY);
         TabletColumnFamily.PREV_ROW_COLUMN.fetch(scanner);
         final Text start =
             new Text(shellState.getAccumuloClient().tableOperations().tableIdMap().get(tableName));
         final Text end = new Text(start);
+        // do not append the ';' until the end value above is assigned.
+        start.append(new byte[] {';'}, 0, 1);
         end.append(new byte[] {'<'}, 0, 1);
         scanner.setRange(new Range(start, end));
         for (final Entry<Key,Value> next : scanner) {

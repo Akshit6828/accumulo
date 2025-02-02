@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -32,7 +32,7 @@ import java.util.Map.Entry;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.Property;
-import org.apache.accumulo.core.tabletserver.thrift.TSamplerConfiguration;
+import org.apache.accumulo.core.tabletscan.thrift.TSamplerConfiguration;
 import org.apache.accumulo.core.util.Pair;
 import org.apache.hadoop.io.Writable;
 
@@ -173,15 +173,17 @@ public class SamplerConfigurationImpl implements Writable {
   }
 
   public static TSamplerConfiguration toThrift(SamplerConfiguration samplerConfig) {
-    if (samplerConfig == null)
+    if (samplerConfig == null) {
       return null;
+    }
     return new TSamplerConfiguration(samplerConfig.getSamplerClassName(),
         samplerConfig.getOptions());
   }
 
   public static SamplerConfiguration fromThrift(TSamplerConfiguration tsc) {
-    if (tsc == null)
+    if (tsc == null) {
       return null;
+    }
     return new SamplerConfiguration(tsc.getClassName()).setOptions(tsc.getOptions());
   }
 

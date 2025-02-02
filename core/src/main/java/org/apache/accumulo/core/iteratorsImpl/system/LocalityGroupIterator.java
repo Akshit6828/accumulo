@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -64,8 +65,8 @@ public class LocalityGroupIterator extends HeapIterator implements Interruptible
       return iterator;
     }
 
-    protected boolean isDefaultLocalityGroup;
-    protected Map<ByteSequence,MutableLong> columnFamilies;
+    protected final boolean isDefaultLocalityGroup;
+    protected final Map<ByteSequence,MutableLong> columnFamilies;
     private InterruptibleIterator iterator;
   }
 
@@ -145,44 +146,38 @@ public class LocalityGroupIterator extends HeapIterator implements Interruptible
    * RFile mechanisms). This method will find the locality groups to use in the
    * LocalityGroupContext, and will seek those groups.
    *
-   * @param hiter
-   *          The heap iterator
-   * @param lgContext
-   *          The locality groups
-   * @param range
-   *          The range to seek
-   * @param columnFamilies
-   *          The column fams to seek
-   * @param inclusive
-   *          The inclusiveness of the column fams
+   * @param hiter The heap iterator
+   * @param lgContext The locality groups
+   * @param range The range to seek
+   * @param columnFamilies The column fams to seek
+   * @param inclusive The inclusiveness of the column fams
    * @return The locality groups seeked
-   * @throws IOException
-   *           thrown if an locality group seek fails
+   * @throws IOException thrown if an locality group seek fails
    */
   static final Collection<LocalityGroup> _seek(HeapIterator hiter, LocalityGroupContext lgContext,
       Range range, Collection<ByteSequence> columnFamilies, boolean inclusive) throws IOException {
     hiter.clear();
 
-    Set<ByteSequence> cfSet;
-    if (columnFamilies.isEmpty()) {
-      cfSet = Collections.emptySet();
-    } else {
-      if (columnFamilies instanceof Set<?>) {
-        cfSet = (Set<ByteSequence>) columnFamilies;
-      } else {
-        cfSet = new HashSet<>();
-        cfSet.addAll(columnFamilies);
-      }
-    }
+    final Set<ByteSequence> cfSet = getCfSet(columnFamilies);
 
     // determine the set of groups to use
-    Collection<LocalityGroup> groups = Collections.emptyList();
+    final Collection<LocalityGroup> groups = getLocalityGroups(lgContext, inclusive, cfSet);
 
+    for (LocalityGroup lgr : groups) {
+      lgr.getIterator().seek(range, EMPTY_CF_SET, false);
+      hiter.addSource(lgr.getIterator());
+    }
+
+    return groups;
+  }
+
+  private static Collection<LocalityGroup> getLocalityGroups(LocalityGroupContext lgContext,
+      boolean inclusive, Set<ByteSequence> cfSet) {
+
+    final Collection<LocalityGroup> groups;
     // if no column families specified, then include all groups unless !inclusive
     if (cfSet.isEmpty()) {
-      if (!inclusive) {
-        groups = lgContext.groups;
-      }
+      groups = inclusive ? List.of() : lgContext.groups;
     } else {
       groups = new HashSet<>();
 
@@ -207,54 +202,45 @@ public class LocalityGroupIterator extends HeapIterator implements Interruptible
        * other
        */
       if (!inclusive) {
-        for (Entry<ByteSequence,LocalityGroup> entry : lgContext.groupByCf.entrySet()) {
-          if (!cfSet.contains(entry.getKey())) {
-            groups.add(entry.getValue());
-          }
-        }
+        lgContext.groupByCf.entrySet().stream().filter(entry -> !cfSet.contains(entry.getKey()))
+            .map(Entry::getValue).forEach(groups::add);
       } else if (lgContext.groupByCf.size() <= cfSet.size()) {
-        for (Entry<ByteSequence,LocalityGroup> entry : lgContext.groupByCf.entrySet()) {
-          if (cfSet.contains(entry.getKey())) {
-            groups.add(entry.getValue());
-          }
-        }
+        lgContext.groupByCf.entrySet().stream().filter(entry -> cfSet.contains(entry.getKey()))
+            .map(Entry::getValue).forEach(groups::add);
       } else {
-        for (ByteSequence cf : cfSet) {
-          LocalityGroup group = lgContext.groupByCf.get(cf);
-          if (group != null) {
-            groups.add(group);
-          }
-        }
+        cfSet.stream().map(lgContext.groupByCf::get).filter(Objects::nonNull).forEach(groups::add);
       }
     }
 
-    for (LocalityGroup lgr : groups) {
-      lgr.getIterator().seek(range, EMPTY_CF_SET, false);
-      hiter.addSource(lgr.getIterator());
-    }
-
     return groups;
+  }
+
+  private static Set<ByteSequence> getCfSet(Collection<ByteSequence> columnFamilies) {
+    final Set<ByteSequence> cfSet;
+    if (columnFamilies.isEmpty()) {
+      cfSet = Collections.emptySet();
+    } else {
+      if (columnFamilies instanceof Set<?>) {
+        cfSet = (Set<ByteSequence>) columnFamilies;
+      } else {
+        cfSet = Set.copyOf(columnFamilies);
+      }
+    }
+    return cfSet;
   }
 
   /**
    * This seek method will reuse the supplied LocalityGroupSeekCache if it can. Otherwise it will
    * delegate to the _seek method.
    *
-   * @param hiter
-   *          The heap iterator
-   * @param lgContext
-   *          The locality groups
-   * @param range
-   *          The range to seek
-   * @param columnFamilies
-   *          The column fams to seek
-   * @param inclusive
-   *          The inclusiveness of the column fams
-   * @param lgSeekCache
-   *          A cache returned by the previous call to this method
+   * @param hiter The heap iterator
+   * @param lgContext The locality groups
+   * @param range The range to seek
+   * @param columnFamilies The column fams to seek
+   * @param inclusive The inclusiveness of the column fams
+   * @param lgSeekCache A cache returned by the previous call to this method
    * @return A cache for this seek call
-   * @throws IOException
-   *           thrown if an locality group seek fails
+   * @throws IOException thrown if an locality group seek fails
    */
   public static LocalityGroupSeekCache seek(HeapIterator hiter, LocalityGroupContext lgContext,
       Range range, Collection<ByteSequence> columnFamilies, boolean inclusive,

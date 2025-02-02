@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,22 +18,30 @@
  */
 package org.apache.accumulo.core.spi.fs;
 
-import java.security.SecureRandom;
-import java.util.Random;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+
 import java.util.Set;
 
 /**
+ * A {@link VolumeChooser} that selects a volume at random from the list of provided volumes.
+ *
  * @since 2.1.0
  */
 public class RandomVolumeChooser implements VolumeChooser {
-  protected final Random random = new SecureRandom();
 
+  /**
+   * Selects a volume at random from the provided set of volumes. The environment scope is not
+   * utilized.
+   */
   @Override
   public String choose(VolumeChooserEnvironment env, Set<String> options) {
     String[] optionsArray = options.toArray(new String[0]);
-    return optionsArray[random.nextInt(optionsArray.length)];
+    return optionsArray[RANDOM.get().nextInt(optionsArray.length)];
   }
 
+  /**
+   * @return same set of volume options that were originally provided.
+   */
   @Override
   public Set<String> choosable(VolumeChooserEnvironment env, Set<String> options) {
     return options;

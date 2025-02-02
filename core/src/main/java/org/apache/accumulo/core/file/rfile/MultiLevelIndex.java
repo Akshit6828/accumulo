@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,6 +28,7 @@ import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,7 +53,7 @@ public class MultiLevelIndex {
     private long offset;
     private long compressedSize;
     private long rawSize;
-    private boolean newFormat;
+    private final boolean newFormat;
 
     IndexEntry(Key k, int e, long offset, long compressedSize, long rawSize) {
       this.key = k;
@@ -121,8 +122,9 @@ public class MultiLevelIndex {
 
     @Override
     public boolean equals(Object o) {
-      if (o instanceof IndexEntry)
+      if (o instanceof IndexEntry) {
         return compareTo((IndexEntry) o) == 0;
+      }
       return false;
     }
 
@@ -138,8 +140,8 @@ public class MultiLevelIndex {
     protected int[] offsets;
     protected byte[] data;
 
-    protected SeekableByteArrayInputStream sbais;
-    protected DataInputStream dis;
+    protected final SeekableByteArrayInputStream sbais;
+    protected final DataInputStream dis;
     protected int offsetsOffset;
     protected int indexOffset;
     protected int numOffsets;
@@ -189,7 +191,7 @@ public class MultiLevelIndex {
         sbais.seek(indexOffset + offset);
         return newValue();
       } catch (IOException ioe) {
-        throw new RuntimeException(ioe);
+        throw new UncheckedIOException(ioe);
       }
     }
 
@@ -207,7 +209,7 @@ public class MultiLevelIndex {
   // a list that deserializes index entries on demand
   private static class SerializedIndex extends SerializedIndexBase<IndexEntry> {
 
-    private boolean newFormat;
+    private final boolean newFormat;
 
     SerializedIndex(int[] offsets, byte[] data, boolean newFormat) {
       super(offsets, data);
@@ -342,8 +344,9 @@ public class MultiLevelIndex {
           numOffsets = in.readInt();
           offsetsArray = new int[numOffsets];
 
-          for (int i = 0; i < numOffsets; i++)
+          for (int i = 0; i < numOffsets; i++) {
             offsetsArray[i] = in.readInt();
+          }
 
           indexSize = in.readInt();
           data = new byte[indexSize];
@@ -397,7 +400,7 @@ public class MultiLevelIndex {
         offsetsArray = offsets;
         newFormat = false;
       } else {
-        throw new RuntimeException("Unexpected version " + version);
+        throw new IllegalStateException("Unexpected version " + version);
       }
 
     }
@@ -449,7 +452,7 @@ public class MultiLevelIndex {
    */
   public static class BufferedWriter {
 
-    private Writer writer;
+    private final Writer writer;
     private DataOutputStream buffer;
     private int buffered;
     private ByteArrayOutputStream baos;
@@ -501,15 +504,15 @@ public class MultiLevelIndex {
   }
 
   public static class Writer {
-    private int threshold;
+    private final int threshold;
 
-    private ArrayList<IndexBlock> levels;
+    private final ArrayList<IndexBlock> levels;
 
     private int totalAdded;
 
     private boolean addedLast = false;
 
-    private BCFile.Writer blockFileWriter;
+    private final BCFile.Writer blockFileWriter;
 
     Writer(BCFile.Writer blockFileWriter, int maxBlockSize) {
       this.blockFileWriter = blockFileWriter;
@@ -530,8 +533,9 @@ public class MultiLevelIndex {
 
     private void flush(int level, Key lastKey, boolean last) throws IOException {
 
-      if (last && level == levels.size() - 1)
+      if (last && level == levels.size() - 1) {
         return;
+      }
 
       IndexBlock iblock = levels.get(level);
       if ((iblock.getSize() > threshold && iblock.offsets.size() > 1) || last) {
@@ -543,10 +547,11 @@ public class MultiLevelIndex {
         add(level + 1, lastKey, 0, out.getStartPos(), out.getCompressedSize(), out.getRawSize());
         flush(level + 1, lastKey, last);
 
-        if (last)
+        if (last) {
           levels.set(level, null);
-        else
+        } else {
           levels.set(level, new IndexBlock(level, totalAdded));
+        }
       }
     }
 
@@ -559,8 +564,9 @@ public class MultiLevelIndex {
 
     public void addLast(Key key, int data, long offset, long compressedSize, long rawSize)
         throws IOException {
-      if (addedLast)
+      if (addedLast) {
         throw new IllegalStateException("already added last");
+      }
 
       totalAdded++;
       add(0, key, data, offset, compressedSize, rawSize);
@@ -570,8 +576,9 @@ public class MultiLevelIndex {
     }
 
     public void close(DataOutput out) throws IOException {
-      if (totalAdded > 0 && !addedLast)
+      if (totalAdded > 0 && !addedLast) {
         throw new IllegalStateException("did not call addLast");
+      }
 
       out.writeInt(totalAdded);
       // save root node
@@ -586,14 +593,14 @@ public class MultiLevelIndex {
 
   public static class Reader {
     private IndexBlock rootBlock;
-    private CachableBlockFile.Reader blockStore;
-    private int version;
+    private final CachableBlockFile.Reader blockStore;
+    private final int version;
     private int size;
 
     public class Node {
 
-      private Node parent;
-      private IndexBlock indexBlock;
+      private final Node parent;
+      private final IndexBlock indexBlock;
       private int currentPos;
 
       Node(Node parent, IndexBlock iBlock) {
@@ -610,12 +617,14 @@ public class MultiLevelIndex {
         int pos =
             Collections.binarySearch(indexBlock.getKeyIndex(), key, Comparator.naturalOrder());
 
-        if (pos < 0)
+        if (pos < 0) {
           pos = (pos * -1) - 1;
+        }
 
         if (pos == indexBlock.getIndex().size()) {
-          if (parent != null)
+          if (parent != null) {
             throw new IllegalStateException();
+          }
           this.currentPos = pos;
           return this;
         }
@@ -633,8 +642,9 @@ public class MultiLevelIndex {
 
       private Node getLast() throws IOException {
         currentPos = indexBlock.getIndex().size() - 1;
-        if (indexBlock.getLevel() == 0)
+        if (indexBlock.getLevel() == 0) {
           return this;
+        }
 
         IndexEntry ie = indexBlock.getIndex().get(currentPos);
         Node child = new Node(this, getIndexBlock(ie));
@@ -643,8 +653,9 @@ public class MultiLevelIndex {
 
       private Node getFirst() throws IOException {
         currentPos = 0;
-        if (indexBlock.getLevel() == 0)
+        if (indexBlock.getLevel() == 0) {
           return this;
+        }
 
         IndexEntry ie = indexBlock.getIndex().get(currentPos);
         Node child = new Node(this, getIndexBlock(ie));
@@ -652,8 +663,9 @@ public class MultiLevelIndex {
       }
 
       private Node getPrevious() throws IOException {
-        if (currentPos == 0)
+        if (currentPos == 0) {
           return parent.getPrevious();
+        }
 
         currentPos--;
 
@@ -664,8 +676,9 @@ public class MultiLevelIndex {
       }
 
       private Node getNext() throws IOException {
-        if (currentPos == indexBlock.getIndex().size() - 1)
+        if (currentPos == indexBlock.getIndex().size() - 1) {
           return parent.getNext();
+        }
 
         currentPos++;
 
@@ -693,7 +706,7 @@ public class MultiLevelIndex {
         try {
           return node.getPreviousNode();
         } catch (IOException e) {
-          throw new RuntimeException(e);
+          throw new UncheckedIOException(e);
         }
       }
 
@@ -701,7 +714,7 @@ public class MultiLevelIndex {
         try {
           return node.getNextNode();
         } catch (IOException e) {
-          throw new RuntimeException(e);
+          throw new UncheckedIOException(e);
         }
       }
 
@@ -716,8 +729,9 @@ public class MultiLevelIndex {
 
       @Override
       public boolean hasNext() {
-        if (node == null)
+        if (node == null) {
           return false;
+        }
 
         if (liter.hasNext()) {
           return true;
@@ -751,8 +765,9 @@ public class MultiLevelIndex {
 
       @Override
       public boolean hasPrevious() {
-        if (node == null)
+        if (node == null) {
           return false;
+        }
 
         if (liter.hasPrevious()) {
           return true;
@@ -843,12 +858,14 @@ public class MultiLevelIndex {
     private void getIndexInfo(IndexBlock ib, Map<Integer,Long> sizesByLevel,
         Map<Integer,Long> countsByLevel) throws IOException {
       Long size = sizesByLevel.get(ib.getLevel());
-      if (size == null)
+      if (size == null) {
         size = 0L;
+      }
 
       Long count = countsByLevel.get(ib.getLevel());
-      if (count == null)
+      if (count == null) {
         count = 0L;
+      }
 
       SerializedIndex index = ib.getIndex();
       size += index.sizeInBytes();

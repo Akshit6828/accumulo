@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,7 +20,6 @@ namespace java org.apache.accumulo.core.gc.thrift
 namespace cpp org.apache.accumulo.core.gc.thrift
 
 include "security.thrift"
-include "trace.thrift"
 include "client.thrift"
 
 struct GcCycleStats {
@@ -30,6 +29,7 @@ struct GcCycleStats {
   4:i64 inUse
   5:i64 deleted
   6:i64 errors
+  7:i64 bulks
 }
 
 struct GCStatus {
@@ -42,7 +42,7 @@ struct GCStatus {
 service GCMonitorService {
 
   GCStatus getStatus(
-    2:trace.TInfo tinfo
+    2:client.TInfo tinfo
     1:security.TCredentials credentials
   ) throws (
     1:client.ThriftSecurityException sec

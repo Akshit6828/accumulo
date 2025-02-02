@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigInteger;
 
 import org.apache.accumulo.core.clientImpl.lexicoder.FixedByteArrayOutputStream;
@@ -47,8 +48,9 @@ public class BigIntegerLexicoder extends AbstractLexicoder<BigInteger> {
       bytes[0] = (byte) (0x80 ^ bytes[0]);
 
       int len = bytes.length;
-      if (v.signum() < 0)
+      if (v.signum() < 0) {
         len = -len;
+      }
 
       len = len ^ 0x80000000;
 
@@ -58,7 +60,7 @@ public class BigIntegerLexicoder extends AbstractLexicoder<BigInteger> {
 
       return ret;
     } catch (IOException ioe) {
-      throw new RuntimeException(ioe);
+      throw new UncheckedIOException(ioe);
     }
 
   }
@@ -86,7 +88,7 @@ public class BigIntegerLexicoder extends AbstractLexicoder<BigInteger> {
 
       return new BigInteger(bytes);
     } catch (IOException ioe) {
-      throw new RuntimeException(ioe);
+      throw new UncheckedIOException(ioe);
     }
   }
 

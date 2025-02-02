@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,6 +19,7 @@
 package org.apache.accumulo.core.iterators.user;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Collection;
 import java.util.Map;
 
@@ -60,6 +61,7 @@ public abstract class RowFilter extends WrappingIterator {
   private boolean inclusive;
   private Range range;
   private boolean hasTop;
+  private Map<String,String> options;
 
   private static class RowIterator extends WrappingIterator {
     private Range rowRange;
@@ -97,8 +99,9 @@ public abstract class RowFilter extends WrappingIterator {
     while (source.hasTop()) {
       Text row = source.getTopKey().getRow();
 
-      if (currentRow != null && currentRow.equals(row))
+      if (currentRow != null && currentRow.equals(row)) {
         break;
+      }
 
       Range rowRange = new Range(row);
       decisionIterator.setRow(rowRange);
@@ -118,10 +121,11 @@ public abstract class RowFilter extends WrappingIterator {
         if (source.hasTop() && source.getTopKey().getRow().equals(row)) {
           Range nextRow = new Range(row, false, null, false);
           nextRow = range.clip(nextRow, true);
-          if (nextRow == null)
+          if (nextRow == null) {
             hasTop = false;
-          else
+          } else {
             source.seek(nextRow, columnFamilies, inclusive);
+          }
         }
       }
     }
@@ -131,12 +135,11 @@ public abstract class RowFilter extends WrappingIterator {
    * Implementation should return false to suppress a row.
    *
    *
-   * @param rowIterator
-   *          - An iterator over the row. This iterator is confined to the row. Seeking past the end
-   *          of the row will return no data. Seeking before the row will always set top to the
-   *          first column in the current row. By default this iterator will only see the columns
-   *          the parent was seeked with. To see more columns reseek this iterator with those
-   *          columns.
+   * @param rowIterator - An iterator over the row. This iterator is confined to the row. Seeking
+   *        past the end of the row will return no data. Seeking before the row will always set top
+   *        to the first column in the current row. By default this iterator will only see the
+   *        columns the parent was seeked with. To see more columns reseek this iterator with those
+   *        columns.
    * @return false if a row should be suppressed, otherwise true.
    */
   public abstract boolean acceptRow(SortedKeyValueIterator<Key,Value> rowIterator)
@@ -147,6 +150,7 @@ public abstract class RowFilter extends WrappingIterator {
       IteratorEnvironment env) throws IOException {
     super.init(source, options, env);
     this.decisionIterator = new RowIterator(source.deepCopy(env));
+    this.options = Map.copyOf(options);
   }
 
   @Override
@@ -154,10 +158,12 @@ public abstract class RowFilter extends WrappingIterator {
     RowFilter newInstance;
     try {
       newInstance = getClass().getDeclaredConstructor().newInstance();
-    } catch (Exception e) {
-      throw new RuntimeException(e);
+      newInstance.init(getSource().deepCopy(env), options, env);
+    } catch (ReflectiveOperationException e) {
+      throw new IllegalStateException(e);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
     }
-    newInstance.setSource(getSource().deepCopy(env));
     newInstance.decisionIterator = new RowIterator(getSource().deepCopy(env));
     return newInstance;
   }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,14 +18,14 @@
  */
 package org.apache.accumulo.manager.tableOps.namespace.delete;
 
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.clientImpl.thrift.ThriftSecurityException;
 import org.apache.accumulo.core.data.NamespaceId;
-import org.apache.accumulo.fate.Repo;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.Repo;
+import org.apache.accumulo.core.fate.zookeeper.DistributedReadWriteLock.LockType;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tableOps.ManagerRepo;
 import org.apache.accumulo.manager.tableOps.Utils;
-import org.apache.accumulo.server.security.AuditedSecurityOperation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,19 +35,19 @@ class NamespaceCleanUp extends ManagerRepo {
 
   private static final long serialVersionUID = 1L;
 
-  private NamespaceId namespaceId;
+  private final NamespaceId namespaceId;
 
   public NamespaceCleanUp(NamespaceId namespaceId) {
     this.namespaceId = namespaceId;
   }
 
   @Override
-  public long isReady(long tid, Manager manager) {
+  public long isReady(FateId fateId, Manager manager) {
     return 0;
   }
 
   @Override
-  public Repo<Manager> call(long id, Manager manager) {
+  public Repo<Manager> call(FateId fateId, Manager manager) {
 
     // remove from zookeeper
     try {
@@ -55,17 +55,17 @@ class NamespaceCleanUp extends ManagerRepo {
     } catch (Exception e) {
       log.error("Failed to find namespace in zookeeper", e);
     }
-    Tables.clearCache(manager.getContext());
+    manager.getContext().clearTableListCache();
 
     // remove any permissions associated with this namespace
     try {
-      AuditedSecurityOperation.getInstance(manager.getContext())
-          .deleteNamespace(manager.getContext().rpcCreds(), namespaceId);
+      manager.getContext().getSecurityOperation().deleteNamespace(manager.getContext().rpcCreds(),
+          namespaceId);
     } catch (ThriftSecurityException e) {
       log.error("{}", e.getMessage(), e);
     }
 
-    Utils.unreserveNamespace(manager, namespaceId, id, true);
+    Utils.unreserveNamespace(manager, namespaceId, fateId, LockType.WRITE);
 
     log.debug("Deleted namespace " + namespaceId);
 
@@ -73,7 +73,7 @@ class NamespaceCleanUp extends ManagerRepo {
   }
 
   @Override
-  public void undo(long tid, Manager environment) {
+  public void undo(FateId fateId, Manager environment) {
     // nothing to do
   }
 

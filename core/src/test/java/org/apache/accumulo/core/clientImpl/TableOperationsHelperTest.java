@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,37 +18,45 @@
  */
 package org.apache.accumulo.core.clientImpl;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 import org.apache.accumulo.core.client.AccumuloException;
+import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.IteratorSetting;
+import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.admin.CloneConfiguration;
 import org.apache.accumulo.core.client.admin.CompactionConfig;
 import org.apache.accumulo.core.client.admin.DiskUsage;
+import org.apache.accumulo.core.client.admin.ImportConfiguration;
 import org.apache.accumulo.core.client.admin.Locations;
 import org.apache.accumulo.core.client.admin.NewTableConfiguration;
 import org.apache.accumulo.core.client.admin.SummaryRetriever;
+import org.apache.accumulo.core.client.admin.TabletAvailability;
+import org.apache.accumulo.core.client.admin.TabletMergeability;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.client.summary.SummarizerConfiguration;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class TableOperationsHelperTest {
 
@@ -73,6 +81,9 @@ public class TableOperationsHelperTest {
 
     @Override
     public void addSplits(String tableName, SortedSet<Text> partitionKeys) {}
+
+    @Override
+    public void putSplits(String tableName, SortedMap<Text,TabletMergeability> partitionKeys) {}
 
     @Override
     public Collection<Text> listSplits(String tableName) {
@@ -129,23 +140,44 @@ public class TableOperationsHelperTest {
 
     @Override
     public void setProperty(String tableName, String property, String value) {
-      if (!settings.containsKey(tableName))
-        settings.put(tableName, new TreeMap<>());
+      settings.computeIfAbsent(tableName, k -> new TreeMap<>());
       settings.get(tableName).put(property, value);
     }
 
     @Override
+    public Map<String,String> modifyProperties(String tableName,
+        Consumer<Map<String,String>> mapMutator)
+        throws IllegalArgumentException, ConcurrentModificationException {
+      settings.computeIfAbsent(tableName, k -> new TreeMap<>());
+      var map = settings.get(tableName);
+      mapMutator.accept(map);
+      return Map.copyOf(map);
+    }
+
+    @Override
     public void removeProperty(String tableName, String property) {
-      if (!settings.containsKey(tableName))
+      if (!settings.containsKey(tableName)) {
         return;
+      }
       settings.get(tableName).remove(property);
     }
 
     @Override
     public Map<String,String> getConfiguration(String tableName) {
       Map<String,String> empty = Collections.emptyMap();
-      if (!settings.containsKey(tableName))
+      if (!settings.containsKey(tableName)) {
         return empty;
+      }
+      return settings.get(tableName);
+    }
+
+    @Override
+    public Map<String,String> getTableProperties(String tableName)
+        throws AccumuloException, TableNotFoundException {
+      Map<String,String> empty = Collections.emptyMap();
+      if (!settings.containsKey(tableName)) {
+        return empty;
+      }
       return settings.get(tableName);
     }
 
@@ -163,13 +195,7 @@ public class TableOperationsHelperTest {
     }
 
     @Override
-    @Deprecated(since = "2.0.0")
-    public void importDirectory(String tableName, String dir, String failureDir, boolean setTime) {}
-
-    @Override
-    public void offline(String tableName) {
-
-    }
+    public void offline(String tableName) {}
 
     @Override
     public boolean isOnline(String tableName) {
@@ -180,12 +206,15 @@ public class TableOperationsHelperTest {
     public void online(String tableName) {}
 
     @Override
-    public void offline(String tableName, boolean wait) {
-
-    }
+    public void offline(String tableName, boolean wait) {}
 
     @Override
     public void online(String tableName, boolean wait) {}
+
+    @Override
+    public void setTabletAvailability(String tableName, Range range,
+        TabletAvailability tabletAvailability)
+        throws AccumuloSecurityException, AccumuloException, TableNotFoundException {}
 
     @Override
     public void clearLocatorCache(String tableName) {}
@@ -201,7 +230,7 @@ public class TableOperationsHelperTest {
     }
 
     @Override
-    public void importTable(String tableName, Set<String> exportDir) {}
+    public void importTable(String tableName, Set<String> exportDir, ImportConfiguration ic) {}
 
     @Override
     public void exportTable(String tableName, String exportDir) {}
@@ -314,12 +343,13 @@ public class TableOperationsHelperTest {
     assertEquals(20, setting.getPriority());
     assertEquals("some.classname", setting.getIteratorClass());
     assertTrue(setting.getOptions().isEmpty());
-    setting = t.getIteratorSetting("table", "otherName", IteratorScope.majc);
-    assertEquals(20, setting.getPriority());
-    assertEquals("some.classname", setting.getIteratorClass());
-    assertFalse(setting.getOptions().isEmpty());
-    assertEquals(Collections.singletonMap("key", "value"), setting.getOptions());
-    t.attachIterator("table", setting, EnumSet.of(IteratorScope.minc));
+
+    final IteratorSetting setting1 = t.getIteratorSetting("table", "otherName", IteratorScope.majc);
+    assertEquals(20, setting1.getPriority());
+    assertEquals("some.classname", setting1.getIteratorClass());
+    assertFalse(setting1.getOptions().isEmpty());
+    assertEquals(Collections.singletonMap("key", "value"), setting1.getOptions());
+    t.attachIterator("table", setting1, EnumSet.of(IteratorScope.minc));
     check(t, "table",
         new String[] {"table.iterator.majc.otherName=20,some.classname",
             "table.iterator.majc.otherName.opt.key=value",
@@ -327,24 +357,13 @@ public class TableOperationsHelperTest {
             "table.iterator.minc.otherName.opt.key=value",
             "table.iterator.scan.otherName=20,some.classname",});
 
-    try {
-      t.attachIterator("table", setting);
-      fail();
-    } catch (AccumuloException e) {
-      // expected, ignore
-    }
-    setting.setName("thirdName");
-    try {
-      t.attachIterator("table", setting);
-      fail();
-    } catch (AccumuloException e) {}
-    setting.setPriority(10);
+    assertThrows(AccumuloException.class, () -> t.attachIterator("table", setting1));
+    setting1.setName("thirdName");
+    assertThrows(AccumuloException.class, () -> t.attachIterator("table", setting1));
+    setting1.setPriority(10);
     t.setProperty("table", "table.iterator.minc.thirdName.opt.key", "value");
-    try {
-      t.attachIterator("table", setting);
-      fail();
-    } catch (AccumuloException e) {}
+    assertThrows(AccumuloException.class, () -> t.attachIterator("table", setting1));
     t.removeProperty("table", "table.iterator.minc.thirdName.opt.key");
-    t.attachIterator("table", setting);
+    t.attachIterator("table", setting1);
   }
 }

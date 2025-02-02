@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -37,20 +37,10 @@ public class DeleteNamespaceCommand extends Command {
   @Override
   public int execute(final String fullCommand, final CommandLine cl, final Shell shellState)
       throws Exception {
-    boolean force = false;
-    boolean operate = true;
-    if (cl.hasOption(forceOpt.getOpt())) {
-      force = true;
-    }
+    boolean force = cl.hasOption(forceOpt);
     String namespace = cl.getArgs()[0];
 
-    if (!force) {
-      shellState.getWriter().flush();
-      String line =
-          shellState.getReader().readLine(getName() + " { " + namespace + " } (yes|no)? ");
-      operate = line != null && (line.equalsIgnoreCase("y") || line.equalsIgnoreCase("yes"));
-    }
-    if (operate) {
+    if (force || shellState.confirm(getName() + " { " + namespace + " }").orElse(false)) {
       doTableOp(shellState, namespace, force);
     }
     return 0;
@@ -70,10 +60,13 @@ public class DeleteNamespaceCommand extends Command {
     List<String> tables = Namespaces.getTableNames(shellState.getContext(), namespaceId);
     resetContext = tables.contains(currentTable);
 
-    if (force)
-      for (String table : shellState.getAccumuloClient().tableOperations().list())
-        if (table.startsWith(namespace + "."))
+    if (force) {
+      for (String table : shellState.getAccumuloClient().tableOperations().list()) {
+        if (table.startsWith(namespace + ".")) {
           shellState.getAccumuloClient().tableOperations().delete(table);
+        }
+      }
+    }
 
     shellState.getAccumuloClient().namespaceOperations().delete(namespace);
     if (resetContext) {

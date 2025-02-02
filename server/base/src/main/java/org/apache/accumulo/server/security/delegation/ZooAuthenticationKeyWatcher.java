@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,7 +22,8 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 
-import org.apache.accumulo.fate.zookeeper.ZooReader;
+import org.apache.accumulo.core.fate.zookeeper.ZooReader;
+import org.apache.accumulo.core.zookeeper.ZooSession;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.KeeperException.NoNodeException;
 import org.apache.zookeeper.WatchedEvent;
@@ -42,10 +43,10 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
   private final ZooReader zk;
   private final String baseNode;
 
-  public ZooAuthenticationKeyWatcher(AuthenticationTokenSecretManager secretManager, ZooReader zk,
+  public ZooAuthenticationKeyWatcher(AuthenticationTokenSecretManager secretManager, ZooSession zk,
       String baseNode) {
     this.secretManager = secretManager;
-    this.zk = zk;
+    this.zk = zk.asReader();
     this.baseNode = baseNode;
   }
 
@@ -59,19 +60,19 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
         case Disconnected: // Intentional fall through of case
         case Expired: // ZooReader is handling the Expiration of the original ZooKeeper object for
                       // us
-          log.debug("ZooKeeper connection disconnected, clearing secret manager");
+          log.debug("ZooKeeper connection disconnected, clearing secret manager; {}", event);
           secretManager.removeAllKeys();
           break;
         case SyncConnected:
-          log.debug("ZooKeeper reconnected, updating secret manager");
+          log.debug("ZooKeeper reconnected, updating secret manager; {}", event);
           try {
             updateAuthKeys();
           } catch (KeeperException | InterruptedException e) {
-            log.error("Failed to update secret manager after ZooKeeper reconnect");
+            log.error("Failed to update secret manager after ZooKeeper reconnect; {}", event, e);
           }
           break;
         default:
-          log.warn("Unhandled: {}", event);
+          log.warn("Unhandled {}", event);
       }
 
       // Nothing more to do for EventType.None
@@ -84,7 +85,7 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
     }
 
     if (!path.startsWith(baseNode)) {
-      log.info("Ignoring event for path: {}", path);
+      log.info("Ignoring event for path {}; {}", path, event);
       return;
     }
 
@@ -95,7 +96,7 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
         processChildNode(event);
       }
     } catch (KeeperException | InterruptedException e) {
-      log.error("Failed to communicate with ZooKeeper", e);
+      log.error("Failed to communicate with ZooKeeper processing {}", event, e);
     }
   }
 
@@ -123,7 +124,7 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
         // The data on the parent changed. We aren't storing anything there so it's a noop
         break;
       default:
-        log.warn("Unsupported event type: {}", event.getType());
+        log.warn("Unsupported {}", event);
         break;
     }
   }
@@ -167,7 +168,7 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
       case NodeDeleted:
         // Key expired
         if (path == null) {
-          log.error("Got null path for NodeDeleted event");
+          log.error("Got null path for {}", event);
           return;
         }
 
@@ -181,7 +182,7 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
       case NodeCreated:
         // New key created
         if (path == null) {
-          log.error("Got null path for NodeCreated event");
+          log.error("Got null path for {}", event);
           return;
         }
         // Get the data and reset the watcher
@@ -192,7 +193,7 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
       case NodeDataChanged:
         // Key changed, could happen on restart after not running Accumulo.
         if (path == null) {
-          log.error("Got null path for NodeDataChanged event");
+          log.error("Got null path for {}", event);
           return;
         }
         // Get the data and reset the watcher
@@ -202,10 +203,10 @@ public class ZooAuthenticationKeyWatcher implements Watcher {
         break;
       case NodeChildrenChanged:
         // no children for the children..
-        log.warn("Unexpected NodeChildrenChanged event for authentication key node {}", path);
+        log.warn("Unexpected event for authentication key node {}; {}", path, event);
         break;
       default:
-        log.warn("Unsupported event type: {}", event.getType());
+        log.warn("Unsupported {}", event);
         break;
     }
   }

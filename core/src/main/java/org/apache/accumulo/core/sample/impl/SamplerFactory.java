@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -35,11 +35,12 @@ public class SamplerFactory {
 
     Class<? extends Sampler> clazz;
     try {
-      if (!useAccumuloStart)
+      if (!useAccumuloStart) {
         clazz = SamplerFactory.class.getClassLoader().loadClass(config.getClassName())
             .asSubclass(Sampler.class);
-      else
+      } else {
         clazz = ClassLoaderUtil.loadClass(context, config.getClassName(), Sampler.class);
+      }
 
       Sampler sampler = clazz.getDeclaredConstructor().newInstance();
       sampler.validateOptions(config.getOptions());

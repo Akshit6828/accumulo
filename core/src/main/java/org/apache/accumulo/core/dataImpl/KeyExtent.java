@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,15 +20,19 @@ package org.apache.accumulo.core.dataImpl;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
+import static org.apache.accumulo.core.util.RowRangeUtil.requireKeyExtentDataRange;
+import static org.apache.accumulo.core.util.RowRangeUtil.stripZeroTail;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
@@ -46,14 +50,15 @@ import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.TabletId;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.dataImpl.thrift.TKeyExtent;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.RootTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.TabletColumnFamily;
 import org.apache.accumulo.core.util.ByteBufferUtil;
 import org.apache.accumulo.core.util.Pair;
 import org.apache.accumulo.core.util.TextUtil;
 import org.apache.hadoop.io.BinaryComparable;
+import org.apache.hadoop.io.DataInputBuffer;
+import org.apache.hadoop.io.DataOutputBuffer;
 import org.apache.hadoop.io.Text;
 
 /**
@@ -81,13 +86,10 @@ public class KeyExtent implements Comparable<KeyExtent> {
   /**
    * Create a new KeyExtent from its components.
    *
-   * @param table
-   *          the ID for the table
-   * @param endRow
-   *          the last row in this tablet, or null if this is the last tablet in this table
-   * @param prevEndRow
-   *          the last row in the immediately preceding tablet for the table, or null if this
-   *          represents the first tablet in this table
+   * @param table the ID for the table
+   * @param endRow the last row in this tablet, or null if this is the last tablet in this table
+   * @param prevEndRow the last row in the immediately preceding tablet for the table, or null if
+   *        this represents the first tablet in this table
    */
   public KeyExtent(TableId table, Text endRow, Text prevEndRow) {
     tableId = requireNonNull(table, "null table ID not allowed");
@@ -102,8 +104,7 @@ public class KeyExtent implements Comparable<KeyExtent> {
   /**
    * Create a copy of a provided KeyExtent.
    *
-   * @param original
-   *          the KeyExtent to copy
+   * @param original the KeyExtent to copy
    */
   public static KeyExtent copyOf(KeyExtent original) {
     return new KeyExtent(original.tableId(), original.endRow(), original.prevEndRow());
@@ -112,8 +113,7 @@ public class KeyExtent implements Comparable<KeyExtent> {
   /**
    * Create a KeyExtent from its Thrift form.
    *
-   * @param tke
-   *          the KeyExtent in its Thrift object form
+   * @param tke the KeyExtent in its Thrift object form
    */
   public static KeyExtent fromThrift(TKeyExtent tke) {
     TableId tableId = TableId.of(new String(ByteBufferUtil.toBytes(tke.table), UTF_8));
@@ -135,12 +135,11 @@ public class KeyExtent implements Comparable<KeyExtent> {
   /**
    * Create a KeyExtent from a metadata previous end row entry.
    *
-   * @param prevRowEntry
-   *          a provided previous end row entry from the metadata table, stored in the
-   *          <code>{@value TabletColumnFamily#STR_NAME}</code> column family and
-   *          <code>{@value TabletColumnFamily#PREV_ROW_QUAL}</code> column. If the individual
-   *          components are needed, consider {@link #KeyExtent(TableId, Text, Text)} or
-   *          {@link #fromMetaRow(Text, Text)} instead.
+   * @param prevRowEntry a provided previous end row entry from the metadata table, stored in the
+   *        <code>{@value TabletColumnFamily#STR_NAME}</code> column family and
+   *        <code>{@value TabletColumnFamily#PREV_ROW_QUAL}</code> column. If the individual
+   *        components are needed, consider {@link #KeyExtent(TableId, Text, Text)} or
+   *        {@link #fromMetaRow(Text, Text)} instead.
    */
   public static KeyExtent fromMetaPrevRow(Entry<Key,Value> prevRowEntry) {
     return fromMetaRow(prevRowEntry.getKey().getRow(),
@@ -151,10 +150,9 @@ public class KeyExtent implements Comparable<KeyExtent> {
    * Create a KeyExtent from the table ID and the end row encoded in the row field of a tablet's
    * metadata entry, with no previous end row.
    *
-   * @param encodedMetadataRow
-   *          the encoded <code>tableId</code> and <code>endRow</code> from a metadata entry, as in
-   *          <code>entry.getKey().getRow()</code> or from
-   *          {@link TabletsSection#encodeRow(TableId, Text)}
+   * @param encodedMetadataRow the encoded <code>tableId</code> and <code>endRow</code> from a
+   *        metadata entry, as in <code>entry.getKey().getRow()</code> or from
+   *        {@link TabletsSection#encodeRow(TableId, Text)}
    */
   public static KeyExtent fromMetaRow(Text encodedMetadataRow) {
     return fromMetaRow(encodedMetadataRow, (Text) null);
@@ -164,12 +162,10 @@ public class KeyExtent implements Comparable<KeyExtent> {
    * Create a KeyExtent from the table ID and the end row encoded in the row field of a tablet's
    * metadata entry, along with a previous end row.
    *
-   * @param encodedMetadataRow
-   *          the encoded <code>tableId</code> and <code>endRow</code> from a metadata entry, as in
-   *          <code>entry.getKey().getRow()</code> or from
-   *          {@link TabletsSection#encodeRow(TableId, Text)}
-   * @param prevEndRow
-   *          the unencoded previous end row (a copy will be made)
+   * @param encodedMetadataRow the encoded <code>tableId</code> and <code>endRow</code> from a
+   *        metadata entry, as in <code>entry.getKey().getRow()</code> or from
+   *        {@link TabletsSection#encodeRow(TableId, Text)}
+   * @param prevEndRow the unencoded previous end row (a copy will be made)
    */
   public static KeyExtent fromMetaRow(Text encodedMetadataRow, Text prevEndRow) {
     Pair<TableId,Text> tableIdAndEndRow = TabletsSection.decodeRow(encodedMetadataRow);
@@ -181,8 +177,7 @@ public class KeyExtent implements Comparable<KeyExtent> {
   /**
    * Create a KeyExtent from a {@link TabletId}.
    *
-   * @param tabletId
-   *          the {@link TabletId} to convert to a KeyExtent
+   * @param tabletId the {@link TabletId} to convert to a KeyExtent
    */
   public static KeyExtent fromTabletId(TabletId tabletId) {
     if (tabletId instanceof TabletIdImpl) {
@@ -390,13 +385,72 @@ public class KeyExtent implements Comparable<KeyExtent> {
    * <p>
    * For example, if this extent represented a range of data from <code>A</code> to <code>Z</code>
    * for a user table, <code>T</code>, this would compute the range to scan
-   * <code>accumulo.metadata</code> that would include all the the metadata for <code>T</code>'s
-   * tablets that contain data in the range <code>(A,Z]</code>.
+   * <code>accumulo.metadata</code> that would include all the metadata for <code>T</code>'s tablets
+   * that contain data in the range <code>(A,Z]</code>.
    */
   public Range toMetaRange() {
     Text metadataPrevRow =
         TabletsSection.encodeRow(tableId(), prevEndRow() == null ? EMPTY_TEXT : prevEndRow());
     return new Range(metadataPrevRow, prevEndRow() == null, toMetaRow(), true);
+  }
+
+  /**
+   * Creates a KeyExtent which represents the intersection of this KeyExtent and the passed in
+   * range.
+   * <p>
+   * <b>Note:</b> The range provided must be a range that is derived from a KeyExtent. This means
+   * the range must be in the format of a row range and also requires an exclusive start key, which
+   * is the format that {@link #toDataRange()} uses
+   *
+   * @param range range to clip to
+   * @return the intersection of this KeyExtent and the given range
+   * @throws IllegalArgumentException if the KeyExtent and range do not overlap
+   */
+  public KeyExtent clip(Range range) {
+    return clip(range, false);
+  }
+
+  /**
+   * Creates a KeyExtent which represents the intersection of this KeyExtent and the passed in
+   * range. Unlike {@link #clip(Range)}, this method can optionally return null if the given range
+   * and this KeyExtent do not overlap, instead of throwing an exception. The returnNullIfDisjoint
+   * parameter controls this behavior.
+   * <p>
+   * <b>Note:</b> The range provided must be a range that is derived from a KeyExtent. This means
+   * the range must be in the format of a row range and also requires an exclusive start key, which
+   * is the format that {@link #toDataRange()} uses
+   *
+   * @param range range to clip to
+   * @param returnNullIfDisjoint true to return null if ranges are disjoint, false to throw an
+   *        exception
+   * @return the intersection of this KeyExtent and the given range, or null if given range and this
+   *         KeyExtent do not overlap and returnNullIfDisjoint is true
+   * @throws IllegalArgumentException if the KeyExtent and range does not overlap and
+   *         returnNullIfDisjoint is false
+   *
+   * @see KeyExtent#clip(Range)
+   **/
+  public KeyExtent clip(Range range, boolean returnNullIfDisjoint) {
+    // This will require a range that matches a row range generated by toDataRange()
+    // This range itself will be required to be an inclusive start and exclusive end
+    // The start and end rows will be required to be exclusive keys (ending in 0x00)
+    requireKeyExtentDataRange(range);
+
+    // If returnNullIfDisjoint is false then this will throw an exception if
+    // the ranges are disjoint, otherwise we can just return null
+    final Range clippedRange = this.toDataRange().clip(range, returnNullIfDisjoint);
+    if (clippedRange == null) {
+      return null;
+    }
+
+    // Build the new KeyExtent with the clipped range. We need to strip off the ending byte
+    // which will essentially reverse what toDataRange() does
+    Text endRow = clippedRange.getEndKey() != null
+        ? new Text(stripZeroTail(clippedRange.getEndKey().getRowData()).toArray()) : null;
+    Text prevEndRow = clippedRange.getStartKey() != null
+        ? new Text(stripZeroTail(clippedRange.getStartKey().getRowData()).toArray()) : null;
+
+    return new KeyExtent(tableId, endRow, prevEndRow);
   }
 
   private boolean startsAfter(KeyExtent other) {
@@ -485,12 +539,16 @@ public class KeyExtent implements Comparable<KeyExtent> {
     return prevExtent.endRow().equals(prevEndRow());
   }
 
+  public boolean isSystemTable() {
+    return AccumuloTable.allTableIds().contains(tableId());
+  }
+
   public boolean isMeta() {
-    return tableId().equals(MetadataTable.ID) || isRootTablet();
+    return tableId().equals(AccumuloTable.METADATA.tableId()) || isRootTablet();
   }
 
   public boolean isRootTablet() {
-    return tableId().equals(RootTable.ID);
+    return tableId().equals(AccumuloTable.ROOT.tableId());
   }
 
   public String obscured() {
@@ -498,12 +556,34 @@ public class KeyExtent implements Comparable<KeyExtent> {
     try {
       digester = MessageDigest.getInstance(OBSCURING_HASH_ALGORITHM);
     } catch (NoSuchAlgorithmException e) {
-      throw new RuntimeException(e);
+      throw new IllegalStateException(e);
     }
     if (endRow() != null && endRow().getLength() > 0) {
       digester.update(endRow().getBytes(), 0, endRow().getLength());
     }
     return Base64.getEncoder().encodeToString(digester.digest());
+  }
+
+  public String toBase64() {
+    DataOutputBuffer buffer = new DataOutputBuffer();
+    try {
+      writeTo(buffer);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+
+    return Base64.getEncoder().encodeToString(Arrays.copyOf(buffer.getData(), buffer.getLength()));
+  }
+
+  public static KeyExtent fromBase64(String encoded) {
+    byte[] data = Base64.getDecoder().decode(encoded);
+    DataInputBuffer buffer = new DataInputBuffer();
+    buffer.reset(data, data.length);
+    try {
+      return KeyExtent.readFrom(buffer);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
 }

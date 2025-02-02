@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,13 +22,12 @@ import static java.util.Objects.requireNonNull;
 
 import java.lang.ref.Cleaner;
 import java.lang.ref.Cleaner.Cleanable;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.BatchWriter;
 import org.apache.accumulo.core.client.MutationsRejectedException;
-import org.apache.accumulo.fate.zookeeper.ZooCache;
 import org.slf4j.Logger;
 
 /**
@@ -61,19 +60,14 @@ public class CleanerUtil {
    * <li>log an error if the resource cannot be closed for any reason
    * </ol>
    *
-   * @param obj
-   *          the object to monitor for becoming phantom-reachable without having been closed
-   * @param objClass
-   *          the class whose simple name will be used in the log message for <code>o</code>
-   *          (usually an interface name, rather than the actual impl name of the object)
-   * @param closed
-   *          a flag to check whether <code>o</code> has already been closed
-   * @param log
-   *          the logger to use when emitting error/warn messages
-   * @param closeable
-   *          the resource within <code>o</code> to close when <code>o</code> is cleaned; must not
-   *          contain a reference to the <code>monitoredObject</code> or it won't become
-   *          phantom-reachable and will never be cleaned
+   * @param obj the object to monitor for becoming phantom-reachable without having been closed
+   * @param objClass the class whose simple name will be used in the log message for <code>o</code>
+   *        (usually an interface name, rather than the actual impl name of the object)
+   * @param closed a flag to check whether <code>o</code> has already been closed
+   * @param log the logger to use when emitting error/warn messages
+   * @param closeable the resource within <code>o</code> to close when <code>o</code> is cleaned;
+   *        must not contain a reference to the <code>monitoredObject</code> or it won't become
+   *        phantom-reachable and will never be cleaned
    * @return the registered {@link Cleanable} from {@link Cleaner#register(Object, Runnable)}
    */
   public static Cleanable unclosed(AutoCloseable obj, Class<?> objClass, AtomicBoolean closed,
@@ -103,7 +97,7 @@ public class CleanerUtil {
     });
   }
 
-  public static Cleanable shutdownThreadPoolExecutor(ThreadPoolExecutor pool, AtomicBoolean closed,
+  public static Cleanable shutdownThreadPoolExecutor(ExecutorService pool, AtomicBoolean closed,
       Logger log) {
     requireNonNull(pool);
     requireNonNull(log);
@@ -137,12 +131,4 @@ public class CleanerUtil {
       }
     });
   }
-
-  // this is dubious; MetadataConstraints should probably use the ZooCache provided by context
-  // can be done in a follow-on action; for now, this merely replaces the previous finalizer
-  public static Cleanable zooCacheClearer(Object o, ZooCache zc) {
-    requireNonNull(zc);
-    return CLEANER.register(o, zc::clear);
-  }
-
 }

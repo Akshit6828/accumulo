@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -17,6 +17,9 @@
  * under the License.
  */
 package org.apache.accumulo.tserver.log;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.accumulo.core.util.threads.ThreadPoolNames.TSERVER_WAL_SORT_CONCURRENT_POOL;
 
 import java.io.DataInputStream;
 import java.io.EOFException;
@@ -32,13 +35,19 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
+import org.apache.accumulo.core.conf.ConfigurationCopy;
 import org.apache.accumulo.core.conf.Property;
+import org.apache.accumulo.core.crypto.CryptoEnvironmentImpl;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.file.FileOperations;
-import org.apache.accumulo.core.master.thrift.RecoveryStatus;
+import org.apache.accumulo.core.manager.thrift.RecoveryStatus;
+import org.apache.accumulo.core.metadata.UnreferencedTabletFile;
+import org.apache.accumulo.core.spi.crypto.CryptoEnvironment;
+import org.apache.accumulo.core.spi.crypto.CryptoService;
 import org.apache.accumulo.core.util.Pair;
 import org.apache.accumulo.core.util.threads.ThreadPools;
+import org.apache.accumulo.server.AbstractServer;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.accumulo.server.fs.VolumeManager;
 import org.apache.accumulo.server.log.SortedLogState;
@@ -55,11 +64,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.MoreExecutors;
 
 public class LogSorter {
 
   private static final Logger log = LoggerFactory.getLogger(LogSorter.class);
-  AccumuloConfiguration conf;
 
   private final Map<String,LogProcessor> currentWork = Collections.synchronizedMap(new HashMap<>());
 
@@ -78,7 +87,7 @@ public class LogSorter {
 
     @Override
     public void process(String child, byte[] data) {
-      String work = new String(data);
+      String work = new String(data, UTF_8);
       String[] parts = work.split("\\|");
       String src = parts[0];
       String dest = parts[1];
@@ -86,8 +95,9 @@ public class LogSorter {
       log.debug("Sorting {} to {} using sortId {}", src, dest, sortId);
 
       synchronized (currentWork) {
-        if (currentWork.containsKey(sortId))
+        if (currentWork.containsKey(sortId)) {
           return;
+        }
         currentWork.put(sortId, this);
       }
 
@@ -138,8 +148,18 @@ public class LogSorter {
       fs.deleteRecursively(new Path(destPath));
 
       input = fs.open(srcPath);
+
+      // Tell the DataNode that the write ahead log does not need to be cached in the OS page cache
       try {
-        decryptingInput = DfsLogger.getDecryptingStream(input, conf);
+        input.setDropBehind(Boolean.TRUE);
+      } catch (UnsupportedOperationException e) {
+        log.debug("setDropBehind reads not enabled for wal file: {}", input);
+      } catch (IOException e) {
+        log.debug("IOException setting drop behind for file: {}, msg: {}", input, e.getMessage());
+      }
+
+      try {
+        decryptingInput = DfsLogger.getDecryptingStream(input, cryptoService);
       } catch (LogHeaderIncompleteException e) {
         log.warn("Could not read header from write-ahead log {}. Not sorting.", srcPath);
         // Creating a 'finished' marker will cause recovery to proceed normally and the
@@ -150,7 +170,7 @@ public class LogSorter {
         return;
       }
 
-      final long bufferSize = conf.getAsBytes(Property.TSERV_SORT_BUFFER_SIZE);
+      final long bufferSize = sortedLogConf.getAsBytes(Property.TSERV_WAL_SORT_BUFFER_SIZE);
       Thread.currentThread().setName("Sorting " + name + " for recovery");
       while (true) {
         final ArrayList<Pair<LogFileKey,LogFileValue>> buffer = new ArrayList<>();
@@ -181,15 +201,18 @@ public class LogSorter {
       if (input != null) {
         bytesCopied = input.getPos();
         input.close();
-        decryptingInput.close();
+        if (decryptingInput != null) {
+          decryptingInput.close();
+        }
         input = null;
       }
     }
 
     public synchronized long getSortTime() {
       if (sortStart > 0) {
-        if (sortStop > 0)
+        if (sortStop > 0) {
           return sortStop - sortStart;
+        }
         return System.currentTimeMillis() - sortStart;
       }
       return 0;
@@ -200,17 +223,42 @@ public class LogSorter {
     }
   }
 
-  ThreadPoolExecutor threadPool;
+  private final AbstractServer server;
   private final ServerContext context;
-  private double walBlockSize;
+  private final AccumuloConfiguration conf;
+  private final double walBlockSize;
+  private final CryptoService cryptoService;
+  private final AccumuloConfiguration sortedLogConf;
 
-  public LogSorter(ServerContext context, AccumuloConfiguration conf) {
-    this.context = context;
-    this.conf = conf;
-    int threadPoolSize = conf.getCount(Property.TSERV_RECOVERY_MAX_CONCURRENT);
-    this.threadPool =
-        ThreadPools.createFixedThreadPool(threadPoolSize, this.getClass().getName(), false);
-    this.walBlockSize = DfsLogger.getWalBlockSize(conf);
+  public LogSorter(AbstractServer server) {
+    this.server = server;
+    this.context = this.server.getContext();
+    this.conf = this.context.getConfiguration();
+    this.sortedLogConf = extractSortedLogConfig(this.conf);
+    this.walBlockSize = DfsLogger.getWalBlockSize(this.conf);
+    CryptoEnvironment env = new CryptoEnvironmentImpl(CryptoEnvironment.Scope.RECOVERY);
+    this.cryptoService =
+        context.getCryptoFactory().getService(env, this.conf.getAllCryptoProperties());
+  }
+
+  /**
+   * Get the properties set with {@link Property#TSERV_WAL_SORT_FILE_PREFIX} and translate them to
+   * equivalent 'table.file' properties to be used when writing rfiles for sorted recovery.
+   */
+  private AccumuloConfiguration extractSortedLogConfig(AccumuloConfiguration conf) {
+    final String tablePrefix = "table.file.";
+    var props = conf.getAllPropertiesWithPrefixStripped(Property.TSERV_WAL_SORT_FILE_PREFIX);
+    ConfigurationCopy copy = new ConfigurationCopy(conf);
+    props.forEach((prop, val) -> {
+      String tableProp = tablePrefix + prop;
+      if (Property.isValidProperty(tableProp, val) && Property.isValidTablePropertyKey(tableProp)) {
+        log.debug("Using property for writing sorted files: {}={}", tableProp, val);
+        copy.set(tableProp, val);
+      } else {
+        throw new IllegalArgumentException("Invalid sort file property " + prop + "=" + val);
+      }
+    });
+    return copy;
   }
 
   @VisibleForTesting
@@ -236,8 +284,8 @@ public class LogSorter {
     }
 
     try (var writer = FileOperations.getInstance().newWriterBuilder()
-        .forFile(fullPath.toString(), fs, fs.getConf(), context.getCryptoService())
-        .withTableConfiguration(conf).build()) {
+        .forFile(UnreferencedTabletFile.of(fs, fullPath), fs, fs.getConf(), cryptoService)
+        .withTableConfiguration(sortedLogConf).build()) {
       writer.startDefaultLocalityGroup();
       for (var entry : keyListMap.entrySet()) {
         LogFileValue val = new LogFileValue();
@@ -247,11 +295,31 @@ public class LogSorter {
     }
   }
 
-  public void startWatchingForRecoveryLogs(ThreadPoolExecutor distWorkQThreadPool)
-      throws KeeperException, InterruptedException {
-    this.threadPool = distWorkQThreadPool;
-    new DistributedWorkQueue(context.getZooKeeperRoot() + Constants.ZRECOVERY, conf)
-        .startProcessing(new LogProcessor(), this.threadPool);
+  /**
+   * Sort any logs that need sorting in the current thread.
+   *
+   * @return The time in millis when the next check can be done.
+   */
+  public long sortLogsIfNeeded() throws KeeperException, InterruptedException {
+    DistributedWorkQueue dwq = new DistributedWorkQueue(
+        context.getZooKeeperRoot() + Constants.ZRECOVERY, sortedLogConf, server);
+    dwq.processExistingWork(new LogProcessor(), MoreExecutors.newDirectExecutorService(), 1, false);
+    return System.currentTimeMillis() + dwq.getCheckInterval();
+  }
+
+  /**
+   * Sort any logs that need sorting in a ThreadPool using
+   * {@link Property#TSERV_WAL_SORT_MAX_CONCURRENT} threads. This method will start a background
+   * thread to look for log sorting work in the future that will be processed by the
+   * ThreadPoolExecutor
+   */
+  public void startWatchingForRecoveryLogs() throws KeeperException, InterruptedException {
+    int threadPoolSize = this.conf.getCount(Property.TSERV_WAL_SORT_MAX_CONCURRENT);
+    ThreadPoolExecutor threadPool =
+        ThreadPools.getServerThreadPools().getPoolBuilder(TSERVER_WAL_SORT_CONCURRENT_POOL)
+            .numCoreThreads(threadPoolSize).enableThreadPoolMetrics().build();
+    new DistributedWorkQueue(context.getZooKeeperRoot() + Constants.ZRECOVERY, sortedLogConf,
+        server).processExistingAndFuture(new LogProcessor(), threadPool);
   }
 
   public List<RecoveryStatus> getLogSorts() {

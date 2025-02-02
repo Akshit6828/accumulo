@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,113 +18,75 @@
  */
 package org.apache.accumulo.gc.metrics;
 
+import static org.apache.accumulo.core.metrics.Metric.GC_CANDIDATES;
+import static org.apache.accumulo.core.metrics.Metric.GC_DELETED;
+import static org.apache.accumulo.core.metrics.Metric.GC_ERRORS;
+import static org.apache.accumulo.core.metrics.Metric.GC_FINISHED;
+import static org.apache.accumulo.core.metrics.Metric.GC_IN_USE;
+import static org.apache.accumulo.core.metrics.Metric.GC_POST_OP_DURATION;
+import static org.apache.accumulo.core.metrics.Metric.GC_RUN_CYCLE;
+import static org.apache.accumulo.core.metrics.Metric.GC_STARTED;
+import static org.apache.accumulo.core.metrics.Metric.GC_WAL_CANDIDATES;
+import static org.apache.accumulo.core.metrics.Metric.GC_WAL_DELETED;
+import static org.apache.accumulo.core.metrics.Metric.GC_WAL_ERRORS;
+import static org.apache.accumulo.core.metrics.Metric.GC_WAL_FINISHED;
+import static org.apache.accumulo.core.metrics.Metric.GC_WAL_IN_USE;
+import static org.apache.accumulo.core.metrics.Metric.GC_WAL_STARTED;
+
 import java.util.concurrent.TimeUnit;
 
-import org.apache.accumulo.core.gc.thrift.GcCycleStats;
+import org.apache.accumulo.core.metrics.MetricsProducer;
 import org.apache.accumulo.gc.SimpleGarbageCollector;
-import org.apache.accumulo.server.metrics.Metrics;
-import org.apache.hadoop.metrics2.lib.MetricsRegistry;
-import org.apache.hadoop.metrics2.lib.MutableGaugeLong;
 
-/**
- * Expected to be instantiated with GcMetricsFactory. This will configure both jmx and the hadoop
- * metrics systems. The naming convention, in hadoop metrics2, the records will appear as
- * CONTEXT.RECORD (accgc.AccGcCycleMetrics). The value for context is also used by the configuration
- * file for sink configuration.
- */
-public class GcMetrics extends Metrics {
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 
-  // use common prefix, different that just gc, to prevent confusion with jvm gc metrics.
-  public static final String GC_METRIC_PREFIX = "AccGc";
+public class GcMetrics implements MetricsProducer {
 
-  private static final String jmxName = "GarbageCollector";
-  private static final String description = "Accumulo garbage collection metrics";
-  private static final String record = "AccGcCycleMetrics";
+  private final GcCycleMetrics metricValues;
 
-  private final SimpleGarbageCollector gc;
-
-  // metrics gauges / counters.
-  private final MutableGaugeLong gcStarted;
-  private final MutableGaugeLong gcFinished;
-  private final MutableGaugeLong gcCandidates;
-  private final MutableGaugeLong gcInUse;
-  private final MutableGaugeLong gcDeleted;
-  private final MutableGaugeLong gcErrors;
-
-  private final MutableGaugeLong walStarted;
-  private final MutableGaugeLong walFinished;
-  private final MutableGaugeLong walCandidates;
-  private final MutableGaugeLong walInUse;
-  private final MutableGaugeLong walDeleted;
-  private final MutableGaugeLong walErrors;
-
-  private final MutableGaugeLong postOpDuration;
-  private final MutableGaugeLong runCycleCount;
-
-  GcMetrics(final SimpleGarbageCollector gc) {
-    super(jmxName + ",sub=" + gc.getClass().getSimpleName(), description, "accgc", record);
-    this.gc = gc;
-
-    MetricsRegistry registry = super.getRegistry();
-
-    gcStarted = registry.newGauge(GC_METRIC_PREFIX + "Started",
-        "Timestamp GC file collection cycle started", 0L);
-    gcFinished = registry.newGauge(GC_METRIC_PREFIX + "Finished",
-        "Timestamp GC file collect cycle finished", 0L);
-    gcCandidates = registry.newGauge(GC_METRIC_PREFIX + "Candidates",
-        "Number of files that are candidates for deletion", 0L);
-    gcInUse =
-        registry.newGauge(GC_METRIC_PREFIX + "InUse", "Number of candidate files still in use", 0L);
-    gcDeleted =
-        registry.newGauge(GC_METRIC_PREFIX + "Deleted", "Number of candidate files deleted", 0L);
-    gcErrors =
-        registry.newGauge(GC_METRIC_PREFIX + "Errors", "Number of candidate deletion errors", 0L);
-
-    walStarted = registry.newGauge(GC_METRIC_PREFIX + "WalStarted",
-        "Timestamp GC WAL collection started", 0L);
-    walFinished = registry.newGauge(GC_METRIC_PREFIX + "WalFinished",
-        "Timestamp GC WAL collection finished", 0L);
-    walCandidates = registry.newGauge(GC_METRIC_PREFIX + "WalCandidates",
-        "Number of files that are candidates for deletion", 0L);
-    walInUse = registry.newGauge(GC_METRIC_PREFIX + "WalInUse",
-        "Number of wal file candidates that are still in use", 0L);
-    walDeleted = registry.newGauge(GC_METRIC_PREFIX + "WalDeleted",
-        "Number of candidate wal files deleted", 0L);
-    walErrors = registry.newGauge(GC_METRIC_PREFIX + "WalErrors",
-        "Number candidate wal file deletion errors", 0L);
-
-    postOpDuration = registry.newGauge(GC_METRIC_PREFIX + "PostOpDuration",
-        "GC metadata table post operation duration in milliseconds", 0L);
-
-    runCycleCount = registry.newGauge(GC_METRIC_PREFIX + "RunCycleCount",
-        "gauge incremented each gc cycle run, rest on process start", 0L);
-
+  public GcMetrics(SimpleGarbageCollector gc) {
+    // Updated during each cycle of SimpleGC
+    metricValues = gc.getGcCycleMetrics();
   }
 
   @Override
-  protected void prepareMetrics() {
+  public void registerMetrics(MeterRegistry registry) {
+    Gauge.builder(GC_STARTED.getName(), metricValues, v -> v.getLastCollect().getStarted())
+        .description(GC_STARTED.getDescription()).register(registry);
+    Gauge.builder(GC_FINISHED.getName(), metricValues, v -> v.getLastCollect().getFinished())
+        .description(GC_FINISHED.getDescription()).register(registry);
+    Gauge.builder(GC_CANDIDATES.getName(), metricValues, v -> v.getLastCollect().getCandidates())
+        .description(GC_CANDIDATES.getDescription()).register(registry);
+    Gauge.builder(GC_IN_USE.getName(), metricValues, v -> v.getLastCollect().getInUse())
+        .description(GC_IN_USE.getDescription()).register(registry);
+    Gauge.builder(GC_DELETED.getName(), metricValues, v -> v.getLastCollect().getDeleted())
+        .description(GC_DELETED.getDescription()).register(registry);
+    Gauge.builder(GC_ERRORS.getName(), metricValues, v -> v.getLastCollect().getErrors())
+        .description(GC_ERRORS.getDescription()).register(registry);
 
-    GcCycleMetrics values = gc.getGcCycleMetrics();
+    // WAL metrics Gauges
+    Gauge.builder(GC_WAL_STARTED.getName(), metricValues, v -> v.getLastWalCollect().getStarted())
+        .description(GC_WAL_STARTED.getDescription()).register(registry);
+    Gauge.builder(GC_WAL_FINISHED.getName(), metricValues, v -> v.getLastWalCollect().getFinished())
+        .description(GC_WAL_FINISHED.getDescription()).register(registry);
+    Gauge
+        .builder(GC_WAL_CANDIDATES.getName(), metricValues,
+            v -> v.getLastWalCollect().getCandidates())
+        .description(GC_WAL_CANDIDATES.getDescription()).register(registry);
+    Gauge.builder(GC_WAL_IN_USE.getName(), metricValues, v -> v.getLastWalCollect().getInUse())
+        .description(GC_WAL_IN_USE.getDescription()).register(registry);
+    Gauge.builder(GC_WAL_DELETED.getName(), metricValues, v -> v.getLastWalCollect().getDeleted())
+        .description(GC_WAL_DELETED.getDescription()).register(registry);
+    Gauge.builder(GC_WAL_ERRORS.getName(), metricValues, v -> v.getLastWalCollect().getErrors())
+        .description(GC_WAL_ERRORS.getDescription()).register(registry);
+    Gauge
+        .builder(GC_POST_OP_DURATION.getName(), metricValues,
+            v -> TimeUnit.NANOSECONDS.toMillis(v.getPostOpDurationNanos()))
+        .description(GC_POST_OP_DURATION.getDescription()).register(registry);
+    Gauge.builder(GC_RUN_CYCLE.getName(), metricValues, GcCycleMetrics::getRunCycleCount)
+        .description(GC_RUN_CYCLE.getDescription()).register(registry);
 
-    GcCycleStats lastFileCollect = values.getLastCollect();
-
-    gcStarted.set(lastFileCollect.getStarted());
-    gcFinished.set(lastFileCollect.getFinished());
-    gcCandidates.set(lastFileCollect.getCandidates());
-    gcInUse.set(lastFileCollect.getInUse());
-    gcDeleted.set(lastFileCollect.getDeleted());
-    gcErrors.set(lastFileCollect.getErrors());
-
-    GcCycleStats lastWalCollect = values.getLastWalCollect();
-
-    walStarted.set(lastWalCollect.getStarted());
-    walFinished.set(lastWalCollect.getFinished());
-    walCandidates.set(lastWalCollect.getCandidates());
-    walInUse.set(lastWalCollect.getInUse());
-    walDeleted.set(lastWalCollect.getDeleted());
-    walErrors.set(lastWalCollect.getErrors());
-
-    postOpDuration.set(TimeUnit.NANOSECONDS.toMillis(values.getPostOpDurationNanos()));
-    runCycleCount.set(values.getRunCycleCount());
   }
+
 }

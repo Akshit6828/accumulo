@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -33,6 +33,8 @@ import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.admin.DelegationTokenConfig;
 import org.apache.accumulo.core.clientImpl.AuthenticationTokenIdentifier;
 import org.apache.accumulo.core.clientImpl.DelegationTokenImpl;
+import org.apache.accumulo.core.data.InstanceId;
+import org.apache.accumulo.core.securityImpl.thrift.TAuthenticationTokenIdentifier;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.security.token.SecretManager;
 import org.apache.hadoop.security.token.Token;
@@ -57,7 +59,7 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
 
   private static final Logger log = LoggerFactory.getLogger(AuthenticationTokenSecretManager.class);
 
-  private final String instanceID;
+  private final InstanceId instanceID;
   private final long tokenMaxLifetime;
   private final ConcurrentHashMap<Integer,AuthenticationKey> allKeys = new ConcurrentHashMap<>();
   private AuthenticationKey currentKey;
@@ -65,36 +67,22 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
   /**
    * Create a new secret manager instance for generating keys.
    *
-   * @param instanceID
-   *          Accumulo instance ID
-   * @param tokenMaxLifetime
-   *          Maximum age (in milliseconds) before a token expires and is no longer valid
+   * @param instanceID Accumulo instance ID
+   * @param tokenMaxLifetime Maximum age (in milliseconds) before a token expires and is no longer
+   *        valid
    */
-  public AuthenticationTokenSecretManager(String instanceID, long tokenMaxLifetime) {
+  public AuthenticationTokenSecretManager(InstanceId instanceID, long tokenMaxLifetime) {
     requireNonNull(instanceID);
     checkArgument(tokenMaxLifetime > 0, "Max lifetime must be positive");
     this.instanceID = instanceID;
     this.tokenMaxLifetime = tokenMaxLifetime;
   }
 
-  @Override
-  protected byte[] createPassword(AuthenticationTokenIdentifier identifier) {
-    DelegationTokenConfig cfg = identifier.getConfig();
-
+  private byte[] createPassword(AuthenticationTokenIdentifier identifier,
+      DelegationTokenConfig cfg) {
     long now = System.currentTimeMillis();
-    final AuthenticationKey secretKey;
-    synchronized (this) {
-      secretKey = currentKey;
-    }
-    identifier.setKeyId(secretKey.getKeyId());
     identifier.setIssueDate(now);
-    long expiration = now + tokenMaxLifetime;
-    // Catch overflow
-    if (expiration < now) {
-      expiration = Long.MAX_VALUE;
-    }
-    identifier.setExpirationDate(expiration);
-
+    identifier.setExpirationDate(calculateExpirationDate(now));
     // Limit the lifetime if the user requests it
     if (cfg != null) {
       long requestedLifetime = cfg.getTokenLifetime(TimeUnit.MILLISECONDS);
@@ -106,15 +94,41 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
         }
         // Ensure that the user doesn't try to extend the expiration date -- they may only limit it
         if (requestedExpirationDate > identifier.getExpirationDate()) {
-          throw new RuntimeException("Requested token lifetime exceeds configured maximum");
+          throw new IllegalStateException("Requested token lifetime exceeds configured maximum");
         }
         log.trace("Overriding token expiration date from {} to {}", identifier.getExpirationDate(),
             requestedExpirationDate);
         identifier.setExpirationDate(requestedExpirationDate);
       }
     }
+    return createPassword(identifier);
+  }
 
+  private long calculateExpirationDate(long now) {
+    long expiration = now + tokenMaxLifetime;
+    // Catch overflow
+    if (expiration < now) {
+      expiration = Long.MAX_VALUE;
+    }
+    return expiration;
+  }
+
+  @Override
+  protected byte[] createPassword(AuthenticationTokenIdentifier identifier) {
+    final AuthenticationKey secretKey;
+    synchronized (this) {
+      secretKey = currentKey;
+    }
+    identifier.setKeyId(secretKey.getKeyId());
     identifier.setInstanceId(instanceID);
+
+    long now = System.currentTimeMillis();
+    if (!identifier.isSetIssueDate()) {
+      identifier.setIssueDate(now);
+    }
+    if (!identifier.isSetExpirationDate()) {
+      identifier.setExpirationDate(calculateExpirationDate(now));
+    }
     return createPassword(identifier.getBytes(), secretKey.getKey());
   }
 
@@ -138,16 +152,14 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
   @Override
   public AuthenticationTokenIdentifier createIdentifier() {
     // Return our TokenIdentifier implementation
-    return new AuthenticationTokenIdentifier();
+    return new AuthenticationTokenIdentifier(new TAuthenticationTokenIdentifier());
   }
 
   /**
    * Generates a delegation token for the user with the provided {@code username}.
    *
-   * @param username
-   *          The client to generate the delegation token for.
-   * @param cfg
-   *          A configuration object for obtaining the delegation token
+   * @param username The client to generate the delegation token for.
+   * @param cfg A configuration object for obtaining the delegation token
    * @return A delegation token for {@code username} created using the {@link #currentKey}.
    */
   public Entry<Token<AuthenticationTokenIdentifier>,AuthenticationTokenIdentifier>
@@ -155,7 +167,7 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
     requireNonNull(username);
     requireNonNull(cfg);
 
-    final AuthenticationTokenIdentifier id = new AuthenticationTokenIdentifier(username, cfg);
+    var id = new AuthenticationTokenIdentifier(new TAuthenticationTokenIdentifier(username));
 
     final StringBuilder svcName = new StringBuilder(DelegationTokenImpl.SERVICE_NAME);
     if (id.getInstanceId() != null) {
@@ -165,7 +177,7 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
     // before serializing the identifier
     byte[] password;
     try {
-      password = createPassword(id);
+      password = createPassword(id, cfg);
     } catch (RuntimeException e) {
       throw new AccumuloException(e.getMessage());
     }
@@ -179,8 +191,7 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
   /**
    * Add the provided {@code key} to the in-memory copy of all {@link AuthenticationKey}s.
    *
-   * @param key
-   *          The key to add.
+   * @param key The key to add.
    */
   public synchronized void addKey(AuthenticationKey key) {
     requireNonNull(key);
@@ -197,14 +208,13 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
    * Removes the {@link AuthenticationKey} from the local cache of keys using the provided
    * {@code keyId}.
    *
-   * @param keyId
-   *          The unique ID for the {@link AuthenticationKey} to remove.
+   * @param keyId The unique ID for the {@link AuthenticationKey} to remove.
    * @return True if the key was removed, otherwise false.
    */
   synchronized boolean removeKey(Integer keyId) {
     requireNonNull(keyId);
 
-    log.debug("Removing AuthenticatioKey with keyId {}", keyId);
+    log.debug("Removing AuthenticationKey with keyId {}", keyId);
 
     return allKeys.remove(keyId) != null;
   }
@@ -229,8 +239,7 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
    * For each removed local {@link AuthenticationKey}, the key is also removed from ZooKeeper using
    * the provided {@code keyDistributor} instance.
    *
-   * @param keyDistributor
-   *          ZooKeeper key distribution class
+   * @param keyDistributor ZooKeeper key distribution class
    */
   synchronized int removeExpiredKeys(ZooAuthenticationKeyDistributor keyDistributor) {
     long now = System.currentTimeMillis();
@@ -247,7 +256,7 @@ public class AuthenticationTokenSecretManager extends SecretManager<Authenticati
           keyDistributor.remove(key);
         } catch (KeeperException | InterruptedException e) {
           log.error("Failed to remove AuthenticationKey from ZooKeeper. Exiting", e);
-          throw new RuntimeException(e);
+          throw new IllegalStateException(e);
         }
       }
     }

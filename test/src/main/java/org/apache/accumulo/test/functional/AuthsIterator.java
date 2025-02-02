@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -17,6 +17,8 @@
  * under the License.
  */
 package org.apache.accumulo.test.functional;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.io.IOException;
 import java.util.Map;
@@ -31,7 +33,7 @@ import org.apache.hadoop.io.Text;
 
 public class AuthsIterator extends WrappingIterator {
 
-  public static final Authorizations AUTHS = new Authorizations("A,B".getBytes());
+  public static final Authorizations AUTHS = new Authorizations("A,B".getBytes(UTF_8));
   public static final String SUCCESS = "SUCCESS";
   public static final String FAIL = "FAIL";
 
@@ -46,9 +48,10 @@ public class AuthsIterator extends WrappingIterator {
 
   @Override
   public Key getTopKey() {
-    if (env.getAuthorizations().equals(AUTHS))
+    if (env.getAuthorizations().equals(AUTHS)) {
       return new Key(new Text(SUCCESS));
-    else
+    } else {
       return new Key(new Text(FAIL));
+    }
   }
 }

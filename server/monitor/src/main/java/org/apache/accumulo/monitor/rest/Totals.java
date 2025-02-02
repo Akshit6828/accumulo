@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -36,12 +36,9 @@ public class Totals {
   /**
    * Initializes totals
    *
-   * @param ingestrate
-   *          Total ingest rate
-   * @param queryrate
-   *          Total query rate
-   * @param numentries
-   *          Total number of entries
+   * @param ingestrate Total ingest rate
+   * @param queryrate Total query rate
+   * @param numentries Total number of entries
    */
   public Totals(double ingestrate, double queryrate, long numentries) {
     this.ingestrate = ingestrate;

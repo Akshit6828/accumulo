@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -51,8 +51,9 @@ public class DefaultKeySizeConstraint implements Constraint {
   public List<Short> check(Environment env, Mutation mutation) {
 
     // fast size check
-    if (mutation.numBytes() < maxSize)
+    if (mutation.numBytes() < maxSize) {
       return NO_VIOLATIONS;
+    }
 
     List<Short> violations = new ArrayList<>();
 
@@ -62,8 +63,9 @@ public class DefaultKeySizeConstraint implements Constraint {
       size += cu.getColumnQualifier().length;
       size += cu.getColumnVisibility().length;
 
-      if (size > maxSize)
+      if (size > maxSize) {
         violations.add(MAX__KEY_SIZE_EXCEEDED_VIOLATION);
+      }
     }
 
     return violations;

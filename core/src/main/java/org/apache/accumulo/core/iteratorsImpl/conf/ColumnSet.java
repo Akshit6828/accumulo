@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -31,11 +31,11 @@ import org.apache.accumulo.core.util.Pair;
 import org.apache.hadoop.io.Text;
 
 public class ColumnSet {
-  private Set<ColFamHashKey> objectsCF;
-  private Set<ColHashKey> objectsCol;
+  private final Set<ColFamHashKey> objectsCF;
+  private final Set<ColHashKey> objectsCol;
 
-  private ColHashKey lookupCol = new ColHashKey();
-  private ColFamHashKey lookupCF = new ColFamHashKey();
+  private final ColHashKey lookupCol = new ColHashKey();
+  private final ColFamHashKey lookupCF = new ColFamHashKey();
 
   public ColumnSet() {
     objectsCF = new HashSet<>();
@@ -68,8 +68,9 @@ public class ColumnSet {
     // lookup column family and column qualifier
     if (!objectsCol.isEmpty()) {
       lookupCol.set(key);
-      if (objectsCol.contains(lookupCol))
+      if (objectsCol.contains(lookupCol)) {
         return true;
+      }
     }
 
     // lookup just column family
@@ -116,16 +117,18 @@ public class ColumnSet {
     for (char c : enc.toCharArray()) {
       boolean validChar = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
           || c == '_' || c == '-' || c == ':' || c == '%';
-      if (!validChar)
+      if (!validChar) {
         return false;
+      }
     }
 
     return true;
   }
 
   public static Pair<Text,Text> decodeColumns(String columns) {
-    if (!isValidEncoding(columns))
+    if (!isValidEncoding(columns)) {
       throw new IllegalArgumentException("Invalid encoding " + columns);
+    }
 
     String[] cols = columns.split(":");
 

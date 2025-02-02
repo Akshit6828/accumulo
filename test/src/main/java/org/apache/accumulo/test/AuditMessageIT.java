@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,15 +19,18 @@
 package org.apache.accumulo.test;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -41,7 +44,10 @@ import org.apache.accumulo.core.client.BatchWriter;
 import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.client.TableExistsException;
 import org.apache.accumulo.core.client.TableNotFoundException;
+import org.apache.accumulo.core.client.admin.ImportConfiguration;
+import org.apache.accumulo.core.client.admin.NewTableConfiguration;
 import org.apache.accumulo.core.client.admin.TableOperations;
+import org.apache.accumulo.core.client.admin.TabletAvailability;
 import org.apache.accumulo.core.client.security.tokens.PasswordToken;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
@@ -55,9 +61,9 @@ import org.apache.accumulo.server.security.AuditedSecurityOperation;
 import org.apache.accumulo.test.functional.ConfigurableMacBase;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.io.Text;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
@@ -75,18 +81,19 @@ public class AuditMessageIT extends ConfigurableMacBase {
   private static final String AUDIT_USER_2 = "AuditUser2";
   private static final String PASSWORD = "password";
   private static final String OLD_TEST_TABLE_NAME = "apples";
+  private static final String OLD_TEST_TABLE_NAME_ID = "1";
   private static final String NEW_TEST_TABLE_NAME = "oranges";
   private static final String THIRD_TEST_TABLE_NAME = "pears";
   private static final Authorizations auths = new Authorizations("private", "public");
 
   @Override
-  public int defaultTimeoutSeconds() {
-    return 60;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(1);
   }
 
   @Override
   public void beforeClusterStart(MiniAccumuloConfigImpl cfg) {
-    cfg.setNumTservers(1);
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(1);
   }
 
   // Must be static to survive Junit re-initialising the class every time.
@@ -101,8 +108,7 @@ public class AuditMessageIT extends ConfigurableMacBase {
   /**
    * Returns a List of Audit messages that have been grep'd out of the MiniAccumuloCluster output.
    *
-   * @param stepName
-   *          A unique name for the test being executed, to identify the System.out messages.
+   * @param stepName A unique name for the test being executed, to identify the System.out messages.
    * @return A List of the Audit messages, sorted (so in chronological order).
    */
   private ArrayList<String> getAuditMessages(String stepName) throws IOException {
@@ -134,8 +140,9 @@ public class AuditMessageIT extends ConfigurableMacBase {
               // Only include the message if startTimestamp is null. or the message occurred after
               // the startTimestamp value
               if ((lastAuditTimestamp == null)
-                  || (line.substring(0, 23).compareTo(lastAuditTimestamp) > 0))
+                  || (line.substring(0, 23).compareTo(lastAuditTimestamp) > 0)) {
                 result.add(line);
+              }
             }
           }
         }
@@ -147,8 +154,9 @@ public class AuditMessageIT extends ConfigurableMacBase {
       System.out.println(s);
     }
     System.out.println("End of captured audit messages for step " + stepName);
-    if (!result.isEmpty())
-      lastAuditTimestamp = (result.get(result.size() - 1)).substring(0, 23);
+    if (!result.isEmpty()) {
+      lastAuditTimestamp = result.get(result.size() - 1).substring(0, 23);
+    }
 
     return result;
   }
@@ -163,7 +171,7 @@ public class AuditMessageIT extends ConfigurableMacBase {
     }
   }
 
-  @Before
+  @BeforeEach
   public void resetInstance() throws Exception {
     client = Accumulo.newClient().from(getClientProperties()).build();
 
@@ -173,7 +181,7 @@ public class AuditMessageIT extends ConfigurableMacBase {
     getAuditMessages("setup");
   }
 
-  @After
+  @AfterEach
   public void cleanUp() throws Exception {
     removeUsersAndTables();
     client.close();
@@ -197,7 +205,7 @@ public class AuditMessageIT extends ConfigurableMacBase {
 
   @Test
   public void testTableOperationsAudits() throws AccumuloException, AccumuloSecurityException,
-      TableExistsException, TableNotFoundException, IOException {
+      TableExistsException, TableNotFoundException, InterruptedException, IOException {
 
     client.securityOperations().createLocalUser(AUDIT_USER_1, new PasswordToken(PASSWORD));
     client.securityOperations().grantSystemPermission(AUDIT_USER_1, SystemPermission.SYSTEM);
@@ -341,7 +349,7 @@ public class AuditMessageIT extends ConfigurableMacBase {
     FileUtils.copyFileToDirectory(importFile, exportDir);
     FileUtils.copyFileToDirectory(importFile, exportDirBulk);
     auditAccumuloClient.tableOperations().importTable(NEW_TEST_TABLE_NAME,
-        Collections.singleton(exportDir.toString()));
+        Collections.singleton(exportDir.toString()), ImportConfiguration.empty());
 
     // Now do a Directory (bulk) import of the same data.
     auditAccumuloClient.tableOperations().create(THIRD_TEST_TABLE_NAME);
@@ -358,11 +366,9 @@ public class AuditMessageIT extends ConfigurableMacBase {
     assertEquals(1,
         findAuditMessage(auditMessages,
             String.format(AuditedSecurityOperation.CAN_ONLINE_OFFLINE_TABLE_AUDIT_TEMPLATE,
-                "offlineTable", OLD_TEST_TABLE_NAME)));
-    assertEquals(1,
-        findAuditMessage(auditMessages,
-            String.format(AuditedSecurityOperation.CAN_EXPORT_AUDIT_TEMPLATE, OLD_TEST_TABLE_NAME,
-                exportDir.toString())));
+                "offlineTable", OLD_TEST_TABLE_NAME, OLD_TEST_TABLE_NAME_ID)));
+    assertEquals(1, findAuditMessage(auditMessages, String.format(
+        AuditedSecurityOperation.CAN_EXPORT_AUDIT_TEMPLATE, OLD_TEST_TABLE_NAME, exportDir)));
     assertEquals(1,
         findAuditMessage(auditMessages,
             String.format(AuditedSecurityOperation.CAN_IMPORT_AUDIT_TEMPLATE, NEW_TEST_TABLE_NAME,
@@ -376,7 +382,7 @@ public class AuditMessageIT extends ConfigurableMacBase {
     assertEquals(1,
         findAuditMessage(auditMessages,
             String.format(AuditedSecurityOperation.CAN_ONLINE_OFFLINE_TABLE_AUDIT_TEMPLATE,
-                "onlineTable", OLD_TEST_TABLE_NAME)));
+                "onlineTable", OLD_TEST_TABLE_NAME, OLD_TEST_TABLE_NAME_ID)));
 
   }
 
@@ -444,7 +450,9 @@ public class AuditMessageIT extends ConfigurableMacBase {
 
     // Create our user with no privs
     client.securityOperations().createLocalUser(AUDIT_USER_1, new PasswordToken(PASSWORD));
-    client.tableOperations().create(OLD_TEST_TABLE_NAME);
+    NewTableConfiguration ntc =
+        new NewTableConfiguration().withInitialTabletAvailability(TabletAvailability.HOSTED);
+    client.tableOperations().create(OLD_TEST_TABLE_NAME, ntc);
     auditAccumuloClient =
         getCluster().createAccumuloClient(AUDIT_USER_1, new PasswordToken(PASSWORD));
 
@@ -453,33 +461,29 @@ public class AuditMessageIT extends ConfigurableMacBase {
     // We don't want the thrown exceptions to stop our tests, and we are not testing that the
     // Exceptions are thrown.
 
-    try {
-      auditAccumuloClient.tableOperations().create(NEW_TEST_TABLE_NAME);
-    } catch (AccumuloSecurityException ex) {}
-    try {
-      auditAccumuloClient.tableOperations().rename(OLD_TEST_TABLE_NAME, NEW_TEST_TABLE_NAME);
-    } catch (AccumuloSecurityException ex) {}
-    try {
-      auditAccumuloClient.tableOperations().clone(OLD_TEST_TABLE_NAME, NEW_TEST_TABLE_NAME, false,
-          Collections.emptyMap(), Collections.emptySet());
-    } catch (AccumuloSecurityException ex) {}
-    try {
-      auditAccumuloClient.tableOperations().delete(OLD_TEST_TABLE_NAME);
-    } catch (AccumuloSecurityException ex) {}
-    try {
-      auditAccumuloClient.tableOperations().offline(OLD_TEST_TABLE_NAME);
-    } catch (AccumuloSecurityException ex) {}
+    final var tableOps = auditAccumuloClient.tableOperations();
+    assertThrows(AccumuloSecurityException.class, () -> tableOps.create(NEW_TEST_TABLE_NAME));
+
+    assertThrows(AccumuloSecurityException.class,
+        () -> tableOps.rename(OLD_TEST_TABLE_NAME, NEW_TEST_TABLE_NAME));
+
+    assertThrows(AccumuloSecurityException.class, () -> tableOps.clone(OLD_TEST_TABLE_NAME,
+        NEW_TEST_TABLE_NAME, false, Collections.emptyMap(), Collections.emptySet()));
+
+    assertThrows(AccumuloSecurityException.class, () -> tableOps.delete(OLD_TEST_TABLE_NAME));
+
+    assertThrows(AccumuloSecurityException.class, () -> tableOps.offline(OLD_TEST_TABLE_NAME));
+
     try (Scanner scanner = auditAccumuloClient.createScanner(OLD_TEST_TABLE_NAME, auths)) {
-      scanner.iterator().next().getKey();
-    } catch (RuntimeException ex) {}
-    try {
-      auditAccumuloClient.tableOperations().deleteRows(OLD_TEST_TABLE_NAME, new Text("myRow"),
-          new Text("myRow~"));
-    } catch (AccumuloSecurityException ex) {}
-    try {
-      auditAccumuloClient.tableOperations().flush(OLD_TEST_TABLE_NAME, new Text("myRow"),
-          new Text("myRow~"), false);
-    } catch (AccumuloSecurityException ex) {}
+      Iterator<Map.Entry<Key,Value>> iterator = scanner.iterator();
+      assertThrows(RuntimeException.class, iterator::next);
+    }
+
+    assertThrows(AccumuloSecurityException.class,
+        () -> tableOps.deleteRows(OLD_TEST_TABLE_NAME, new Text("myRow"), new Text("myRow~")));
+
+    assertThrows(AccumuloSecurityException.class,
+        () -> tableOps.flush(OLD_TEST_TABLE_NAME, new Text("myRow"), new Text("myRow~"), false));
 
     // ... that will do for now.
     // End of testing activities
@@ -497,15 +501,18 @@ public class AuditMessageIT extends ConfigurableMacBase {
             "operation: denied;.*"
                 + String.format(AuditedSecurityOperation.CAN_CLONE_TABLE_AUDIT_TEMPLATE,
                     OLD_TEST_TABLE_NAME, NEW_TEST_TABLE_NAME)));
-    assertEquals(1, findAuditMessage(auditMessages, "operation: denied;.*" + String
-        .format(AuditedSecurityOperation.CAN_DELETE_TABLE_AUDIT_TEMPLATE, OLD_TEST_TABLE_NAME)));
+    assertEquals(1,
+        findAuditMessage(auditMessages,
+            "operation: denied;.*"
+                + String.format(AuditedSecurityOperation.CAN_DELETE_TABLE_AUDIT_TEMPLATE,
+                    OLD_TEST_TABLE_NAME, OLD_TEST_TABLE_NAME_ID)));
     assertEquals(1,
         findAuditMessage(auditMessages,
             "operation: denied;.*"
                 + String.format(AuditedSecurityOperation.CAN_ONLINE_OFFLINE_TABLE_AUDIT_TEMPLATE,
-                    "offlineTable", OLD_TEST_TABLE_NAME)));
+                    "offlineTable", OLD_TEST_TABLE_NAME, OLD_TEST_TABLE_NAME_ID)));
     assertEquals(1, findAuditMessage(auditMessages,
-        "operation: denied;.*" + "action: scan; targetTable: " + OLD_TEST_TABLE_NAME));
+        "operation: denied;.*action: scan; targetTable: " + OLD_TEST_TABLE_NAME));
     assertEquals(1,
         findAuditMessage(auditMessages,
             "operation: denied;.*"
@@ -522,16 +529,15 @@ public class AuditMessageIT extends ConfigurableMacBase {
     // Test that we get a few "failed" audit messages come through when we tell it to do dumb stuff
     // We don't want the thrown exceptions to stop our tests, and we are not testing that the
     // Exceptions are thrown.
-    try {
-      client.securityOperations().dropLocalUser(AUDIT_USER_2);
-    } catch (AccumuloSecurityException ex) {}
-    try {
-      client.securityOperations().revokeSystemPermission(AUDIT_USER_2,
-          SystemPermission.ALTER_TABLE);
-    } catch (AccumuloSecurityException ex) {}
-    try {
-      client.securityOperations().createLocalUser("root", new PasswordToken("super secret"));
-    } catch (AccumuloSecurityException ex) {}
+    assertThrows(AccumuloSecurityException.class,
+        () -> client.securityOperations().dropLocalUser(AUDIT_USER_2));
+
+    assertThrows(AccumuloSecurityException.class, () -> client.securityOperations()
+        .revokeSystemPermission(AUDIT_USER_2, SystemPermission.ALTER_TABLE));
+
+    assertThrows(AccumuloSecurityException.class, () -> client.securityOperations()
+        .createLocalUser("root", new PasswordToken("super secret")));
+
     ArrayList<String> auditMessages = getAuditMessages("testFailedAudits");
     // ... that will do for now.
     // End of testing activities

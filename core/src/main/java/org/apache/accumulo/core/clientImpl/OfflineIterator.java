@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,30 +18,31 @@
  */
 package org.apache.accumulo.core.clientImpl;
 
+import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.accumulo.core.metadata.schema.TabletMetadata.ColumnType.FILES;
 import static org.apache.accumulo.core.metadata.schema.TabletMetadata.ColumnType.LOCATION;
 import static org.apache.accumulo.core.metadata.schema.TabletMetadata.ColumnType.PREV_ROW;
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.AccumuloException;
+import org.apache.accumulo.core.client.AccumuloSecurityException;
+import org.apache.accumulo.core.client.PluginEnvironment;
 import org.apache.accumulo.core.client.SampleNotPresentException;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
-import org.apache.accumulo.core.conf.IterConfigUtil;
-import org.apache.accumulo.core.conf.IterLoad;
 import org.apache.accumulo.core.conf.Property;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
+import org.apache.accumulo.core.crypto.CryptoFactoryLoader;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.KeyValue;
 import org.apache.accumulo.core.data.PartialKey;
@@ -54,11 +55,11 @@ import org.apache.accumulo.core.file.FileSKVIterator;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
+import org.apache.accumulo.core.iteratorsImpl.IteratorConfigUtil;
 import org.apache.accumulo.core.iteratorsImpl.system.MultiIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.SystemIteratorUtil;
 import org.apache.accumulo.core.manager.state.tables.TableState;
 import org.apache.accumulo.core.metadata.StoredTabletFile;
-import org.apache.accumulo.core.metadata.TabletFile;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection;
 import org.apache.accumulo.core.metadata.schema.TabletMetadata;
 import org.apache.accumulo.core.metadata.schema.TabletsMetadata;
@@ -76,22 +77,20 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
   static class OfflineIteratorEnvironment implements IteratorEnvironment {
 
     private final Authorizations authorizations;
-    private AccumuloConfiguration conf;
-    private boolean useSample;
-    private SamplerConfiguration sampleConf;
+    private final AccumuloConfiguration conf;
+    private final boolean useSample;
+    private final SamplerConfiguration sampleConf;
+    private final ClientContext context;
+    private final TableId tableId;
 
-    public OfflineIteratorEnvironment(Authorizations auths, AccumuloConfiguration acuTableConf,
-        boolean useSample, SamplerConfiguration samplerConf) {
+    public OfflineIteratorEnvironment(ClientContext context, TableId tableId, Authorizations auths,
+        AccumuloConfiguration acuTableConf, boolean useSample, SamplerConfiguration samplerConf) {
+      this.context = context;
+      this.tableId = tableId;
       this.authorizations = auths;
       this.conf = acuTableConf;
       this.useSample = useSample;
       this.sampleConf = samplerConf;
-    }
-
-    @Deprecated(since = "2.0.0")
-    @Override
-    public AccumuloConfiguration getConfig() {
-      return conf;
     }
 
     @Override
@@ -109,13 +108,8 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
       return false;
     }
 
-    private ArrayList<SortedKeyValueIterator<Key,Value>> topLevelIterators = new ArrayList<>();
-
-    @Deprecated(since = "2.0.0")
-    @Override
-    public void registerSideChannel(SortedKeyValueIterator<Key,Value> iter) {
-      topLevelIterators.add(iter);
-    }
+    private final ArrayList<SortedKeyValueIterator<Key,Value>> topLevelIterators =
+        new ArrayList<>();
 
     @Override
     public Authorizations getAuthorizations() {
@@ -123,8 +117,9 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
     }
 
     SortedKeyValueIterator<Key,Value> getTopLevelIterator(SortedKeyValueIterator<Key,Value> iter) {
-      if (topLevelIterators.isEmpty())
+      if (topLevelIterators.isEmpty()) {
         return iter;
+      }
       ArrayList<SortedKeyValueIterator<Key,Value>> allIters = new ArrayList<>(topLevelIterators);
       allIters.add(iter);
       return new MultiIterator(allIters, false);
@@ -142,20 +137,32 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
 
     @Override
     public IteratorEnvironment cloneWithSamplingEnabled() {
-      if (sampleConf == null)
+      if (sampleConf == null) {
         throw new SampleNotPresentException();
-      return new OfflineIteratorEnvironment(authorizations, conf, true, sampleConf);
+      }
+      return new OfflineIteratorEnvironment(context, tableId, authorizations, conf, true,
+          sampleConf);
+    }
+
+    @Override
+    public PluginEnvironment getPluginEnv() {
+      return new ClientServiceEnvironmentImpl(context);
+    }
+
+    @Override
+    public TableId getTableId() {
+      return tableId;
     }
   }
 
   private SortedKeyValueIterator<Key,Value> iter;
   private Range range;
   private KeyExtent currentExtent;
-  private TableId tableId;
-  private Authorizations authorizations;
-  private ClientContext context;
-  private ScannerOptions options;
-  private ArrayList<SortedKeyValueIterator<Key,Value>> readers;
+  private final TableId tableId;
+  private final Authorizations authorizations;
+  private final ClientContext context;
+  private final ScannerOptions options;
+  private final ArrayList<SortedKeyValueIterator<Key,Value>> readers;
 
   public OfflineIterator(ScannerOptions options, ClientContext context,
       Authorizations authorizations, Text table, Range range) {
@@ -175,13 +182,14 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
     try {
       nextTablet();
 
-      while (iter != null && !iter.hasTop())
+      while (iter != null && !iter.hasTop()) {
         nextTablet();
+      }
 
-    } catch (Exception e) {
-      if (e instanceof RuntimeException)
-        throw (RuntimeException) e;
-      throw new RuntimeException(e);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    } catch (AccumuloException | AccumuloSecurityException | TableNotFoundException e) {
+      throw new IllegalStateException(e);
     }
   }
 
@@ -199,36 +207,37 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
 
       iter.next();
 
-      while (iter != null && !iter.hasTop())
+      while (iter != null && !iter.hasTop()) {
         nextTablet();
+      }
 
       return ret;
-    } catch (Exception e) {
-      throw new RuntimeException(e);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    } catch (AccumuloException | AccumuloSecurityException | TableNotFoundException e) {
+      throw new IllegalStateException(e);
     }
   }
 
-  private void nextTablet() throws TableNotFoundException, AccumuloException, IOException {
+  private void nextTablet()
+      throws TableNotFoundException, AccumuloException, IOException, AccumuloSecurityException {
 
-    Range nextRange = null;
+    Range nextRange;
 
     if (currentExtent == null) {
       Text startRow;
 
-      if (range.getStartKey() != null)
+      if (range.getStartKey() != null) {
         startRow = range.getStartKey().getRow();
-      else
+      } else {
         startRow = new Text();
+      }
 
       nextRange = new Range(TabletsSection.encodeRow(tableId, startRow), true, null, false);
     } else {
 
-      if (currentExtent.endRow() == null) {
-        iter = null;
-        return;
-      }
-
-      if (range.afterEndKey(new Key(currentExtent.endRow()).followingKey(PartialKey.ROW))) {
+      if (currentExtent.endRow() == null
+          || range.afterEndKey(new Key(currentExtent.endRow()).followingKey(PartialKey.ROW))) {
         iter = null;
         return;
       }
@@ -239,15 +248,15 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
     TabletMetadata tablet = getTabletFiles(nextRange);
 
     while (tablet.getLocation() != null) {
-      if (Tables.getTableState(context, tableId) != TableState.OFFLINE) {
-        Tables.clearCache(context);
-        if (Tables.getTableState(context, tableId) != TableState.OFFLINE) {
+      if (context.getTableState(tableId) != TableState.OFFLINE) {
+        context.clearTableListCache();
+        if (context.getTableState(tableId) != TableState.OFFLINE) {
           throw new AccumuloException("Table is online " + tableId
               + " cannot scan tablet in offline mode " + tablet.getExtent());
         }
       }
 
-      sleepUninterruptibly(250, TimeUnit.MILLISECONDS);
+      sleepUninterruptibly(250, MILLISECONDS);
 
       tablet = getTabletFiles(nextRange);
     }
@@ -257,9 +266,10 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
           " did not find tablets for table " + tableId + " " + tablet.getExtent());
     }
 
-    if (currentExtent != null && !tablet.getExtent().isPreviousExtent(currentExtent))
+    if (currentExtent != null && !tablet.getExtent().isPreviousExtent(currentExtent)) {
       throw new AccumuloException(
           " " + currentExtent + " is not previous extent " + tablet.getExtent());
+    }
 
     iter = createIterator(tablet.getExtent(), tablet.getFiles());
     iter.seek(range, LocalityGroupUtil.families(options.fetchedColumns),
@@ -277,14 +287,13 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
 
   private SortedKeyValueIterator<Key,Value> createIterator(KeyExtent extent,
       Collection<StoredTabletFile> absFiles)
-      throws TableNotFoundException, AccumuloException, IOException {
-
-    // TODO share code w/ tablet - ACCUMULO-1303
+      throws TableNotFoundException, AccumuloException, IOException, AccumuloSecurityException {
 
     // possible race condition here, if table is renamed
-    String tableName = Tables.getTableName(context, tableId);
-    AccumuloConfiguration acuTableConf =
-        new ConfigurationCopy(context.tableOperations().getConfiguration(tableName));
+    String tableName = context.getTableName(tableId);
+    var tableConf = context.tableOperations().getConfiguration(tableName);
+    AccumuloConfiguration tableCC = new ConfigurationCopy(tableConf);
+    var systemConf = context.instanceOperations().getSystemConfiguration();
 
     Configuration conf = context.getHadoopConf();
 
@@ -297,25 +306,21 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
     SamplerConfiguration scannerSamplerConfig = options.getSamplerConfiguration();
     SamplerConfigurationImpl scannerSamplerConfigImpl =
         scannerSamplerConfig == null ? null : new SamplerConfigurationImpl(scannerSamplerConfig);
-    SamplerConfigurationImpl samplerConfImpl =
-        SamplerConfigurationImpl.newSamplerConfig(acuTableConf);
+    SamplerConfigurationImpl samplerConfImpl = SamplerConfigurationImpl.newSamplerConfig(tableCC);
 
-    if (scannerSamplerConfigImpl != null
-        && ((samplerConfImpl != null && !scannerSamplerConfigImpl.equals(samplerConfImpl))
-            || samplerConfImpl == null)) {
+    if (scannerSamplerConfigImpl != null && !scannerSamplerConfigImpl.equals(samplerConfImpl)) {
       throw new SampleNotPresentException();
     }
-
-    // TODO need to close files - ACCUMULO-1303
-    for (TabletFile file : absFiles) {
-      FileSystem fs = VolumeConfiguration.fileSystemForPath(file.getPathStr(), conf);
+    for (StoredTabletFile file : absFiles) {
+      var cs = CryptoFactoryLoader.getServiceForClientWithTable(systemConf, tableConf, tableId);
+      FileSystem fs = VolumeConfiguration.fileSystemForPath(file.getNormalizedPathStr(), conf);
       FileSKVIterator reader = FileOperations.getInstance().newReaderBuilder()
-          .forFile(file.getPathStr(), fs, conf, CryptoServiceFactory.newDefaultInstance())
-          .withTableConfiguration(acuTableConf).build();
+          .forFile(file, fs, conf, cs).withTableConfiguration(tableCC).build();
       if (scannerSamplerConfigImpl != null) {
         reader = reader.getSample(scannerSamplerConfigImpl);
-        if (reader == null)
+        if (reader == null) {
           throw new SampleNotPresentException();
+        }
       }
       readers.add(reader);
     }
@@ -323,23 +328,22 @@ class OfflineIterator implements Iterator<Entry<Key,Value>> {
     MultiIterator multiIter = new MultiIterator(readers, extent);
 
     OfflineIteratorEnvironment iterEnv =
-        new OfflineIteratorEnvironment(authorizations, acuTableConf, false,
+        new OfflineIteratorEnvironment(context, tableId, authorizations, tableCC, false,
             samplerConfImpl == null ? null : samplerConfImpl.toSamplerConfiguration());
 
     byte[] defaultSecurityLabel;
     ColumnVisibility cv =
-        new ColumnVisibility(acuTableConf.get(Property.TABLE_DEFAULT_SCANTIME_VISIBILITY));
+        new ColumnVisibility(tableCC.get(Property.TABLE_DEFAULT_SCANTIME_VISIBILITY));
     defaultSecurityLabel = cv.getExpression();
 
-    SortedKeyValueIterator<Key,
-        Value> visFilter = SystemIteratorUtil.setupSystemScanIterators(multiIter,
-            new HashSet<>(options.fetchedColumns), authorizations, defaultSecurityLabel,
-            acuTableConf);
-    IterLoad iterLoad = IterConfigUtil.loadIterConf(IteratorScope.scan,
-        options.serverSideIteratorList, options.serverSideIteratorOptions, acuTableConf);
-
-    return iterEnv.getTopLevelIterator(IterConfigUtil.loadIterators(visFilter,
-        iterLoad.iterEnv(iterEnv).useAccumuloClassLoader(false)));
+    SortedKeyValueIterator<Key,Value> visFilter =
+        SystemIteratorUtil.setupSystemScanIterators(multiIter,
+            new HashSet<>(options.fetchedColumns), authorizations, defaultSecurityLabel, tableCC);
+    var iteratorBuilderEnv = IteratorConfigUtil.loadIterConf(IteratorScope.scan,
+        options.serverSideIteratorList, options.serverSideIteratorOptions, tableCC);
+    var iteratorBuilder = iteratorBuilderEnv.env(iterEnv).build();
+    return iterEnv
+        .getTopLevelIterator(IteratorConfigUtil.loadIterators(visFilter, iteratorBuilder));
   }
 
   @Override

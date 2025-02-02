@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -48,18 +48,11 @@ public class DropUserCommand extends Command {
 
   private void doDropUser(final Shell shellState, final String user, final boolean force)
       throws AccumuloException, AccumuloSecurityException {
-    boolean operate = true;
 
-    if (!force) {
-      shellState.getWriter().flush();
-      String line = shellState.getReader().readLine(getName() + " { " + user + " } (yes|no)? ");
-      operate = line != null && (line.equalsIgnoreCase("y") || line.equalsIgnoreCase("yes"));
-    }
-    if (operate) {
+    if (force || shellState.confirm(getName() + " { " + user + " }").orElse(false)) {
       shellState.getAccumuloClient().securityOperations().dropLocalUser(user);
       Shell.log.debug("Deleted user {}", user);
     }
-
   }
 
   @Override

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,14 +18,13 @@
  */
 package org.apache.accumulo.monitor.rest.status;
 
-import java.util.List;
-
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
+import org.apache.accumulo.core.lock.ServiceLockPaths.ServiceLockPath;
 import org.apache.accumulo.core.manager.thrift.ManagerMonitorInfo;
 import org.apache.accumulo.monitor.Monitor;
 
@@ -56,6 +55,8 @@ public class StatusResource {
     Status managerStatus;
     Status gcStatus;
     Status tServerStatus = Status.ERROR;
+    Status coordinatorStatus = monitor.getCoordinatorHost().isPresent() ? Status.OK : Status.ERROR;
+
     ManagerMonitorInfo mmi = monitor.getMmi();
 
     if (mmi != null) {
@@ -65,8 +66,8 @@ public class StatusResource {
         gcStatus = Status.ERROR;
       }
 
-      List<String> managers = monitor.getContext().getManagerLocations();
-      managerStatus = managers.isEmpty() ? Status.ERROR : Status.OK;
+      ServiceLockPath slp = monitor.getContext().getServerPaths().getManager(true);
+      managerStatus = slp == null ? Status.ERROR : Status.OK;
 
       int tServerUp = mmi.getTServerInfoSize();
       int tServerDown = mmi.getDeadTabletServersSize();
@@ -95,7 +96,6 @@ public class StatusResource {
     }
 
     return new StatusInformation(managerStatus.toString(), gcStatus.toString(),
-        tServerStatus.toString(), monitor.recentLogs().numEvents(),
-        monitor.recentLogs().eventsIncludeErrors(), monitor.getProblemSummary().entrySet().size());
+        tServerStatus.toString(), coordinatorStatus.toString());
   }
 }

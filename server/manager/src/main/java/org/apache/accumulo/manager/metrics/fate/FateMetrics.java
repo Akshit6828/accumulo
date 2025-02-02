@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,169 +18,110 @@
  */
 package org.apache.accumulo.manager.metrics.fate;
 
-import java.util.Map;
-import java.util.TreeMap;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import static org.apache.accumulo.core.metrics.Metric.FATE_OPS;
+import static org.apache.accumulo.core.metrics.Metric.FATE_TX;
+import static org.apache.accumulo.core.metrics.Metric.FATE_TYPE_IN_PROGRESS;
 
-import org.apache.accumulo.core.Constants;
-import org.apache.accumulo.fate.ReadOnlyTStore;
-import org.apache.accumulo.fate.ZooStore;
-import org.apache.accumulo.manager.metrics.ManagerMetrics;
+import java.util.EnumMap;
+import java.util.Map.Entry;
+import java.util.Objects;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
+import org.apache.accumulo.core.fate.ReadOnlyFateStore;
+import org.apache.accumulo.core.fate.ReadOnlyFateStore.TStatus;
+import org.apache.accumulo.core.metrics.MetricsProducer;
+import org.apache.accumulo.core.util.threads.ThreadPools;
 import org.apache.accumulo.server.ServerContext;
-import org.apache.hadoop.metrics2.lib.MetricsRegistry;
-import org.apache.hadoop.metrics2.lib.MutableGaugeLong;
-import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class FateMetrics extends ManagerMetrics {
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Tags;
+
+public abstract class FateMetrics<T extends FateMetricValues> implements MetricsProducer {
 
   private static final Logger log = LoggerFactory.getLogger(FateMetrics.class);
 
   // limit calls to update fate counters to guard against hammering zookeeper.
-  private static final long DEFAULT_MIN_REFRESH_DELAY = TimeUnit.SECONDS.toMillis(10);
-  private long minimumRefreshDelay;
+  private static final long DEFAULT_MIN_REFRESH_DELAY = TimeUnit.SECONDS.toMillis(5);
 
-  private static final String FATE_TX_STATE_METRIC_PREFIX = "FateTxState_";
-  private static final String FATE_OP_TYPE_METRIC_PREFIX = "FateTxOpType_";
+  private static final String OP_TYPE_TAG = "op.type";
 
-  private final MutableGaugeLong currentFateOps;
-  private final MutableGaugeLong zkChildFateOpsTotal;
-  private final MutableGaugeLong zkConnectionErrorsTotal;
+  protected final ServerContext context;
+  protected final ReadOnlyFateStore<FateMetrics<T>> readOnlyFateStore;
+  protected final long refreshDelay;
 
-  private final Map<String,MutableGaugeLong> fateTypeCounts = new TreeMap<>();
-  private final Map<String,MutableGaugeLong> fateOpCounts = new TreeMap<>();
-
-  /*
-   * lock should be used to guard read and write access to metricValues and the lastUpdate
-   * timestamp.
-   */
-  private final Lock metricsValuesLock = new ReentrantLock();
-  private FateMetricValues metricValues;
-  private volatile long lastUpdate = 0;
-
-  private final ServerContext context;
-  private final ReadOnlyTStore<FateMetrics> zooStore;
-  private final String fateRootPath;
+  protected final AtomicLong totalCurrentOpsCount = new AtomicLong(0);
+  private final EnumMap<TStatus,AtomicLong> txStatusCounters = new EnumMap<>(TStatus.class);
 
   public FateMetrics(final ServerContext context, final long minimumRefreshDelay) {
-    super("Fate", "Fate Metrics", "fate");
-
     this.context = context;
-    fateRootPath = context.getZooKeeperRoot() + Constants.ZFATE;
+    this.refreshDelay = Math.max(DEFAULT_MIN_REFRESH_DELAY, minimumRefreshDelay);
+    this.readOnlyFateStore = Objects.requireNonNull(buildReadOnlyStore(context));
 
-    try {
-
-      zooStore = new ZooStore<>(fateRootPath, context.getZooReaderWriter());
-
-    } catch (KeeperException ex) {
-      throw new IllegalStateException(
-          "FATE Metrics - Failed to create zoo store - metrics unavailable", ex);
-    } catch (InterruptedException ex) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException(
-          "FATE Metrics - Interrupt received while initializing zoo store");
-    }
-
-    this.minimumRefreshDelay = Math.max(DEFAULT_MIN_REFRESH_DELAY, minimumRefreshDelay);
-
-    // lock not necessary in constructor.
-    metricValues = FateMetricValues.getFromZooKeeper(context, fateRootPath, zooStore);
-
-    MetricsRegistry registry = super.getRegistry();
-
-    currentFateOps = registry.newGauge("currentFateOps", "Current number of FATE Ops", 0L);
-    zkChildFateOpsTotal = registry.newGauge("totalFateOps", "Total FATE Ops", 0L);
-    zkConnectionErrorsTotal =
-        registry.newGauge("totalZkConnErrors", "Total ZK Connection Errors", 0L);
-
-    for (ReadOnlyTStore.TStatus t : ReadOnlyTStore.TStatus.values()) {
-      MutableGaugeLong g = registry.newGauge(FATE_TX_STATE_METRIC_PREFIX + t.name().toUpperCase(),
-          "Transaction count for " + t.name() + " transactions", 0L);
-      fateTypeCounts.put(t.name(), g);
+    for (TStatus status : TStatus.values()) {
+      txStatusCounters.put(status, new AtomicLong(0));
     }
   }
 
-  /**
-   * For testing only: allow refresh delay to be set to any value, over riding the enforced minimum.
-   *
-   * @param minimumRefreshDelay
-   *          set new min refresh value, in seconds.
-   */
-  public void overrideRefresh(final long minimumRefreshDelay) {
-    long delay = Math.max(0, minimumRefreshDelay);
-    this.minimumRefreshDelay = TimeUnit.SECONDS.toMillis(delay);
+  protected abstract ReadOnlyFateStore<FateMetrics<T>> buildReadOnlyStore(ServerContext context);
+
+  protected abstract T getMetricValues();
+
+  protected void update() {
+    update(getMetricValues());
+  }
+
+  protected void update(T metricValues) {
+    totalCurrentOpsCount.set(metricValues.getCurrentFateOps());
+
+    for (Entry<TStatus,Long> entry : metricValues.getTxStateCounters().entrySet()) {
+      AtomicLong counter = txStatusCounters.get(entry.getKey());
+      if (counter != null) {
+        counter.set(entry.getValue());
+      } else {
+        log.warn("Unhandled TStatus: {}", entry.getKey());
+      }
+    }
+
+    metricValues.getOpTypeCounters().forEach((name, count) -> Metrics
+        .gauge(FATE_TYPE_IN_PROGRESS.getName(), Tags.of(OP_TYPE_TAG, name), count));
   }
 
   @Override
-  protected void prepareMetrics() {
+  public void registerMetrics(final MeterRegistry registry) {
+    String type = readOnlyFateStore.type().name().toLowerCase();
 
-    metricsValuesLock.lock();
-    try {
+    Gauge.builder(FATE_OPS.getName(), totalCurrentOpsCount, AtomicLong::get)
+        .description(FATE_OPS.getDescription()).register(registry);
 
-      long now = System.currentTimeMillis();
+    txStatusCounters.forEach((status, counter) -> Gauge
+        .builder(FATE_TX.getName(), counter, AtomicLong::get).description(FATE_TX.getDescription())
+        .tags("state", status.name().toLowerCase(), "instanceType", type).register(registry));
 
-      if ((lastUpdate + minimumRefreshDelay) < now) {
-        metricValues = FateMetricValues.getFromZooKeeper(context, fateRootPath, zooStore);
-        lastUpdate = now;
+    // get fate status is read only operation - no reason to be nice on shutdown.
+    ScheduledExecutorService scheduler = ThreadPools.getServerThreadPools()
+        .createScheduledExecutorService(1, type + "FateMetricsPoller");
+    Runtime.getRuntime().addShutdownHook(new Thread(scheduler::shutdownNow));
 
-        recordValues();
+    // Only update as part of the scheduler thread.
+    // We have to call update() in a new thread because this method to
+    // register metrics is called on start up in the Manager before it's finished
+    // initializing, so we can't scan the User fate store until after startup is done.
+    // If we called update() here in this method directly we would get stuck forever.
+    ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> {
+      try {
+        update();
+      } catch (Exception ex) {
+        log.info("Failed to update {}fate metrics due to exception", type, ex);
       }
-    } finally {
-      metricsValuesLock.unlock();
-    }
-  }
-
-  /**
-   * Update the metrics gauges from the measured values - this method assumes that concurrent access
-   * is controlled externally to this method with the metricsValueLock, and that the lock has been
-   * acquired before calling this method, and then released by the caller.
-   */
-  private void recordValues() {
-
-    // update individual gauges that are reported.
-    currentFateOps.set(metricValues.getCurrentFateOps());
-    zkChildFateOpsTotal.set(metricValues.getZkFateChildOpsTotal());
-    zkConnectionErrorsTotal.set(metricValues.getZkConnectionErrors());
-
-    // the number FATE Tx states (NEW< IN_PROGRESS...) are fixed - the underlying
-    // getTxStateCounters call will return a current valid count for each possible state.
-    Map<String,Long> states = metricValues.getTxStateCounters();
-
-    states.forEach((key,
-        value) -> fateTypeCounts.computeIfAbsent(key,
-            v -> super.getRegistry().newGauge(metricNameHelper(FATE_TX_STATE_METRIC_PREFIX, key),
-                "By transaction state count for " + key, value))
-            .set(value));
-
-    // the op types are dynamic and the metric gauges generated when first seen. After
-    // that the values need to be cleared and set to any new values present. This is so
-    // that the metrics system will report "known" values once seen. In operation, the
-    // number of types will be a fairly small set and should populate a consistent set
-    // with normal operations.
-
-    // clear current values.
-    fateOpCounts.forEach((key, value) -> value.set(0));
-
-    // update new counts, create new gauge if first time seen.
-    Map<String,Long> opTypes = metricValues.getOpTypeCounters();
-
-    log.trace("OP Counts Before: prev {}, updates {}", fateOpCounts, opTypes);
-
-    opTypes.forEach((key,
-        value) -> fateOpCounts.computeIfAbsent(key,
-            gauge -> super.getRegistry().newGauge(metricNameHelper(FATE_OP_TYPE_METRIC_PREFIX, key),
-                "By transaction op type count for " + key, value))
-            .set(value));
-
-    log.trace("OP Counts After: prev {}, updates {}", fateOpCounts, opTypes);
-
-  }
-
-  private String metricNameHelper(final String prefix, final String name) {
-    return prefix + name;
+    }, 0, refreshDelay, TimeUnit.MILLISECONDS);
+    ThreadPools.watchNonCriticalScheduledTask(future);
   }
 
 }

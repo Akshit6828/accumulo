@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -56,10 +56,12 @@ public abstract class TableOperationsHelper implements TableOperations {
     for (IteratorScope scope : scopes) {
       String root = String.format("%s%s.%s", Property.TABLE_ITERATOR_PREFIX,
           scope.name().toLowerCase(), setting.getName());
-      for (Entry<String,String> prop : setting.getOptions().entrySet()) {
-        this.setProperty(tableName, root + ".opt." + prop.getKey(), prop.getValue());
-      }
-      this.setProperty(tableName, root, setting.getPriority() + "," + setting.getIteratorClass());
+      this.modifyProperties(tableName, properties -> {
+        for (Entry<String,String> prop : setting.getOptions().entrySet()) {
+          properties.put(root + ".opt." + prop.getKey(), prop.getValue());
+        }
+        properties.put(root, setting.getPriority() + "," + setting.getIteratorClass());
+      });
     }
   }
 
@@ -72,16 +74,16 @@ public abstract class TableOperationsHelper implements TableOperations {
     for (IteratorScope scope : scopes) {
       String root = String.format("%s%s.%s", Property.TABLE_ITERATOR_PREFIX,
           scope.name().toLowerCase(), name);
-      for (Entry<String,String> property : copy.entrySet()) {
-        if (property.getKey().equals(root) || property.getKey().startsWith(root + ".opt."))
-          this.removeProperty(tableName, property.getKey());
-      }
+      this.modifyProperties(tableName,
+          properties -> copy.keySet().stream()
+              .filter(prop -> prop.equals(root) || prop.startsWith(root + ".opt."))
+              .forEach(properties::remove));
     }
   }
 
   @Override
   public IteratorSetting getIteratorSetting(String tableName, String name, IteratorScope scope)
-      throws AccumuloException, TableNotFoundException {
+      throws AccumuloSecurityException, AccumuloException, TableNotFoundException {
     EXISTING_TABLE_NAME.validate(tableName);
     checkArgument(name != null, "name is null");
     checkArgument(scope != null, "scope is null");
@@ -113,7 +115,7 @@ public abstract class TableOperationsHelper implements TableOperations {
 
   @Override
   public Map<String,EnumSet<IteratorScope>> listIterators(String tableName)
-      throws AccumuloException, TableNotFoundException {
+      throws AccumuloSecurityException, AccumuloException, TableNotFoundException {
     EXISTING_TABLE_NAME.validate(tableName);
 
     Map<String,EnumSet<IteratorScope>> result = new TreeMap<>();
@@ -123,8 +125,9 @@ public abstract class TableOperationsHelper implements TableOperations {
       if (parts.length == 4) {
         if (parts[0].equals("table") && parts[1].equals("iterator")) {
           IteratorScope scope = IteratorScope.valueOf(parts[2]);
-          if (!result.containsKey(parts[3]))
+          if (!result.containsKey(parts[3])) {
             result.put(parts[3], EnumSet.noneOf(IteratorScope.class));
+          }
           result.get(parts[3]).add(scope);
         }
       }
@@ -144,30 +147,36 @@ public abstract class TableOperationsHelper implements TableOperations {
       Map<String,String> optionConflicts = new TreeMap<>();
       for (Entry<String,String> property : props.entrySet()) {
         if (property.getKey().startsWith(scopeStr)) {
-          if (property.getKey().equals(nameStr))
+          if (property.getKey().equals(nameStr)) {
             throw new AccumuloException(new IllegalArgumentException("iterator name conflict for "
                 + setting.getName() + ": " + property.getKey() + "=" + property.getValue()));
-          if (property.getKey().startsWith(optStr))
+          }
+          if (property.getKey().startsWith(optStr)) {
             optionConflicts.put(property.getKey(), property.getValue());
-          if (property.getKey().contains(".opt."))
+          }
+          if (property.getKey().contains(".opt.")) {
             continue;
+          }
           String[] parts = property.getValue().split(",");
-          if (parts.length != 2)
+          if (parts.length != 2) {
             throw new AccumuloException("Bad value for existing iterator setting: "
                 + property.getKey() + "=" + property.getValue());
+          }
           try {
-            if (Integer.parseInt(parts[0]) == setting.getPriority())
+            if (Integer.parseInt(parts[0]) == setting.getPriority()) {
               throw new AccumuloException(new IllegalArgumentException(
                   "iterator priority conflict: " + property.getKey() + "=" + property.getValue()));
+            }
           } catch (NumberFormatException e) {
             throw new AccumuloException("Bad value for existing iterator setting: "
                 + property.getKey() + "=" + property.getValue());
           }
         }
       }
-      if (!optionConflicts.isEmpty())
+      if (!optionConflicts.isEmpty()) {
         throw new AccumuloException(new IllegalArgumentException(
             "iterator options conflict for " + setting.getName() + ": " + optionConflicts));
+      }
     }
   }
 
@@ -201,11 +210,13 @@ public abstract class TableOperationsHelper implements TableOperations {
       }
     }
     i = 1;
-    while (constraintNumbers.contains(i))
+    while (constraintNumbers.contains(i)) {
       i++;
-    if (constraintClasses.containsKey(constraintClassName))
+    }
+    if (constraintClasses.containsKey(constraintClassName)) {
       throw new AccumuloException("Constraint " + constraintClassName + " already exists for table "
           + tableName + " with number " + constraintClasses.get(constraintClassName));
+    }
     this.setProperty(tableName, Property.TABLE_CONSTRAINT_PREFIX.toString() + i,
         constraintClassName);
     return i;
@@ -225,10 +236,11 @@ public abstract class TableOperationsHelper implements TableOperations {
     Map<String,Integer> constraints = new TreeMap<>();
     for (Entry<String,String> property : this.getProperties(tableName)) {
       if (property.getKey().startsWith(Property.TABLE_CONSTRAINT_PREFIX.toString())) {
-        if (constraints.containsKey(property.getValue()))
+        if (constraints.containsKey(property.getValue())) {
           throw new AccumuloException("Same constraint configured twice: " + property.getKey() + "="
               + Property.TABLE_CONSTRAINT_PREFIX + constraints.get(property.getValue()) + "="
               + property.getKey());
+        }
         try {
           constraints.put(property.getValue(), Integer.parseInt(
               property.getKey().substring(Property.TABLE_CONSTRAINT_PREFIX.toString().length())));

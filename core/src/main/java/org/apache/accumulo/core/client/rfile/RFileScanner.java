@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,6 +19,7 @@
 package org.apache.accumulo.core.client.rfile;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -38,11 +39,8 @@ import org.apache.accumulo.core.clientImpl.ScannerOptions;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
-import org.apache.accumulo.core.conf.IterConfigUtil;
-import org.apache.accumulo.core.conf.IterLoad;
 import org.apache.accumulo.core.conf.Property;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory.ClassloaderType;
+import org.apache.accumulo.core.crypto.CryptoFactoryLoader;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Column;
 import org.apache.accumulo.core.data.Key;
@@ -59,6 +57,8 @@ import org.apache.accumulo.core.iterators.IteratorAdapter;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
+import org.apache.accumulo.core.iteratorsImpl.IteratorBuilder;
+import org.apache.accumulo.core.iteratorsImpl.IteratorConfigUtil;
 import org.apache.accumulo.core.iteratorsImpl.system.MultiIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.SystemIteratorUtil;
 import org.apache.accumulo.core.sample.impl.SamplerConfigurationImpl;
@@ -67,6 +67,7 @@ import org.apache.accumulo.core.spi.cache.BlockCache;
 import org.apache.accumulo.core.spi.cache.BlockCacheManager;
 import org.apache.accumulo.core.spi.cache.CacheEntry;
 import org.apache.accumulo.core.spi.cache.CacheType;
+import org.apache.accumulo.core.spi.crypto.CryptoEnvironment;
 import org.apache.accumulo.core.spi.crypto.CryptoService;
 import org.apache.accumulo.core.util.LocalityGroupUtil;
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -140,6 +141,11 @@ class RFileScanner extends ScannerOptions implements Scanner {
         public long requestCount() {
           return 0L;
         }
+
+        @Override
+        public long evictionCount() {
+          return 0L;
+        }
       };
     }
 
@@ -208,13 +214,12 @@ class RFileScanner extends ScannerOptions implements Scanner {
         if (opts.dataCacheSize > 0) {
           cc.set(Property.TSERV_DATACACHE_SIZE, Long.toString(opts.dataCacheSize));
         }
-        blockCacheManager.start(new BlockCacheConfiguration(cc));
+        blockCacheManager.start(BlockCacheConfiguration.forTabletServer(cc));
         this.indexCache = blockCacheManager.getBlockCache(CacheType.INDEX);
         this.dataCache = blockCacheManager.getBlockCache(CacheType.DATA);
-      } catch (RuntimeException e) {
-        throw e;
-      } catch (Exception e) {
-        throw new RuntimeException(e);
+      } catch (ReflectiveOperationException e) {
+        throw new IllegalArgumentException(
+            "Configuration does not contain loadable class for block cache manager factory", e);
       }
     }
     if (indexCache == null) {
@@ -223,7 +228,8 @@ class RFileScanner extends ScannerOptions implements Scanner {
     if (this.dataCache == null) {
       this.dataCache = new NoopCache();
     }
-    this.cryptoService = CryptoServiceFactory.newInstance(tableConf, ClassloaderType.JAVA);
+    this.cryptoService =
+        CryptoFactoryLoader.getServiceForClient(CryptoEnvironment.Scope.TABLE, opts.tableConfig);
   }
 
   @Override
@@ -346,11 +352,11 @@ class RFileScanner extends ScannerOptions implements Scanner {
 
       for (int i = 0; i < sources.length; i++) {
         // TODO may have been a bug with multiple files and caching in older version...
-        FSDataInputStream inputStream = (FSDataInputStream) sources[i].getInputStream();
-        CachableBuilder cb = new CachableBuilder().cacheId("source-" + i).input(inputStream)
+        CachableBuilder cb = new CachableBuilder()
+            .input((FSDataInputStream) sources[i].getInputStream(), "source-" + i)
             .length(sources[i].getLength()).conf(opts.in.getConf()).cacheProvider(cacheProvider)
             .cryptoService(cryptoService);
-        readers.add(new RFile.Reader(cb));
+        readers.add(RFile.getReader(cb, sources[i].getRange()));
       }
 
       if (getSamplerConfiguration() != null) {
@@ -378,24 +384,24 @@ class RFileScanner extends ScannerOptions implements Scanner {
 
       try {
         if (opts.tableConfig != null && !opts.tableConfig.isEmpty()) {
-          IterLoad il = IterConfigUtil.loadIterConf(IteratorScope.scan, serverSideIteratorList,
+          var ibEnv = IteratorConfigUtil.loadIterConf(IteratorScope.scan, serverSideIteratorList,
               serverSideIteratorOptions, tableConf);
-          iterator = IterConfigUtil.loadIterators(iterator,
-              il.iterEnv(new IterEnv()).useAccumuloClassLoader(true));
+          var iteratorBuilder = ibEnv.env(new IterEnv()).build();
+          iterator = IteratorConfigUtil.loadIterators(iterator, iteratorBuilder);
         } else {
-          iterator = IterConfigUtil.loadIterators(iterator,
-              new IterLoad().iters(serverSideIteratorList).iterOpts(serverSideIteratorOptions)
-                  .iterEnv(new IterEnv()).useAccumuloClassLoader(false));
+          var iteratorBuilder = IteratorBuilder.builder(serverSideIteratorList)
+              .opts(serverSideIteratorOptions).env(new IterEnv()).build();
+          iterator = IteratorConfigUtil.loadIterators(iterator, iteratorBuilder);
         }
       } catch (IOException e) {
-        throw new RuntimeException(e);
+        throw new UncheckedIOException(e);
       }
 
       iterator.seek(getRange() == null ? EMPTY_RANGE : getRange(), families, !families.isEmpty());
       return new IteratorAdapter(iterator);
 
     } catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new UncheckedIOException(e);
     }
   }
 
@@ -406,14 +412,10 @@ class RFileScanner extends ScannerOptions implements Scanner {
         source.getInputStream().close();
       }
     } catch (IOException e) {
-      throw new RuntimeException(e);
+      throw new UncheckedIOException(e);
     }
-    try {
-      if (this.blockCacheManager != null) {
-        this.blockCacheManager.stop();
-      }
-    } catch (Exception e1) {
-      throw new RuntimeException(e1);
+    if (this.blockCacheManager != null) {
+      this.blockCacheManager.stop();
     }
   }
 }

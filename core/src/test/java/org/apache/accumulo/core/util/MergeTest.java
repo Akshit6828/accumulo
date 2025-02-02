@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,8 +18,8 @@
  */
 package org.apache.accumulo.core.util;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -28,9 +28,10 @@ import java.util.List;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.util.Merge.Size;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class MergeTest {
 
@@ -42,10 +43,11 @@ public class MergeTest {
       Text start = null;
       for (Integer size : sizes) {
         Text end;
-        if (tablets.size() == sizes.length - 1)
+        if (tablets.size() == sizes.length - 1) {
           end = null;
-        else
+        } else {
           end = new Text(String.format("%05d", tablets.size()));
+        }
         KeyExtent extent = new KeyExtent(TableId.of("table"), end, start);
         start = end;
         tablets.add(new Size(extent, size));
@@ -56,8 +58,34 @@ public class MergeTest {
     protected void message(String format, Object... args) {}
 
     @Override
-    protected Iterator<Size> getSizeIterator(AccumuloClient client, String tablename,
-        final Text start, final Text end) throws MergeException {
+    public void mergomatic(AccumuloClient client, String table, Text start, Text end, long goalSize,
+        boolean force) throws MergeException {
+      if (table.equals(AccumuloTable.METADATA.tableName())) {
+        throw new IllegalArgumentException("cannot merge tablets on the metadata table");
+      }
+
+      List<Size> sizes = new ArrayList<>();
+      long totalSize = 0;
+
+      Iterator<Size> sizeIterator = getSizeIterator(start, end);
+
+      while (sizeIterator.hasNext()) {
+        Size next = sizeIterator.next();
+        totalSize += next.size;
+        sizes.add(next);
+        if (totalSize > goalSize) {
+          mergeMany(client, table, sizes, goalSize, force, false);
+          sizes.clear();
+          sizes.add(next);
+          totalSize = next.size;
+        }
+      }
+      if (sizes.size() > 1) {
+        mergeMany(client, table, sizes, goalSize, force, true);
+      }
+    }
+
+    protected Iterator<Size> getSizeIterator(final Text start, final Text end) {
       final Iterator<Size> impl = tablets.iterator();
       return new Iterator<>() {
         Size next = skip();
@@ -72,13 +100,15 @@ public class MergeTest {
             Size candidate = impl.next();
             if (start != null) {
               if (candidate.extent.endRow() != null
-                  && candidate.extent.endRow().compareTo(start) < 0)
+                  && candidate.extent.endRow().compareTo(start) < 0) {
                 continue;
+              }
             }
             if (end != null) {
               if (candidate.extent.prevEndRow() != null
-                  && candidate.extent.prevEndRow().compareTo(end) >= 0)
+                  && candidate.extent.prevEndRow().compareTo(end) >= 0) {
                 continue;
+              }
             }
             return candidate;
           }

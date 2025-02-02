@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -16,60 +16,71 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+"use strict";
+
+var scansList;
 
 /**
  * Creates scans initial table
  */
-$(document).ready(function() {
-  refreshScans();
+$(function () {
+  // Create a table for scans list
+  scansList = $('#scansList').DataTable({
+    "ajax": {
+      "url": '/rest/scans',
+      "dataSrc": "scans"
+    },
+    "stateSave": true,
+    "dom": 't<"align-left"l>p',
+    "columnDefs": [{
+        "targets": "duration",
+        "render": function (data, type, row) {
+          if (type === 'display') data = timeDuration(data);
+          return data;
+        }
+      },
+      {
+        "targets": "date",
+        "render": function (data, type, row) {
+          if (type === 'display') data = dateFormat(data);
+          return data;
+        }
+      }
+    ],
+    "columns": [{
+        "data": "server",
+        "type": "html",
+        "render": function (data, type, row, meta) {
+          if (type === 'display') {
+            data = '<a href="/tservers?s=' + row.server + '">' + row.server + '</a>';
+          }
+          return data;
+        }
+      },
+      {
+        "data": "scanCount"
+      },
+      {
+        "data": "oldestScan"
+      },
+      {
+        "data": "fetched"
+      },
+    ]
+  });
 });
 
-/**
- * Makes the REST calls, generates the tables with the new information
- */
-function refreshScans() {
-  getScans().then(function() {
-    refreshScansTable();
-  });
-}
 
 /**
  * Used to redraw the page
  */
 function refresh() {
-  refreshScans();
+  refreshScansTable();
 }
 
 /**
  * Generates the scans table
  */
 function refreshScansTable() {
-  clearTableBody('scanStatus');
-
-  var data = sessionStorage.scans === undefined ?
-      [] : JSON.parse(sessionStorage.scans);
-
-  if (data.length === 0 || data.scans.length === 0) {
-    var items = createEmptyRow(3, 'Empty');
-
-    $('<tr/>', {
-      html: items
-    }).appendTo('#scanStatus tbody');
-  } else {
-    $.each(data.scans, function(key, val) {
-      var items = [];
-
-      items.push(createFirstCell(val.server,
-          '<a href="/tservers?s=' + val.server + '">' + val.server +
-          '</a>'));
-
-      items.push(createRightCell(val.scanCount, val.scanCount));
-
-      items.push(createRightCell(val.oldestScan, timeDuration(val.oldestScan)));
-
-      $('<tr/>', {
-        html: items.join('')
-      }).appendTo('#scanStatus tbody');
-    });
-  }
+  if (scansList) scansList.ajax.reload(null, false); // user paging is not reset on reload
 }

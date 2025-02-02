@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,6 +28,7 @@ import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.security.tokens.AuthenticationToken;
 import org.apache.accumulo.core.client.security.tokens.AuthenticationToken.AuthenticationTokenSerializer;
 import org.apache.accumulo.core.clientImpl.thrift.SecurityErrorCode;
+import org.apache.accumulo.core.data.InstanceId;
 import org.apache.accumulo.core.securityImpl.thrift.TCredentials;
 
 /**
@@ -42,18 +43,16 @@ import org.apache.accumulo.core.securityImpl.thrift.TCredentials;
  */
 public class Credentials {
 
-  private String principal;
-  private AuthenticationToken token;
+  private final String principal;
+  private final AuthenticationToken token;
 
   /**
    * Creates a new credentials object.
    *
-   * @param principal
-   *          unique identifier for the entity (e.g. a user or service) authorized for these
-   *          credentials
-   * @param token
-   *          authentication token used to prove that the principal for these credentials has been
-   *          properly verified
+   * @param principal unique identifier for the entity (e.g. a user or service) authorized for these
+   *        credentials
+   * @param token authentication token used to prove that the principal for these credentials has
+   *        been properly verified
    */
   public Credentials(String principal, AuthenticationToken token) {
     this.principal = principal;
@@ -85,26 +84,25 @@ public class Credentials {
    * a non-destroyable version of the {@link AuthenticationToken}, so this should be used just
    * before placing on the wire, and references to it should be tightly controlled.
    *
-   * @param instanceID
-   *          Accumulo instance ID
+   * @param instanceID Accumulo instance ID
    * @return Thrift credentials
-   * @throws RuntimeException
-   *           if the authentication token has been destroyed (expired)
+   * @throws IllegalStateException if the authentication token has been destroyed (expired)
    */
-  public TCredentials toThrift(String instanceID) {
+  public TCredentials toThrift(InstanceId instanceID) {
     TCredentials tCreds = new TCredentials(getPrincipal(), getToken().getClass().getName(),
-        ByteBuffer.wrap(AuthenticationTokenSerializer.serialize(getToken())), instanceID);
-    if (getToken().isDestroyed())
-      throw new RuntimeException("Token has been destroyed",
+        ByteBuffer.wrap(AuthenticationTokenSerializer.serialize(getToken())),
+        instanceID.canonical());
+    if (getToken().isDestroyed()) {
+      throw new IllegalStateException("Token has been destroyed",
           new AccumuloSecurityException(getPrincipal(), SecurityErrorCode.TOKEN_EXPIRED));
+    }
     return tCreds;
   }
 
   /**
    * Converts a given thrift object to our internal Credentials representation.
    *
-   * @param serialized
-   *          a Thrift encoded set of credentials
+   * @param serialized a Thrift encoded set of credentials
    * @return a new Credentials instance; destroy the token when you're done.
    */
   public static Credentials fromThrift(TCredentials serialized) {
@@ -133,8 +131,7 @@ public class Credentials {
    * Converts the serialized form to an instance of {@link Credentials}. The original serialized
    * form will not be affected.
    *
-   * @param serializedForm
-   *          serialized form of credentials
+   * @param serializedForm serialized form of credentials
    * @return deserialized credentials
    */
   public static final Credentials deserialize(String serializedForm) {
@@ -158,14 +155,16 @@ public class Credentials {
 
   @Override
   public boolean equals(Object obj) {
-    if (obj == null || !(obj instanceof Credentials))
+    if (obj == null || !(obj instanceof Credentials)) {
       return false;
+    }
     Credentials other = Credentials.class.cast(obj);
     boolean pEq = getPrincipal() == null ? (other.getPrincipal() == null)
-        : (getPrincipal().equals(other.getPrincipal()));
-    if (!pEq)
+        : getPrincipal().equals(other.getPrincipal());
+    if (!pEq) {
       return false;
-    return getToken() == null ? (other.getToken() == null) : (getToken().equals(other.getToken()));
+    }
+    return getToken() == null ? (other.getToken() == null) : getToken().equals(other.getToken());
   }
 
   @Override

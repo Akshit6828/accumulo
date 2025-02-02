@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,14 +18,14 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
@@ -43,7 +43,7 @@ import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.accumulo.test.constraints.AlphaNumKeyConstraint;
 import org.apache.accumulo.test.constraints.NumericValueConstraint;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,8 +51,8 @@ public class ConstraintIT extends AccumuloClusterHarness {
   private static final Logger log = LoggerFactory.getLogger(ConstraintIT.class);
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 60;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(1);
   }
 
   @Test
@@ -66,7 +66,7 @@ public class ConstraintIT extends AccumuloClusterHarness {
       }
 
       // A static sleep to just let ZK do its thing
-      Thread.sleep(10 * 1000);
+      Thread.sleep(10_000);
 
       // Then check that the client has at least gotten the updates
       for (String table : tableNames) {
@@ -162,7 +162,7 @@ public class ConstraintIT extends AccumuloClusterHarness {
 
       // remove the numeric value constraint
       client.tableOperations().removeConstraint(tableName, 2);
-      sleepUninterruptibly(1, TimeUnit.SECONDS);
+      Thread.sleep(SECONDS.toMillis(1));
 
       // now should be able to add a non numeric value
       bw = client.createBatchWriter(tableName);
@@ -188,8 +188,8 @@ public class ConstraintIT extends AccumuloClusterHarness {
 
       // add a constraint that references a non-existent class
       client.tableOperations().setProperty(tableName, Property.TABLE_CONSTRAINT_PREFIX + "1",
-          "com.foobar.nonExistantClass");
-      sleepUninterruptibly(1, TimeUnit.SECONDS);
+          "com.foobar.nonExistentClass");
+      Thread.sleep(SECONDS.toMillis(1));
 
       // add a mutation
       bw = client.createBatchWriter(tableName);
@@ -232,7 +232,7 @@ public class ConstraintIT extends AccumuloClusterHarness {
 
       // remove the bad constraint
       client.tableOperations().removeConstraint(tableName, 1);
-      sleepUninterruptibly(1, TimeUnit.SECONDS);
+      Thread.sleep(SECONDS.toMillis(1));
 
       // try the mutation again
       bw = client.createBatchWriter(tableName);

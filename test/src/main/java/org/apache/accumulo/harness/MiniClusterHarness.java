@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,7 +23,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 import static org.apache.hadoop.minikdc.MiniKdc.JAVA_SECURITY_KRB5_CONF;
 import static org.apache.hadoop.minikdc.MiniKdc.SUN_SECURITY_KRB5_DEBUG;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -66,8 +66,7 @@ public class MiniClusterHarness {
 
   public MiniAccumuloClusterImpl create(AccumuloITBase testBase, AuthenticationToken token,
       TestingKdc kdc, MiniClusterConfigurationCallback configCallback) throws Exception {
-    return create(testBase.getClass().getName(), testBase.testName.getMethodName(), token,
-        configCallback, kdc);
+    return create(testBase.getClass().getName(), testBase.testName(), token, configCallback, kdc);
   }
 
   public MiniAccumuloClusterImpl create(String testClassName, String testMethodName,
@@ -105,8 +104,9 @@ public class MiniClusterHarness {
     // classpath)
     if (coreSite.size() > 0) {
       File csFile = new File(miniCluster.getConfig().getConfDir(), "core-site.xml");
-      if (csFile.exists())
+      if (csFile.exists()) {
         throw new RuntimeException(csFile + " already exist");
+      }
 
       OutputStream out = new BufferedOutputStream(
           new FileOutputStream(new File(miniCluster.getConfig().getConfDir(), "core-site.xml")));
@@ -207,10 +207,6 @@ public class MiniClusterHarness {
     cfg.setProperty(Property.INSTANCE_SECURITY_AUTHORIZOR, KerberosAuthorizor.class.getName());
     cfg.setProperty(Property.INSTANCE_SECURITY_PERMISSION_HANDLER,
         KerberosPermissionHandler.class.getName());
-    // Piggy-back on the "system user" credential, but use it as a normal KerberosToken, not the
-    // SystemToken.
-    cfg.setProperty(Property.TRACE_USER, serverUser.getPrincipal());
-    cfg.setProperty(Property.TRACE_TOKEN_TYPE, KerberosToken.CLASS_NAME);
 
     // Pass down some KRB5 debug properties
     Map<String,String> systemProperties = cfg.getSystemProperties();

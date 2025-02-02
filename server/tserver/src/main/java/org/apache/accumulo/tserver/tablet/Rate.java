@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,12 +27,12 @@ public class Rate {
   /**
    * Turn a counter into an exponentially smoothed rate over time.
    *
-   * @param ratio
-   *          the rate at which each update influences the curve; must be (0., 1.0)
+   * @param ratio the rate at which each update influences the curve; must be (0., 1.0)
    */
   public Rate(double ratio) {
-    if (ratio <= 0. || ratio >= 1.0)
+    if (ratio <= 0. || ratio >= 1.0) {
       throw new IllegalArgumentException("ratio must be > 0. and < 1.0");
+    }
     this.ratio = ratio;
   }
 
@@ -46,7 +46,7 @@ public class Rate {
       throw new IllegalArgumentException("update time < last value");
     }
     double keep = 1. - ratio;
-    current = (keep * current + ratio * ((counter - lastCounter)) * 1000. / (when - lastTime));
+    current = (keep * current + ratio * (counter - lastCounter) * 1000. / (when - lastTime));
     lastTime = when;
     lastCounter = counter;
     return current;

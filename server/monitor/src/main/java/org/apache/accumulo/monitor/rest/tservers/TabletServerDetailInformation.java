@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,8 +28,6 @@ public class TabletServerDetailInformation {
   // Variable names become JSON keys
   public int hostedTablets;
   public int minors;
-  public int majors;
-  public int splits;
   public long entries;
 
   public TabletServerDetailInformation() {}
@@ -37,23 +35,13 @@ public class TabletServerDetailInformation {
   /**
    * Store new tserver details
    *
-   * @param hostedTablets
-   *          Number of hosted tablets
-   * @param entries
-   *          Number of entries
-   * @param minors
-   *          Number of minor compactions
-   * @param majors
-   *          Number of major compactions
-   * @param splits
-   *          Number of splits
+   * @param hostedTablets Number of hosted tablets
+   * @param entries Number of entries
+   * @param minors Number of minor compactions
    */
-  public TabletServerDetailInformation(int hostedTablets, long entries, int minors, int majors,
-      int splits) {
+  public TabletServerDetailInformation(int hostedTablets, long entries, int minors) {
     this.hostedTablets = hostedTablets;
     this.entries = entries;
     this.minors = minors;
-    this.majors = majors;
-    this.splits = splits;
   }
 }

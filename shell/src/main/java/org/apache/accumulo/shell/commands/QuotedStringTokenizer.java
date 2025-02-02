@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -89,8 +89,9 @@ public class QuotedStringTokenizer implements Iterable<String> {
           byte b;
           try {
             b = (byte) (0xff & Short.parseShort(hexChars, 16));
-            if (!Character.isValidCodePoint(0xff & b))
+            if (!Character.isValidCodePoint(0xff & b)) {
               throw new NumberFormatException();
+            }
           } catch (NumberFormatException e) {
             throw new BadArgumentException("unsupported non-ascii character", input, i);
           }

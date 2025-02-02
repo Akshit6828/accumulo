@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -40,22 +40,14 @@ public class AllTimeTabletResults {
   /**
    * Stores all time results of a tablet
    *
-   * @param operation
-   *          Type of operation
-   * @param success
-   *          Number of successes
-   * @param failure
-   *          Number of failures
-   * @param avgQueueTime
-   *          Average queue time
-   * @param queueStdDev
-   *          Standard deviation of queue
-   * @param avgTime
-   *          Average time
-   * @param stdDev
-   *          Standard deviation
-   * @param timeSpent
-   *          Time spent in operation
+   * @param operation Type of operation
+   * @param success Number of successes
+   * @param failure Number of failures
+   * @param avgQueueTime Average queue time
+   * @param queueStdDev Standard deviation of queue
+   * @param avgTime Average time
+   * @param stdDev Standard deviation
+   * @param timeSpent Time spent in operation
    */
   public AllTimeTabletResults(String operation, int success, int failure, Double avgQueueTime,
       Double queueStdDev, Double avgTime, double stdDev, double timeSpent) {

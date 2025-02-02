@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -54,8 +54,9 @@ public class ServerMutation extends Mutation {
   public void readFields(DataInput in) throws IOException {
     super.readFields(in);
     // new format writes system time with the mutation
-    if (getSerializedFormat() == SERIALIZED_FORMAT.VERSION2)
+    if (getSerializedFormat() == SERIALIZED_FORMAT.VERSION2) {
       systemTime = WritableUtils.readVLong(in);
+    }
   }
 
   @Override

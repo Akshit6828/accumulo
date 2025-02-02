@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -85,8 +85,9 @@ public class RangeInputSplit extends InputSplit implements Writable {
   }
 
   public float getProgress(Key currentKey) {
-    if (currentKey == null)
+    if (currentKey == null) {
       return 0f;
+    }
     if (range.contains(currentKey)) {
       if (range.getStartKey() != null && range.getEndKey() != null) {
         if (range.getStartKey().compareTo(range.getEndKey(), PartialKey.ROW) != 0) {
@@ -130,8 +131,9 @@ public class RangeInputSplit extends InputSplit implements Writable {
     tableId = in.readUTF();
     int numLocs = in.readInt();
     locations = new String[numLocs];
-    for (int i = 0; i < numLocs; ++i)
+    for (int i = 0; i < numLocs; ++i) {
       locations[i] = in.readUTF();
+    }
 
     if (in.readBoolean()) {
       isolatedScan = in.readBoolean();
@@ -182,8 +184,9 @@ public class RangeInputSplit extends InputSplit implements Writable {
     out.writeUTF(tableName);
     out.writeUTF(tableId);
     out.writeInt(locations.length);
-    for (String location : locations)
+    for (String location : locations) {
       out.writeUTF(location);
+    }
 
     out.writeBoolean(isolatedScan != null);
     if (isolatedScan != null) {

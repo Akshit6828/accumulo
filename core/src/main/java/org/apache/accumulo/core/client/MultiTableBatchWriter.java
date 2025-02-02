@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,15 +28,11 @@ public interface MultiTableBatchWriter extends AutoCloseable {
   /**
    * Returns a BatchWriter for a particular table.
    *
-   * @param table
-   *          the name of a table whose batch writer you wish to retrieve
+   * @param table the name of a table whose batch writer you wish to retrieve
    * @return an instance of a batch writer for the specified table
-   * @throws AccumuloException
-   *           when a general exception occurs with accumulo
-   * @throws AccumuloSecurityException
-   *           when the user is not allowed to insert data into that table
-   * @throws TableNotFoundException
-   *           when the table does not exist
+   * @throws AccumuloException when a general exception occurs with accumulo
+   * @throws AccumuloSecurityException when the user is not allowed to insert data into that table
+   * @throws TableNotFoundException when the table does not exist
    */
   BatchWriter getBatchWriter(String table)
       throws AccumuloException, AccumuloSecurityException, TableNotFoundException;
@@ -44,16 +40,14 @@ public interface MultiTableBatchWriter extends AutoCloseable {
   /**
    * Send mutations for all tables to accumulo.
    *
-   * @throws MutationsRejectedException
-   *           when queued mutations are unable to be inserted
+   * @throws MutationsRejectedException when queued mutations are unable to be inserted
    */
   void flush() throws MutationsRejectedException;
 
   /**
    * Flush and release all resources.
    *
-   * @throws MutationsRejectedException
-   *           when queued mutations are unable to be inserted
+   * @throws MutationsRejectedException when queued mutations are unable to be inserted
    *
    */
   @Override

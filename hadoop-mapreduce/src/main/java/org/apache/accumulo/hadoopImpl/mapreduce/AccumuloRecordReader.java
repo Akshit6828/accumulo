@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,11 +18,12 @@
  */
 package org.apache.accumulo.hadoopImpl.mapreduce;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
+import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
 
 import java.io.IOException;
 import java.net.InetAddress;
-import java.security.SecureRandom;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -30,26 +31,29 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.BatchScanner;
 import org.apache.accumulo.core.client.ClientSideIteratorScanner;
+import org.apache.accumulo.core.client.InvalidTabletHostingRequestException;
 import org.apache.accumulo.core.client.IsolatedScanner;
 import org.apache.accumulo.core.client.IteratorSetting;
 import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.client.ScannerBase;
+import org.apache.accumulo.core.client.ScannerBase.ConsistencyLevel;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.TableOfflineException;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.clientImpl.ClientContext;
+import org.apache.accumulo.core.clientImpl.ClientTabletCache;
+import org.apache.accumulo.core.clientImpl.ClientTabletCache.CachedTablet;
+import org.apache.accumulo.core.clientImpl.ClientTabletCache.LocationNeed;
 import org.apache.accumulo.core.clientImpl.OfflineScanner;
 import org.apache.accumulo.core.clientImpl.ScannerImpl;
-import org.apache.accumulo.core.clientImpl.Tables;
-import org.apache.accumulo.core.clientImpl.TabletLocator;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.TableId;
@@ -57,6 +61,7 @@ import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.util.Pair;
+import org.apache.accumulo.core.util.Retry;
 import org.apache.accumulo.hadoopImpl.mapreduce.lib.InputConfigurator;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
@@ -105,8 +110,7 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
   /**
    * Extracts Iterators settings from the context to be used by RecordReader.
    *
-   * @param context
-   *          the Hadoop context for the configured job
+   * @param context the Hadoop context for the configured job
    * @return List of iterator settings for given table
    */
   private List<IteratorSetting> contextIterators(TaskAttemptContext context) {
@@ -117,12 +121,9 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
    * Configures the iterators on a scanner for the given table name. Will attempt to use
    * configuration from the InputSplit, on failure will try to extract them from TaskAttemptContext.
    *
-   * @param context
-   *          the Hadoop context for the configured job
-   * @param scanner
-   *          the scanner for which to configure the iterators
-   * @param split
-   *          InputSplit containing configurations
+   * @param context the Hadoop context for the configured job
+   * @param scanner the scanner for which to configure the iterators
+   * @param split InputSplit containing configurations
    */
   private void setupIterators(TaskAttemptContext context, ScannerBase scanner,
       RangeInputSplit split) {
@@ -137,8 +138,9 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
       }
     }
 
-    for (IteratorSetting iterator : iterators)
+    for (IteratorSetting iterator : iterators) {
       scanner.addScanIterator(iterator);
+    }
   }
 
   @Override
@@ -152,6 +154,7 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
     ClientContext context = (ClientContext) client;
     Authorizations authorizations = InputConfigurator.getScanAuthorizations(CLASS, conf);
     String classLoaderContext = InputConfigurator.getClassLoaderContext(CLASS, conf);
+    ConsistencyLevel cl = InputConfigurator.getConsistencyLevel(CLASS, conf);
     String table = split.getTableName();
 
     // in case the table name changed, we can still use the previous name for terms of
@@ -182,6 +185,8 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
         throw new IOException(e);
       }
 
+      scanner.setConsistencyLevel(cl == null ? ConsistencyLevel.IMMEDIATE : cl);
+      log.info("Using consistency level: {}", scanner.getConsistencyLevel());
       scanner.setRanges(batchSplit.getRanges());
       scannerBase = scanner;
     } else {
@@ -209,10 +214,14 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
           // Not using public API to create scanner so that we can use table ID
           // Table ID is used in case of renames during M/R job
           scanner = new ScannerImpl(context, TableId.of(split.getTableId()), authorizations);
+          scanner.setConsistencyLevel(cl == null ? ConsistencyLevel.IMMEDIATE : cl);
+          log.info("Using consistency level: {}", scanner.getConsistencyLevel());
         }
         if (isIsolated) {
           log.info("Creating isolated scanner");
-          scanner = new IsolatedScanner(scanner);
+          @SuppressWarnings("resource")
+          var wrapped = new IsolatedScanner(scanner);
+          scanner = wrapped;
         }
         if (usesLocalIterators) {
           log.info("Using local iterators");
@@ -279,8 +288,9 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
 
   @Override
   public float getProgress() {
-    if (numKeysRead > 0 && currentKey == null)
+    if (numKeysRead > 0 && currentKey == null) {
       return 1.0f;
+    }
     return split.getProgress(currentKey);
   }
 
@@ -318,9 +328,9 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
   public static List<InputSplit> getSplits(JobContext context, Class<?> callingClass)
       throws IOException {
     validateOptions(context, callingClass);
-    Random random = new SecureRandom();
     LinkedList<InputSplit> splits = new LinkedList<>();
-    try (AccumuloClient client = createClient(context, callingClass)) {
+    try (AccumuloClient client = createClient(context, callingClass);
+        var clientContext = ((ClientContext) client)) {
       Map<String,InputTableConfig> tableConfigs =
           InputConfigurator.getInputTableConfigs(callingClass, context.getConfiguration());
       for (Map.Entry<String,InputTableConfig> tableConfigEntry : tableConfigs.entrySet()) {
@@ -328,11 +338,10 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
         String tableName = tableConfigEntry.getKey();
         InputTableConfig tableConfig = tableConfigEntry.getValue();
 
-        ClientContext clientContext = (ClientContext) client;
         TableId tableId;
         // resolve table name to id once, and use id from this point forward
         try {
-          tableId = Tables.getTableId(clientContext, tableName);
+          tableId = clientContext.getTableId(tableName);
         } catch (TableNotFoundException e) {
           throw new IOException(e);
         }
@@ -340,14 +349,16 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
         boolean batchScan = InputConfigurator.isBatchScan(callingClass, context.getConfiguration());
         boolean supportBatchScan = !(tableConfig.isOfflineScan()
             || tableConfig.shouldUseIsolatedScanners() || tableConfig.shouldUseLocalIterators());
-        if (batchScan && !supportBatchScan)
+        if (batchScan && !supportBatchScan) {
           throw new IllegalArgumentException("BatchScanner optimization not available for offline"
               + " scan, isolated, or local iterators");
+        }
 
         boolean autoAdjust = tableConfig.shouldAutoAdjustRanges();
-        if (batchScan && !autoAdjust)
+        if (batchScan && !autoAdjust) {
           throw new IllegalArgumentException(
               "AutoAdjustRanges must be enabled when using BatchScanner optimization");
+        }
 
         List<Range> ranges =
             autoAdjust ? Range.mergeOverlapping(tableConfig.getRanges()) : tableConfig.getRanges();
@@ -358,14 +369,14 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
 
         // get the metadata information for these ranges
         Map<String,Map<KeyExtent,List<Range>>> binnedRanges = new HashMap<>();
-        TabletLocator tl;
+        ClientTabletCache tl;
         try {
           if (tableConfig.isOfflineScan()) {
             binnedRanges = binOfflineTable(context, tableId, ranges, callingClass);
             while (binnedRanges == null) {
               // Some tablets were still online, try again
               // sleep randomly between 100 and 200 ms
-              sleepUninterruptibly(100 + random.nextInt(100), TimeUnit.MILLISECONDS);
+              sleepUninterruptibly(100 + RANDOM.get().nextInt(100), TimeUnit.MILLISECONDS);
               binnedRanges = binOfflineTable(context, tableId, ranges, callingClass);
 
             }
@@ -376,18 +387,52 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
             // tables tablets... so clear it
             tl.invalidateCache();
 
-            while (!tl.binRanges(clientContext, ranges, binnedRanges).isEmpty()) {
-              clientContext.requireNotDeleted(tableId);
-              clientContext.requireNotOffline(tableId, tableName);
-              binnedRanges.clear();
-              log.warn("Unable to locate bins for specified ranges. Retrying.");
-              // sleep randomly between 100 and 200 ms
-              sleepUninterruptibly(100 + random.nextInt(100), TimeUnit.MILLISECONDS);
-              tl.invalidateCache();
+            if (InputConfigurator.getConsistencyLevel(callingClass, context.getConfiguration())
+                == ConsistencyLevel.IMMEDIATE) {
+              while (!tl.binRanges(clientContext, ranges, binnedRanges).isEmpty()) {
+                clientContext.requireNotDeleted(tableId);
+                clientContext.requireNotOffline(tableId, tableName);
+                binnedRanges.clear();
+                log.warn("Unable to locate bins for specified ranges. Retrying.");
+                // sleep randomly between 100 and 200 ms
+                sleepUninterruptibly(100 + RANDOM.get().nextInt(100), TimeUnit.MILLISECONDS);
+                tl.invalidateCache();
+              }
+            } else {
+              Map<String,Map<KeyExtent,List<Range>>> unhostedRanges = new HashMap<>();
+              unhostedRanges.put("", new HashMap<>());
+              BiConsumer<CachedTablet,Range> consumer = (ct, r) -> {
+                unhostedRanges.get("").computeIfAbsent(ct.getExtent(), k -> new ArrayList<>())
+                    .add(r);
+              };
+              List<Range> failures =
+                  tl.findTablets(clientContext, ranges, consumer, LocationNeed.NOT_REQUIRED);
+
+              Retry retry = Retry.builder().infiniteRetries().retryAfter(Duration.ofMillis(100))
+                  .incrementBy(Duration.ofMillis(100)).maxWait(Duration.ofSeconds(2))
+                  .backOffFactor(1.5).logInterval(Duration.ofMinutes(3)).createRetry();
+
+              while (!failures.isEmpty()) {
+
+                clientContext.requireNotDeleted(tableId);
+
+                try {
+                  retry.waitForNextAttempt(log,
+                      String.format("locating tablets in table %s(%s) for %d ranges", tableName,
+                          tableId, ranges.size()));
+                } catch (InterruptedException e) {
+                  throw new RuntimeException(e);
+                }
+                unhostedRanges.get("").clear();
+                tl.invalidateCache();
+                failures =
+                    tl.findTablets(clientContext, ranges, consumer, LocationNeed.NOT_REQUIRED);
+              }
+              binnedRanges = unhostedRanges;
             }
           }
-        } catch (TableOfflineException | TableNotFoundException | AccumuloException
-            | AccumuloSecurityException e) {
+        } catch (InvalidTabletHostingRequestException | TableOfflineException
+            | TableNotFoundException | AccumuloException | AccumuloSecurityException e) {
           throw new IOException(e);
         }
 
@@ -396,8 +441,9 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
         // Map from Range to Array of Locations, we only use this if we're don't split
         HashMap<Range,ArrayList<String>> splitsToAdd = null;
 
-        if (!autoAdjust)
+        if (!autoAdjust) {
           splitsToAdd = new HashMap<>();
+        }
 
         HashMap<String,String> hostNameCache = new HashMap<>();
         for (Map.Entry<String,Map<KeyExtent,List<Range>>> tserverBin : binnedRanges.entrySet()) {
@@ -413,8 +459,9 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
             if (batchScan) {
               // group ranges by tablet to be read by a BatchScanner
               ArrayList<Range> clippedRanges = new ArrayList<>();
-              for (Range r : extentRanges.getValue())
+              for (Range r : extentRanges.getValue()) {
                 clippedRanges.add(ke.clip(r));
+              }
               BatchInputSplit split =
                   new BatchInputSplit(tableName, tableId, clippedRanges, new String[] {location});
               SplitUtils.updateSplit(split, tableConfig);
@@ -435,8 +482,9 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
                 } else {
                   // don't divide ranges
                   ArrayList<String> locations = splitsToAdd.get(r);
-                  if (locations == null)
+                  if (locations == null) {
                     locations = new ArrayList<>(1);
+                  }
                   locations.add(location);
                   splitsToAdd.put(r, locations);
                 }
@@ -445,7 +493,7 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
           }
         }
 
-        if (!autoAdjust)
+        if (!autoAdjust) {
           for (Map.Entry<Range,ArrayList<String>> entry : splitsToAdd.entrySet()) {
             RangeInputSplit split = new RangeInputSplit(tableName, tableId.canonical(),
                 entry.getKey(), entry.getValue().toArray(new String[0]));
@@ -456,6 +504,7 @@ public abstract class AccumuloRecordReader<K,V> extends RecordReader<K,V> {
 
             splits.add(split);
           }
+        }
       }
     }
     return splits;

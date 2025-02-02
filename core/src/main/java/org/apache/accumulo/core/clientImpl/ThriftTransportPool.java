@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,10 @@
  */
 package org.apache.accumulo.core.clientImpl;
 
-import java.security.SecureRandom;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,32 +34,220 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import org.apache.accumulo.core.rpc.ThriftUtil;
-import org.apache.accumulo.core.singletons.SingletonManager;
-import org.apache.accumulo.core.singletons.SingletonService;
-import org.apache.accumulo.core.util.HostAndPort;
+import org.apache.accumulo.core.rpc.clients.ThriftClientTypes;
 import org.apache.accumulo.core.util.Pair;
 import org.apache.accumulo.core.util.threads.Threads;
+import org.apache.thrift.TConfiguration;
 import org.apache.thrift.transport.TTransport;
 import org.apache.thrift.transport.TTransportException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Suppliers;
+import com.google.common.net.HostAndPort;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 public class ThriftTransportPool {
 
-  private static final SecureRandom random = new SecureRandom();
-  private long killTime = 1000 * 3;
+  private static final Logger log = LoggerFactory.getLogger(ThriftTransportPool.class);
+  private static final long ERROR_THRESHOLD = 20L;
+  private static final long STUCK_THRESHOLD = MINUTES.toMillis(2);
+
+  private final ConnectionPool connectionPool = new ConnectionPool();
+  private final Map<ThriftTransportKey,Long> errorCount = new HashMap<>();
+  private final Map<ThriftTransportKey,Long> errorTime = new HashMap<>();
+  private final Set<ThriftTransportKey> serversWarnedAbout = new HashSet<>();
+  private final Thread checkThread;
+
+  private final LongSupplier maxAgeMillis;
+
+  private ThriftTransportPool(LongSupplier maxAgeMillis) {
+    this.maxAgeMillis = maxAgeMillis;
+    this.checkThread = Threads.createThread("Thrift Connection Pool Checker", () -> {
+      try {
+        final long minNanos = MILLISECONDS.toNanos(250);
+        final long maxNanos = MINUTES.toNanos(1);
+        long lastRun = System.nanoTime();
+        // loop often, to detect shutdowns quickly
+        while (!connectionPool.awaitShutdown(250)) {
+          // don't close on every loop; instead, check based on configured max age, within bounds
+          var threshold = Math.min(maxNanos,
+              Math.max(minNanos, MILLISECONDS.toNanos(maxAgeMillis.getAsLong()) / 2));
+          long currentNanos = System.nanoTime();
+          if ((currentNanos - lastRun) >= threshold) {
+            closeExpiredConnections();
+            lastRun = currentNanos;
+          }
+        }
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      } catch (TransportPoolShutdownException e) {
+        log.debug("Error closing expired connections", e);
+      }
+    });
+  }
+
+  /**
+   * Create a new instance and start its checker thread, returning the instance.
+   *
+   * @param maxAgeMillis the supplier for the max age of idle transports before they are cleaned up
+   * @return a new instance with its checker thread started to clean up idle transports
+   */
+  static ThriftTransportPool startNew(LongSupplier maxAgeMillis) {
+    var pool = new ThriftTransportPool(maxAgeMillis);
+    log.debug("Set thrift transport pool idle time to {}ms", maxAgeMillis.getAsLong());
+    pool.checkThread.start();
+    return pool;
+  }
+
+  public TTransport getTransport(ThriftClientTypes<?> type, HostAndPort location, long milliseconds,
+      ClientContext context, boolean preferCached) throws TTransportException {
+
+    ThriftTransportKey cacheKey = new ThriftTransportKey(type, location, milliseconds, context);
+    if (preferCached) {
+      CachedConnection connection = connectionPool.reserveAny(cacheKey);
+      if (connection != null) {
+        log.trace("Using existing connection to {}", cacheKey.getServer());
+        return connection.transport;
+      }
+    }
+    return createNewTransport(cacheKey);
+  }
+
+  public Pair<String,TTransport> getAnyCachedTransport(ThriftClientTypes<?> type) {
+    final List<ThriftTransportKey> serversSet = new ArrayList<>();
+    for (ThriftTransportKey ttk : connectionPool.getThriftTransportKeys()) {
+      if (ttk.getType().equals(type)) {
+        serversSet.add(ttk);
+      }
+    }
+    if (serversSet.isEmpty()) {
+      return null;
+    }
+    Collections.shuffle(serversSet, RANDOM.get());
+    for (ThriftTransportKey ttk : serversSet) {
+      CachedConnection connection = connectionPool.reserveAny(ttk);
+      if (connection != null) {
+        final String serverAddr = ttk.getServer().toString();
+        log.trace("Using existing connection to {}", serverAddr);
+        return new Pair<>(serverAddr, connection.transport);
+      }
+    }
+    return null;
+  }
+
+  private TTransport createNewTransport(ThriftTransportKey cacheKey) throws TTransportException {
+    TTransport transport = ThriftUtil.createClientTransport(cacheKey.getServer(),
+        (int) cacheKey.getTimeout(), cacheKey.getSslParams(), cacheKey.getSaslParams());
+
+    log.trace("Creating new connection to connection to {}", cacheKey.getServer());
+
+    CachedTTransport tsc = new CachedTTransport(transport, cacheKey);
+
+    CachedConnection connection = new CachedConnection(tsc);
+    connection.reserve();
+
+    try {
+      connectionPool.putReserved(cacheKey, connection);
+    } catch (TransportPoolShutdownException e) {
+      connection.transport.close();
+      throw e;
+    }
+
+    return connection.transport;
+  }
+
+  public void returnTransport(TTransport transport) {
+    if (transport == null) {
+      return;
+    }
+
+    CachedTTransport cachedTransport = (CachedTTransport) transport;
+    ArrayList<CachedConnection> closeList = new ArrayList<>();
+    boolean existInCache = connectionPool.returnTransport(cachedTransport, closeList);
+
+    // close outside of sync block
+    closeList.forEach(connection -> {
+      try {
+        connection.transport.close();
+      } catch (Exception e) {
+        log.debug("Failed to close connection w/ errors", e);
+      }
+    });
+
+    if (cachedTransport.sawError) {
+
+      boolean shouldWarn = false;
+      long ecount;
+
+      synchronized (errorCount) {
+
+        ecount = errorCount.merge(cachedTransport.getCacheKey(), 1L, Long::sum);
+
+        // logs the first time an error occurred
+        errorTime.computeIfAbsent(cachedTransport.getCacheKey(), k -> System.currentTimeMillis());
+
+        if (ecount >= ERROR_THRESHOLD && serversWarnedAbout.add(cachedTransport.getCacheKey())) {
+          // boolean facilitates logging outside of lock
+          shouldWarn = true;
+        }
+      }
+
+      log.trace("Returned connection had error {}", cachedTransport.getCacheKey());
+
+      if (shouldWarn) {
+        log.warn("Server {} had {} failures in a short time period, will not complain anymore",
+            cachedTransport.getCacheKey(), ecount);
+      }
+    }
+
+    if (!existInCache) {
+      log.warn("Returned tablet server connection to cache that did not come from cache");
+      // close outside of sync block
+      transport.close();
+    }
+  }
+
+  private void closeExpiredConnections() {
+    List<CachedConnection> expiredConnections;
+
+    expiredConnections = connectionPool.removeExpiredConnections(maxAgeMillis);
+
+    synchronized (errorCount) {
+      Iterator<Entry<ThriftTransportKey,Long>> iter = errorTime.entrySet().iterator();
+      while (iter.hasNext()) {
+        Entry<ThriftTransportKey,Long> entry = iter.next();
+        long delta = System.currentTimeMillis() - entry.getValue();
+        if (delta >= STUCK_THRESHOLD) {
+          errorCount.remove(entry.getKey());
+          iter.remove();
+        }
+      }
+    }
+
+    // Close connections outside of sync block
+    expiredConnections.forEach(c -> c.transport.close());
+  }
+
+  void shutdown() {
+    connectionPool.shutdown();
+    try {
+      checkThread.join();
+    } catch (InterruptedException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  // INNER classes below here
 
   private static class CachedConnections {
     /*
@@ -92,15 +283,16 @@ public class ThriftTransportPool {
     }
 
     private void removeExpiredConnections(final ArrayList<CachedConnection> expired,
-        final long killTime) {
+        final LongSupplier maxAgeMillis) {
       long currTime = System.currentTimeMillis();
-      while (isLastUnreservedExpired(currTime, killTime)) {
+      while (isLastUnreservedExpired(currTime, maxAgeMillis)) {
         expired.add(unreserved.removeLast());
       }
     }
 
-    boolean isLastUnreservedExpired(final long currTime, final long killTime) {
-      return !unreserved.isEmpty() && (currTime - unreserved.peekLast().lastReturnTime) > killTime;
+    boolean isLastUnreservedExpired(final long currTime, final LongSupplier maxAgeMillis) {
+      return !unreserved.isEmpty()
+          && (currTime - unreserved.peekLast().lastReturnTime) > maxAgeMillis.getAsLong();
     }
 
     void checkReservedForStuckIO() {
@@ -113,7 +305,7 @@ public class ThriftTransportPool {
     }
 
     void closeTransports(final Iterable<CachedConnection> stream) {
-      stream.forEach((connection) -> {
+      stream.forEach(connection -> {
         try {
           connection.transport.close();
         } catch (Exception e) {
@@ -131,7 +323,7 @@ public class ThriftTransportPool {
     final Lock[] locks;
     final ConcurrentHashMap<ThriftTransportKey,CachedConnections> connections =
         new ConcurrentHashMap<>();
-    private volatile boolean shutdown = false;
+    private final CountDownLatch shutdownLatch = new CountDownLatch(1);
 
     ConnectionPool() {
       // intentionally using a prime number, don't use 31
@@ -155,8 +347,7 @@ public class ThriftTransportPool {
      * This operation locks access to the mapping for the key in {@link ConnectionPool#connections}
      * until the operation completes.
      *
-     * @param key
-     *          the transport key
+     * @param key the transport key
      * @return the reserved {@link CachedConnection}
      */
     CachedConnection reserveAny(final ThriftTransportKey key) {
@@ -168,28 +359,6 @@ public class ThriftTransportPool {
     }
 
     /**
-     * Reserve and return a new {@link CachedConnection} from the {@link CachedConnections} mapped
-     * to the specified transport key. If a {@link CachedConnections} is not found, null will be
-     * returned.
-     *
-     * <p>
-     *
-     * This operation locks access to the mapping for the key in {@link ConnectionPool#connections}
-     * until the operation completes.
-     *
-     * @param key
-     *          the transport key
-     * @return the reserved {@link CachedConnection}, or null if none were available.
-     */
-    CachedConnection reserveAnyIfPresent(final ThriftTransportKey key) {
-      // It's possible that multiple locks from executeWithinLock will overlap with a single lock
-      // inside the ConcurrentHashMap which can unnecessarily block threads. Access the
-      // ConcurrentHashMap outside of executeWithinLock to prevent this.
-      var connections = getCachedConnections(key);
-      return connections == null ? null : executeWithinLock(key, connections::reserveAny);
-    }
-
-    /**
      * Puts the specified connection into the reserved map of the {@link CachedConnections} for the
      * specified transport key. If a {@link CachedConnections} is not found, one will be created.
      *
@@ -198,10 +367,8 @@ public class ThriftTransportPool {
      * This operation locks access to the mapping for the key in {@link ConnectionPool#connections}
      * until the operation completes.
      *
-     * @param key
-     *          the transport key
-     * @param connection
-     *          the reserved connection
+     * @param key the transport key
+     * @param connection the reserved connection
      */
     void putReserved(final ThriftTransportKey key, final CachedConnection connection) {
       // It's possible that multiple locks from executeWithinLock will overlap with a single lock
@@ -224,10 +391,9 @@ public class ThriftTransportPool {
      * This operation locks access to the mapping for the key in {@link ConnectionPool#connections}
      * until the operation completes.
      *
-     * @param transport
-     *          the transport
-     * @param toBeClosed
-     *          the list to add connections that must be closed after this operation finishes
+     * @param transport the transport
+     * @param toBeClosed the list to add connections that must be closed after this operation
+     *        finishes
      * @return true if the connection for the transport existed and was initially reserved, or false
      *         otherwise
      */
@@ -252,16 +418,30 @@ public class ThriftTransportPool {
       // All locks are now acquired, so nothing else should be able to run concurrently...
       try {
         // Check if an shutdown has already been initiated.
-        if (shutdown) {
+        if (isShutdown()) {
           return;
         }
-        shutdown = true;
+        shutdownLatch.countDown();
         connections.values().forEach(CachedConnections::closeAllTransports);
       } finally {
         for (Lock lock : locks) {
           lock.unlock();
         }
       }
+    }
+
+    boolean isShutdown() {
+      return shutdownLatch.getCount() == 0;
+    }
+
+    /**
+     * Waits for shutdown for at most the specified number of milliseconds and returns whether
+     * shutdown happened.
+     *
+     * @return true if shutdown happened, false if the timeout was reached
+     */
+    boolean awaitShutdown(long timeoutMillis) throws InterruptedException {
+      return shutdownLatch.await(timeoutMillis, MILLISECONDS);
     }
 
     <T> T executeWithinLock(final ThriftTransportKey key, Supplier<T> function) {
@@ -287,7 +467,7 @@ public class ThriftTransportPool {
 
       lock.lock();
 
-      if (shutdown) {
+      if (isShutdown()) {
         lock.unlock();
         throw new TransportPoolShutdownException(
             "The Accumulo singleton for connection pooling is disabled.  This is likely caused by "
@@ -295,10 +475,6 @@ public class ThriftTransportPool {
       }
 
       return lock;
-    }
-
-    CachedConnections getCachedConnections(final ThriftTransportKey key) {
-      return connections.get(key);
     }
 
     CachedConnections getOrCreateCachedConnections(final ThriftTransportKey key) {
@@ -344,35 +520,18 @@ public class ThriftTransportPool {
       connections.unreserved.addFirst(connection);
     }
 
-    List<CachedConnection> removeExpiredConnections(final long killTime) {
+    List<CachedConnection> removeExpiredConnections(final LongSupplier maxAgeMillis) {
       ArrayList<CachedConnection> expired = new ArrayList<>();
       for (Entry<ThriftTransportKey,CachedConnections> entry : connections.entrySet()) {
         CachedConnections connections = entry.getValue();
-        executeWithinLock(entry.getKey(), (key) -> {
-          connections.removeExpiredConnections(expired, killTime);
+        executeWithinLock(entry.getKey(), key -> {
+          connections.removeExpiredConnections(expired, maxAgeMillis);
           connections.checkReservedForStuckIO();
         });
       }
       return expired;
     }
   }
-
-  private final ConnectionPool connectionPool = new ConnectionPool();
-
-  private Map<ThriftTransportKey,Long> errorCount = new HashMap<>();
-  private Map<ThriftTransportKey,Long> errorTime = new HashMap<>();
-  private Set<ThriftTransportKey> serversWarnedAbout = new HashSet<>();
-
-  private Supplier<Thread> checkThreadFactory = Suppliers.memoize(() -> {
-    var thread = Threads.createThread("Thrift Connection Pool Checker", new Closer());
-    thread.start();
-    return thread;
-  });
-
-  private static final Logger log = LoggerFactory.getLogger(ThriftTransportPool.class);
-
-  private static final Long ERROR_THRESHOLD = 20L;
-  private static final int STUCK_THRESHOLD = 2 * 60 * 1000;
 
   private static class CachedConnection {
 
@@ -403,26 +562,7 @@ public class ThriftTransportPool {
     private static final long serialVersionUID = 1L;
   }
 
-  private class Closer implements Runnable {
-
-    private void closeConnections() throws InterruptedException {
-      while (!getConnectionPool().shutdown) {
-        closeExpiredConnections();
-        Thread.sleep(500);
-      }
-    }
-
-    @Override
-    public void run() {
-      try {
-        closeConnections();
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-      } catch (TransportPoolShutdownException e) {}
-    }
-  }
-
-  static class CachedTTransport extends TTransport {
+  private static class CachedTTransport extends TTransport {
 
     private final ThriftTransportKey cacheKey;
     private final TTransport wrappedTransport;
@@ -654,257 +794,35 @@ public class ThriftTransportPool {
       }
     }
 
+    @Override
+    public TConfiguration getConfiguration() {
+      return wrappedTransport.getConfiguration();
+    }
+
+    @Override
+    public void updateKnownMessageSize(long size) throws TTransportException {
+      try {
+        ioCount++;
+        wrappedTransport.updateKnownMessageSize(size);
+      } finally {
+        ioCount++;
+      }
+    }
+
+    @Override
+    public void checkReadBytesAvailable(long numBytes) throws TTransportException {
+      try {
+        ioCount++;
+        wrappedTransport.checkReadBytesAvailable(numBytes);
+      } finally {
+        ioCount++;
+      }
+    }
+
     public ThriftTransportKey getCacheKey() {
       return cacheKey;
     }
 
   }
 
-  private ThriftTransportPool() {}
-
-  public TTransport getTransport(HostAndPort location, long milliseconds, ClientContext context)
-      throws TTransportException {
-    ThriftTransportKey cacheKey = new ThriftTransportKey(location, milliseconds, context);
-    // compute hash code outside of lock, this lowers the time the lock is held
-    cacheKey.precomputeHashCode();
-
-    ConnectionPool pool = getConnectionPool();
-    CachedConnection connection = pool.reserveAny(cacheKey);
-
-    if (connection != null) {
-      log.trace("Using existing connection to {}", cacheKey.getServer());
-      return connection.transport;
-    } else {
-      return createNewTransport(cacheKey);
-    }
-  }
-
-  @VisibleForTesting
-  public Pair<String,TTransport> getAnyTransport(List<ThriftTransportKey> servers,
-      boolean preferCachedConnection) throws TTransportException {
-
-    servers = new ArrayList<>(servers);
-
-    if (preferCachedConnection) {
-      HashSet<ThriftTransportKey> serversSet = new HashSet<>(servers);
-
-      ConnectionPool pool = getConnectionPool();
-
-      // randomly pick a server from the connection cache
-      serversSet.retainAll(pool.getThriftTransportKeys());
-
-      if (!serversSet.isEmpty()) {
-        ArrayList<ThriftTransportKey> cachedServers = new ArrayList<>(serversSet);
-        Collections.shuffle(cachedServers, random);
-
-        for (ThriftTransportKey ttk : cachedServers) {
-          CachedConnection connection = pool.reserveAny(ttk);
-          if (connection != null) {
-            final String serverAddr = ttk.getServer().toString();
-            log.trace("Using existing connection to {}", serverAddr);
-            return new Pair<>(serverAddr, connection.transport);
-          }
-
-        }
-      }
-    }
-
-    ConnectionPool pool = getConnectionPool();
-    int retryCount = 0;
-    while (!servers.isEmpty() && retryCount < 10) {
-
-      int index = random.nextInt(servers.size());
-      ThriftTransportKey ttk = servers.get(index);
-
-      if (preferCachedConnection) {
-        CachedConnection connection = pool.reserveAnyIfPresent(ttk);
-        if (connection != null) {
-          return new Pair<>(ttk.getServer().toString(), connection.transport);
-        }
-      }
-
-      try {
-        return new Pair<>(ttk.getServer().toString(), createNewTransport(ttk));
-      } catch (TTransportException tte) {
-        log.debug("Failed to connect to {}", servers.get(index), tte);
-        servers.remove(index);
-        retryCount++;
-      }
-    }
-
-    throw new TTransportException("Failed to connect to a server");
-  }
-
-  private TTransport createNewTransport(ThriftTransportKey cacheKey) throws TTransportException {
-    TTransport transport = ThriftUtil.createClientTransport(cacheKey.getServer(),
-        (int) cacheKey.getTimeout(), cacheKey.getSslParams(), cacheKey.getSaslParams());
-
-    log.trace("Creating new connection to connection to {}", cacheKey.getServer());
-
-    CachedTTransport tsc = new CachedTTransport(transport, cacheKey);
-
-    CachedConnection connection = new CachedConnection(tsc);
-    connection.reserve();
-
-    try {
-      ConnectionPool pool = getConnectionPool();
-      pool.putReserved(cacheKey, connection);
-    } catch (TransportPoolShutdownException e) {
-      connection.transport.close();
-      throw e;
-    }
-
-    return connection.transport;
-  }
-
-  public void returnTransport(TTransport transport) {
-    if (transport == null) {
-      return;
-    }
-
-    CachedTTransport cachedTransport = (CachedTTransport) transport;
-    ArrayList<CachedConnection> closeList = new ArrayList<>();
-    ConnectionPool pool = getConnectionPool();
-    boolean existInCache = pool.returnTransport(cachedTransport, closeList);
-
-    // close outside of sync block
-    closeList.forEach((connection) -> {
-      try {
-        connection.transport.close();
-      } catch (Exception e) {
-        log.debug("Failed to close connection w/ errors", e);
-      }
-    });
-
-    if (cachedTransport.sawError) {
-
-      boolean shouldWarn = false;
-      Long ecount = null;
-
-      synchronized (errorCount) {
-
-        ecount = errorCount.merge(cachedTransport.getCacheKey(), 1L, Long::sum);
-
-        // logs the first time an error occurred
-        errorTime.computeIfAbsent(cachedTransport.getCacheKey(), k -> System.currentTimeMillis());
-
-        if (ecount >= ERROR_THRESHOLD && serversWarnedAbout.add(cachedTransport.getCacheKey())) {
-          // boolean facilitates logging outside of lock
-          shouldWarn = true;
-        }
-      }
-
-      log.trace("Returned connection had error {}", cachedTransport.getCacheKey());
-
-      if (shouldWarn) {
-        log.warn("Server {} had {} failures in a short time period, will not complain anymore",
-            cachedTransport.getCacheKey(), ecount);
-      }
-    }
-
-    if (!existInCache) {
-      log.warn("Returned tablet server connection to cache that did not come from cache");
-      // close outside of sync block
-      transport.close();
-    }
-  }
-
-  /**
-   * Set the time after which idle connections should be closed
-   */
-  public synchronized void setIdleTime(long time) {
-    this.killTime = time;
-    log.debug("Set thrift transport pool idle time to {}", time);
-  }
-
-  private static ThriftTransportPool instance = null;
-
-  static {
-    SingletonManager.register(new SingletonService() {
-
-      @Override
-      public boolean isEnabled() {
-        return ThriftTransportPool.isEnabled();
-      }
-
-      @Override
-      public void enable() {
-        ThriftTransportPool.enable();
-      }
-
-      @Override
-      public void disable() {
-        ThriftTransportPool.disable();
-      }
-    });
-  }
-
-  public static synchronized ThriftTransportPool getInstance() {
-    Preconditions.checkState(instance != null,
-        "The Accumulo singleton for connection pooling is disabled.  This is likely caused by all "
-            + "AccumuloClients being closed or garbage collected.");
-    instance.startCheckerThread();
-    return instance;
-  }
-
-  private static synchronized boolean isEnabled() {
-    return instance != null;
-  }
-
-  private static synchronized void enable() {
-    if (instance == null) {
-      // this code intentionally does not start the thread that closes idle connections. That thread
-      // is created the first time something attempts to use this service.
-      instance = new ThriftTransportPool();
-    }
-  }
-
-  private static synchronized void disable() {
-    if (instance != null) {
-      try {
-        instance.shutdown();
-      } finally {
-        instance = null;
-      }
-    }
-  }
-
-  public void startCheckerThread() {
-    checkThreadFactory.get();
-  }
-
-  void closeExpiredConnections() {
-    List<CachedConnection> expiredConnections;
-
-    ConnectionPool pool = getConnectionPool();
-    expiredConnections = pool.removeExpiredConnections(killTime);
-
-    synchronized (errorCount) {
-      Iterator<Entry<ThriftTransportKey,Long>> iter = errorTime.entrySet().iterator();
-      while (iter.hasNext()) {
-        Entry<ThriftTransportKey,Long> entry = iter.next();
-        long delta = System.currentTimeMillis() - entry.getValue();
-        if (delta >= STUCK_THRESHOLD) {
-          errorCount.remove(entry.getKey());
-          iter.remove();
-        }
-      }
-    }
-
-    // Close connections outside of sync block
-    expiredConnections.forEach((c) -> c.transport.close());
-  }
-
-  private void shutdown() {
-    connectionPool.shutdown();
-    try {
-      checkThreadFactory.get().join();
-    } catch (InterruptedException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
-  private ConnectionPool getConnectionPool() {
-    return connectionPool;
-  }
 }

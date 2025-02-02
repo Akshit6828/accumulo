@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,9 +18,9 @@
  */
 package org.apache.accumulo.core.file.rfile;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -33,7 +33,7 @@ import org.apache.accumulo.core.file.blockfile.impl.CachableBlockFile;
 import org.apache.accumulo.core.file.rfile.BlockIndex.BlockIndexEntry;
 import org.apache.accumulo.core.file.rfile.MultiLevelIndex.IndexEntry;
 import org.apache.accumulo.core.spi.cache.CacheEntry;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class BlockIndexTest {
 
@@ -87,8 +87,9 @@ public class BlockIndexTest {
     CachableBlockFile.CachedBlockRead cacheBlock = new CachableBlockFile.CachedBlockRead(ce, data);
     BlockIndex blockIndex = null;
 
-    for (int i = 0; i < 129; i++)
+    for (int i = 0; i < 129; i++) {
       blockIndex = BlockIndex.getIndex(cacheBlock, new IndexEntry(prevKey, num, 0, 0, 0));
+    }
 
     BlockIndexEntry[] indexEntries = blockIndex.getIndexEntries();
 
@@ -99,10 +100,11 @@ public class BlockIndexTest {
 
       bie =
           blockIndex.seekBlock(new Key(RFileTest.formatString("", row), "cf1", "cq1"), cacheBlock);
-      if (i == 0)
+      if (i == 0) {
         assertSame(null, bie);
-      else
+      } else {
         assertSame(indexEntries[i - 1], bie);
+      }
 
       assertSame(bie, blockIndex
           .seekBlock(new Key(RFileTest.formatString("", row - 1), "cf1", "cq1"), cacheBlock));
@@ -159,8 +161,9 @@ public class BlockIndexTest {
     CachableBlockFile.CachedBlockRead cacheBlock = new CachableBlockFile.CachedBlockRead(ce, data);
     BlockIndex blockIndex = null;
 
-    for (int i = 0; i < 257; i++)
+    for (int i = 0; i < 257; i++) {
       blockIndex = BlockIndex.getIndex(cacheBlock, new IndexEntry(prevKey, num, 0, 0, 0));
+    }
 
     assertSame(null,
         blockIndex.seekBlock(new Key(RFileTest.formatString("", 0), "cf1", "cq1"), cacheBlock));

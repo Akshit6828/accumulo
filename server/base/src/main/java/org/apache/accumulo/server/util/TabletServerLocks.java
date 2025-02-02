@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,61 +18,66 @@
  */
 package org.apache.accumulo.server.util;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
+import java.util.Optional;
+import java.util.Set;
 
-import java.util.List;
-
-import org.apache.accumulo.core.Constants;
-import org.apache.accumulo.core.cli.Help;
-import org.apache.accumulo.core.conf.SiteConfiguration;
-import org.apache.accumulo.fate.zookeeper.ServiceLock;
-import org.apache.accumulo.fate.zookeeper.ZooCache;
-import org.apache.accumulo.fate.zookeeper.ZooReaderWriter;
+import org.apache.accumulo.core.fate.zookeeper.ZooCache;
+import org.apache.accumulo.core.fate.zookeeper.ZooReaderWriter;
+import org.apache.accumulo.core.lock.ServiceLock;
+import org.apache.accumulo.core.lock.ServiceLockData;
+import org.apache.accumulo.core.lock.ServiceLockData.ThriftService;
+import org.apache.accumulo.core.lock.ServiceLockPaths.AddressSelector;
+import org.apache.accumulo.core.lock.ServiceLockPaths.ServiceLockPath;
 import org.apache.accumulo.server.ServerContext;
 
-import com.beust.jcommander.Parameter;
+import com.google.common.base.Preconditions;
+import com.google.common.net.HostAndPort;
 
 public class TabletServerLocks {
 
-  static class Opts extends Help {
-    @Parameter(names = "-list")
-    boolean list = false;
-    @Parameter(names = "-delete")
-    String delete = null;
-  }
+  public static void execute(final ServerContext context, final String lock, final String delete)
+      throws Exception {
 
-  public static void main(String[] args) throws Exception {
+    ZooCache cache = context.getZooCache();
+    ZooReaderWriter zoo = context.getZooSession().asReaderWriter();
 
-    try (var context = new ServerContext(SiteConfiguration.auto())) {
-      String tserverPath = context.getZooKeeperRoot() + Constants.ZTSERVERS;
-      Opts opts = new Opts();
-      opts.parseArgs(TabletServerLocks.class.getName(), args);
+    if (delete == null) {
+      Set<ServiceLockPath> tabletServers =
+          context.getServerPaths().getTabletServer(rg -> true, AddressSelector.all(), false);
+      if (tabletServers.isEmpty()) {
+        System.err.println("No tservers found in ZK");
+      }
 
-      ZooCache cache = context.getZooCache();
-      ZooReaderWriter zoo = context.getZooReaderWriter();
-
-      if (opts.list) {
-
-        List<String> tabletServers = zoo.getChildren(tserverPath);
-
-        for (String tabletServer : tabletServers) {
-          var zLockPath = ServiceLock.path(tserverPath + "/" + tabletServer);
-          byte[] lockData = ServiceLock.getLockData(cache, zLockPath, null);
-          String holder = null;
-          if (lockData != null) {
-            holder = new String(lockData, UTF_8);
-          }
-
-          System.out.printf("%32s %16s%n", tabletServer, holder);
+      for (ServiceLockPath tabletServer : tabletServers) {
+        Optional<ServiceLockData> lockData = ServiceLock.getLockData(cache, tabletServer, null);
+        final String holder;
+        if (lockData.isPresent()) {
+          holder = lockData.orElseThrow().getAddressString(ThriftService.TSERV);
+        } else {
+          holder = "<none>";
         }
-      } else if (opts.delete != null) {
-        ServiceLock.deleteLock(zoo, ServiceLock.path(tserverPath + "/" + args[1]));
+
+        System.out.printf("%32s %16s%n", tabletServer.getServer(), holder);
+      }
+    } else {
+      if (lock == null) {
+        printUsage();
       } else {
-        System.out.println(
-            "Usage : " + TabletServerLocks.class.getName() + " -list|-delete <tserver lock>");
+        var hostAndPort = HostAndPort.fromString(lock);
+        Set<ServiceLockPath> paths = context.getServerPaths().getTabletServer(rg -> true,
+            AddressSelector.exact(hostAndPort), true);
+        Preconditions.checkArgument(paths.size() == 1,
+            lock + " does not match a single ZooKeeper TabletServer lock. matches=" + paths);
+        ServiceLockPath path = paths.iterator().next();
+        ServiceLock.deleteLock(zoo, path);
+        System.out.printf("Deleted %s", path.toString());
       }
 
     }
+  }
+
+  private static void printUsage() {
+    System.out.println("Usage : accumulo admin locks -delete <tserver lock>");
   }
 
 }

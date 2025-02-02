@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -26,25 +26,29 @@ public enum TabletType {
   ROOT, METADATA, USER;
 
   public static TabletType type(KeyExtent ke) {
-    if (ke.isRootTablet())
+    if (ke.isRootTablet()) {
       return ROOT;
-    if (ke.isMeta())
+    }
+    if (ke.isMeta()) {
       return METADATA;
+    }
     return USER;
   }
 
   public static TabletType type(Collection<KeyExtent> extents) {
-    if (extents.isEmpty())
+    if (extents.isEmpty()) {
       throw new IllegalArgumentException();
+    }
 
     TabletType ttype = null;
 
     for (KeyExtent extent : extents) {
-      if (ttype == null)
+      if (ttype == null) {
         ttype = type(extent);
-      else if (ttype != type(extent))
+      } else if (ttype != type(extent)) {
         throw new IllegalArgumentException(
             "multiple extent types not allowed " + ttype + " " + type(extent));
+      }
     }
 
     return ttype;

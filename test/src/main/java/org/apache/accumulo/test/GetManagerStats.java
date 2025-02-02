@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,46 +18,28 @@
  */
 package org.apache.accumulo.test;
 
-import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
-
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 
-import org.apache.accumulo.core.clientImpl.ManagerClient;
-import org.apache.accumulo.core.clientImpl.thrift.ThriftNotActiveServiceException;
 import org.apache.accumulo.core.conf.SiteConfiguration;
+import org.apache.accumulo.core.manager.thrift.BulkImportStatus;
 import org.apache.accumulo.core.manager.thrift.DeadServer;
-import org.apache.accumulo.core.manager.thrift.ManagerClientService;
 import org.apache.accumulo.core.manager.thrift.ManagerMonitorInfo;
-import org.apache.accumulo.core.master.thrift.BulkImportStatus;
-import org.apache.accumulo.core.master.thrift.RecoveryStatus;
-import org.apache.accumulo.core.master.thrift.TableInfo;
-import org.apache.accumulo.core.master.thrift.TabletServerStatus;
+import org.apache.accumulo.core.manager.thrift.RecoveryStatus;
+import org.apache.accumulo.core.manager.thrift.TableInfo;
+import org.apache.accumulo.core.manager.thrift.TabletServerStatus;
+import org.apache.accumulo.core.rpc.clients.ThriftClientTypes;
 import org.apache.accumulo.core.trace.TraceUtil;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.accumulo.server.util.TableInfoUtil;
 
 public class GetManagerStats {
   public static void main(String[] args) throws Exception {
-    ManagerClientService.Iface client = null;
     ManagerMonitorInfo stats = null;
     var context = new ServerContext(SiteConfiguration.auto());
-    while (true) {
-      try {
-        client = ManagerClient.getConnectionWithRetry(context);
-        stats = client.getManagerStats(TraceUtil.traceInfo(), context.rpcCreds());
-        break;
-      } catch (ThriftNotActiveServiceException e) {
-        // Let it loop, fetching a new location
-        sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
-      } finally {
-        if (client != null) {
-          ManagerClient.close(client);
-        }
-      }
-    }
+    stats = ThriftClientTypes.MANAGER.execute(context,
+        client -> client.getManagerStats(TraceUtil.traceInfo(), context.rpcCreds()));
     out(0, "State: " + stats.state.name());
     out(0, "Goal State: " + stats.goalState.name());
     if (stats.serversShuttingDown != null && !stats.serversShuttingDown.isEmpty()) {
@@ -125,8 +107,6 @@ public class GetManagerStats {
             out(4, "Records in Memory: %d", info.recsInMemory);
             out(4, "Ingest: %.2f", info.ingestRate);
             out(4, "Queries: %.2f", info.queryRate);
-            out(4, "Major Compacting: %d", info.majors == null ? 0 : info.majors.running);
-            out(4, "Queued for Major Compaction: %d", info.majors == null ? 0 : info.majors.queued);
             out(4, "Minor Compacting: %d", info.minors == null ? 0 : info.minors.running);
             out(4, "Queued for Minor Compaction: %d", info.minors == null ? 0 : info.minors.queued);
           }
@@ -148,11 +128,11 @@ public class GetManagerStats {
     }
   }
 
-  private static void out(int indent, String string, Object... args) {
+  private static void out(int indent, String fmtString, Object... args) {
     for (int i = 0; i < indent; i++) {
       System.out.print(" ");
     }
-    System.out.println(String.format(string, args));
+    System.out.printf(fmtString + "%n", args);
   }
 
 }

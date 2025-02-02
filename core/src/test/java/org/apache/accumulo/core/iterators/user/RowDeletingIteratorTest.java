@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,9 +18,10 @@
  */
 package org.apache.accumulo.core.iterators.user;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -33,10 +34,10 @@ import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
-import org.apache.accumulo.core.iterators.SortedMapIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.ColumnFamilySkippingIterator;
+import org.apache.accumulo.core.iteratorsImpl.system.SortedMapIterator;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class RowDeletingIteratorTest {
 
@@ -177,13 +178,13 @@ public class RowDeletingIteratorTest {
         new TestIE(IteratorScope.scan, false));
 
     HashSet<ByteSequence> cols = new HashSet<>();
-    cols.add(new ArrayByteSequence("cf1".getBytes()));
+    cols.add(new ArrayByteSequence("cf1".getBytes(UTF_8)));
 
     rdi.seek(new Range(), cols, true);
     testAssertions(rdi, "r2", "cf1", "cq1", 5, "v1");
 
     cols.clear();
-    cols.add(new ArrayByteSequence("".getBytes()));
+    cols.add(new ArrayByteSequence("".getBytes(UTF_8)));
     rdi.seek(new Range(), cols, false);
     testAssertions(rdi, "r2", "cf1", "cq1", 5, "v1");
 

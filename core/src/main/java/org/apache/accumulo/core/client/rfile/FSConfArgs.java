@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,15 +22,23 @@ import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 
 class FSConfArgs {
 
   FileSystem fs;
   Configuration conf;
 
+  FileSystem getFileSystem(Path path) throws IOException {
+    if (fs == null) {
+      return path.getFileSystem(getConf());
+    }
+    return fs;
+  }
+
   FileSystem getFileSystem() throws IOException {
     if (fs == null) {
-      fs = FileSystem.get(getConf());
+      return FileSystem.get(getConf());
     }
     return fs;
   }

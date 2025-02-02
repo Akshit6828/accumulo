@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -52,7 +52,7 @@
  * </ul>
  *
  * <p>
- * Before this package was created many plugin interface were created for Accumulo. These plugin
+ * Before this package was created many plugin interfaces were created for Accumulo. These plugin
  * interfaces used internal Accumulo types, which transitively used other internal types. This
  * undisciplined use of any types made it impractical to reason about, analyze, or make any
  * guarantees about plugin stability. This package was created to solve that problem. Hopefully

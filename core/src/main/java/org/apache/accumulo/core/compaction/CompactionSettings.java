@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -36,8 +36,8 @@ public enum CompactionSettings {
   OUTPUT_INDEX_BLOCK_SIZE_OPT(new SizeType(), false),
   OUTPUT_REPLICATION_OPT(new UIntType(), false);
 
-  private Type type;
-  private boolean selectorOpt;
+  private final Type type;
+  private final boolean selectorOpt;
 
   private CompactionSettings(Type type, boolean selectorOpt) {
     this.type = type;
@@ -45,9 +45,10 @@ public enum CompactionSettings {
   }
 
   public void put(Map<String,String> selectorOpts, Map<String,String> configurerOpts, String val) {
-    if (selectorOpt)
+    if (selectorOpt) {
       selectorOpts.put(name(), type.convert(val));
-    else
+    } else {
       configurerOpts.put(name(), type.convert(val));
+    }
   }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -89,10 +89,8 @@ public abstract class SeekingFilter extends WrappingIterator {
    * Subclasses must provide an implementation which examines the given key and value and determines
    * (1) whether to accept the KV pair and (2) how far to advance the source iterator past the key.
    *
-   * @param k
-   *          a key
-   * @param v
-   *          a value
+   * @param k a key
+   * @param v a value
    * @return indicating whether to pass or block the key, and how far the source iterator should be
    *         advanced.
    */
@@ -104,10 +102,8 @@ public abstract class SeekingFilter extends WrappingIterator {
    * which is greater than (sorts after) the input key. If the subclass never returns USE_HINT, this
    * method will never be called and may safely return null.
    *
-   * @param k
-   *          a key
-   * @param v
-   *          a value
+   * @param k a key
+   * @param v a value
    * @return as above
    */
   public abstract Key getNextKeyHint(Key k, Value v);
@@ -156,8 +152,8 @@ public abstract class SeekingFilter extends WrappingIterator {
     SeekingFilter newInstance;
     try {
       newInstance = this.getClass().getDeclaredConstructor().newInstance();
-    } catch (Exception e) {
-      throw new RuntimeException(e);
+    } catch (ReflectiveOperationException e) {
+      throw new IllegalStateException(e);
     }
     newInstance.setSource(getSource().deepCopy(env));
     newInstance.negate = negate;

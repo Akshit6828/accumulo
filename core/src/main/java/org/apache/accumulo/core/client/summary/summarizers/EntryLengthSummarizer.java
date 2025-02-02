@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -45,7 +45,7 @@ public class EntryLengthSummarizer implements Summarizer {
     private long min = Long.MAX_VALUE;
     private long max = Long.MIN_VALUE;
     private long sum = 0;
-    private long[] counts = new long[32];
+    private final long[] counts = new long[32];
 
     private void accept(int length) {
       int idx;
@@ -106,12 +106,12 @@ public class EntryLengthSummarizer implements Summarizer {
   public Collector collector(SummarizerConfiguration sc) {
     return new Collector() {
 
-      private LengthStats keyStats = new LengthStats();
-      private LengthStats rowStats = new LengthStats();
-      private LengthStats familyStats = new LengthStats();
-      private LengthStats qualifierStats = new LengthStats();
-      private LengthStats visibilityStats = new LengthStats();
-      private LengthStats valueStats = new LengthStats();
+      private final LengthStats keyStats = new LengthStats();
+      private final LengthStats rowStats = new LengthStats();
+      private final LengthStats familyStats = new LengthStats();
+      private final LengthStats qualifierStats = new LengthStats();
+      private final LengthStats visibilityStats = new LengthStats();
+      private final LengthStats valueStats = new LengthStats();
       private long total = 0;
 
       @Override

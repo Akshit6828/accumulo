@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,6 +18,8 @@
  */
 package org.apache.accumulo.server.util;
 
+import static org.apache.accumulo.core.util.threads.ThreadPoolNames.UTILITY_CHECK_FILE_TASKS;
+
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -25,35 +27,37 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.BatchWriter;
 import org.apache.accumulo.core.client.Scanner;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.RootTable;
-import org.apache.accumulo.core.metadata.TabletFileUtil;
+import org.apache.accumulo.core.metadata.AccumuloTable;
+import org.apache.accumulo.core.metadata.StoredTabletFile;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.DataFileColumnFamily;
 import org.apache.accumulo.core.security.Authorizations;
+import org.apache.accumulo.core.trace.TraceUtil;
 import org.apache.accumulo.core.util.threads.ThreadPools;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.accumulo.server.cli.ServerUtilOpts;
 import org.apache.accumulo.server.fs.VolumeManager;
 import org.apache.commons.collections4.map.LRUMap;
 import org.apache.hadoop.fs.Path;
-import org.apache.htrace.TraceScope;
 
 import com.beust.jcommander.Parameter;
 
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
+
 /**
- * Remove file entries for map files that don't exist.
+ * Remove file entries for data files that don't exist.
  */
 public class RemoveEntriesForMissingFiles {
 
@@ -63,19 +67,20 @@ public class RemoveEntriesForMissingFiles {
   }
 
   private static class CheckFileTask implements Runnable {
-    @SuppressWarnings("rawtypes")
-    private Map cache;
-    private VolumeManager fs;
-    private AtomicInteger missing;
-    private BatchWriter writer;
-    private Key key;
-    private Path path;
-    private Set<Path> processing;
-    private AtomicReference<Exception> exceptionRef;
+    private final Map<Path,Path> cache;
+    private final VolumeManager fs;
+    private final AtomicInteger missing;
+    private final BatchWriter writer;
+    private final Key key;
+    private final Path path;
+    private final Set<Path> processing;
+    private final AtomicReference<Exception> exceptionRef;
+    private final Consumer<String> printInfoMethod;
+    private final Consumer<String> printProblemMethod;
 
-    @SuppressWarnings({"rawtypes"})
-    CheckFileTask(Map cache, VolumeManager fs, AtomicInteger missing, BatchWriter writer, Key key,
-        Path map, Set<Path> processing, AtomicReference<Exception> exceptionRef) {
+    CheckFileTask(Map<Path,Path> cache, VolumeManager fs, AtomicInteger missing, BatchWriter writer,
+        Key key, Path map, Set<Path> processing, AtomicReference<Exception> exceptionRef,
+        Consumer<String> printInfoMethod, Consumer<String> printProblemMethod) {
       this.cache = cache;
       this.fs = fs;
       this.missing = missing;
@@ -84,10 +89,11 @@ public class RemoveEntriesForMissingFiles {
       this.path = map;
       this.processing = processing;
       this.exceptionRef = exceptionRef;
+      this.printInfoMethod = printInfoMethod;
+      this.printProblemMethod = printProblemMethod;
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void run() {
       try {
         if (fs.exists(path)) {
@@ -101,9 +107,9 @@ public class RemoveEntriesForMissingFiles {
           m.putDelete(key.getColumnFamily(), key.getColumnQualifier());
           if (writer != null) {
             writer.addMutation(m);
-            System.out.println("Reference " + path + " removed from " + key.getRow());
+            printInfoMethod.accept("Reference " + path + " removed from " + key.getRow());
           } else {
-            System.out.println("File " + path + " is missing");
+            printProblemMethod.accept("File " + path + " is missing");
           }
         }
       } catch (Exception e) {
@@ -117,15 +123,15 @@ public class RemoveEntriesForMissingFiles {
     }
   }
 
-  private static int checkTable(ServerContext context, String tableName, Range range, boolean fix)
-      throws Exception {
+  private static int checkTable(ServerContext context, String tableName, Range range, boolean fix,
+      Consumer<String> printInfoMethod, Consumer<String> printProblemMethod) throws Exception {
 
-    @SuppressWarnings({"rawtypes"})
-    Map cache = new LRUMap(100000);
+    Map<Path,Path> cache = new LRUMap<>(100000);
     Set<Path> processing = new HashSet<>();
-    ExecutorService threadPool = ThreadPools.createFixedThreadPool(16, "CheckFileTasks", false);
+    ExecutorService threadPool = ThreadPools.getServerThreadPools()
+        .getPoolBuilder(UTILITY_CHECK_FILE_TASKS).numCoreThreads(16).build();
 
-    System.out.printf("Scanning : %s %s\n", tableName, range);
+    printInfoMethod.accept(String.format("Scanning : %s %s\n", tableName, range));
 
     VolumeManager fs = context.getVolumeManager();
     Scanner metadata = context.createScanner(tableName, Authorizations.EMPTY);
@@ -136,20 +142,23 @@ public class RemoveEntriesForMissingFiles {
     AtomicReference<Exception> exceptionRef = new AtomicReference<>(null);
     BatchWriter writer = null;
 
-    if (fix)
-      writer = context.createBatchWriter(MetadataTable.NAME);
+    if (fix) {
+      writer = context.createBatchWriter(AccumuloTable.METADATA.tableName());
+    }
 
     for (Entry<Key,Value> entry : metadata) {
-      if (exceptionRef.get() != null)
+      if (exceptionRef.get() != null) {
         break;
+      }
 
       count++;
       Key key = entry.getKey();
-      Path map = new Path(TabletFileUtil.validate(key.getColumnQualifierData().toString()));
+      Path map = StoredTabletFile.of(key.getColumnQualifierData().toString()).getPath();
 
       synchronized (processing) {
-        while (processing.size() >= 64 || processing.contains(map))
+        while (processing.size() >= 64 || processing.contains(map)) {
           processing.wait();
+        }
 
         if (cache.get(map) != null) {
           continue;
@@ -158,54 +167,73 @@ public class RemoveEntriesForMissingFiles {
         processing.add(map);
       }
 
-      threadPool.submit(
-          new CheckFileTask(cache, fs, missing, writer, key, map, processing, exceptionRef));
+      threadPool.execute(new CheckFileTask(cache, fs, missing, writer, key, map, processing,
+          exceptionRef, printInfoMethod, printProblemMethod));
     }
 
     threadPool.shutdown();
 
     synchronized (processing) {
-      while (!processing.isEmpty())
+      while (!processing.isEmpty()) {
         processing.wait();
+      }
     }
 
-    if (exceptionRef.get() != null)
+    if (exceptionRef.get() != null) {
       throw new AccumuloException(exceptionRef.get());
+    }
 
-    if (writer != null && missing.get() > 0)
+    if (writer != null && missing.get() > 0) {
       writer.close();
+    }
 
-    System.out.printf("Scan finished, %d files of %d missing\n\n", missing.get(), count);
+    String msg =
+        String.format("Scan finished, missing files: %d, total files: %d\n", missing.get(), count);
+    if (missing.get() == 0) {
+      printInfoMethod.accept(msg);
+    } else {
+      printProblemMethod.accept(msg);
+    }
 
     return missing.get();
   }
 
-  static int checkAllTables(ServerContext context, boolean fix) throws Exception {
-    int missing = checkTable(context, RootTable.NAME, TabletsSection.getRange(), fix);
+  static int checkAllTables(ServerContext context, boolean fix, Consumer<String> printInfoMethod,
+      Consumer<String> printProblemMethod) throws Exception {
+    int missing = checkTable(context, AccumuloTable.ROOT.tableName(), TabletsSection.getRange(),
+        fix, printInfoMethod, printProblemMethod);
 
-    if (missing == 0)
-      return checkTable(context, MetadataTable.NAME, TabletsSection.getRange(), fix);
-    else
+    if (missing == 0) {
+      return checkTable(context, AccumuloTable.METADATA.tableName(), TabletsSection.getRange(), fix,
+          printInfoMethod, printProblemMethod);
+    } else {
       return missing;
+    }
   }
 
-  static int checkTable(ServerContext context, String tableName, boolean fix) throws Exception {
-    if (tableName.equals(RootTable.NAME)) {
+  public static int checkTable(ServerContext context, String tableName, boolean fix,
+      Consumer<String> printInfoMethod, Consumer<String> printProblemMethod) throws Exception {
+    if (tableName.equals(AccumuloTable.ROOT.tableName())) {
       throw new IllegalArgumentException("Can not check root table");
-    } else if (tableName.equals(MetadataTable.NAME)) {
-      return checkTable(context, RootTable.NAME, TabletsSection.getRange(), fix);
+    } else if (tableName.equals(AccumuloTable.METADATA.tableName())) {
+      return checkTable(context, AccumuloTable.ROOT.tableName(), TabletsSection.getRange(), fix,
+          printInfoMethod, printProblemMethod);
     } else {
-      TableId tableId = Tables.getTableId(context, tableName);
+      TableId tableId = context.getTableId(tableName);
       Range range = new KeyExtent(tableId, null, null).toMetaRange();
-      return checkTable(context, MetadataTable.NAME, range, fix);
+      return checkTable(context, AccumuloTable.METADATA.tableName(), range, fix, printInfoMethod,
+          printProblemMethod);
     }
   }
 
   public static void main(String[] args) throws Exception {
     Opts opts = new Opts();
-    try (TraceScope clientSpan =
-        opts.parseArgsAndTrace(RemoveEntriesForMissingFiles.class.getName(), args)) {
-      checkAllTables(opts.getServerContext(), opts.fix);
+    opts.parseArgs(RemoveEntriesForMissingFiles.class.getName(), args);
+    Span span = TraceUtil.startSpan(RemoveEntriesForMissingFiles.class, "main");
+    try (Scope scope = span.makeCurrent()) {
+      checkAllTables(opts.getServerContext(), opts.fix, System.out::println, System.out::println);
+    } finally {
+      span.end();
     }
   }
 }

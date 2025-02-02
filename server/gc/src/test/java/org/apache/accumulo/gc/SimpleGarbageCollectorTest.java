@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -25,10 +25,10 @@ import static org.easymock.EasyMock.getCurrentArguments;
 import static org.easymock.EasyMock.partialMockBuilder;
 import static org.easymock.EasyMock.replay;
 import static org.easymock.EasyMock.verify;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
@@ -43,29 +43,35 @@ import org.apache.accumulo.core.clientImpl.Credentials;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.conf.SiteConfiguration;
+import org.apache.accumulo.core.data.InstanceId;
 import org.apache.accumulo.core.data.TableId;
+import org.apache.accumulo.core.gc.GcCandidate;
 import org.apache.accumulo.core.volume.Volume;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.accumulo.server.fs.VolumeManager;
-import org.apache.accumulo.server.gc.GcVolumeUtil;
+import org.apache.accumulo.server.gc.AllVolumesDirectory;
 import org.apache.accumulo.server.security.SystemCredentials;
 import org.apache.hadoop.fs.Path;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SimpleGarbageCollectorTest {
+  private static final Logger log = LoggerFactory.getLogger(SimpleGarbageCollectorTest.class);
+
   private VolumeManager volMgr;
   private ServerContext context;
   private Credentials credentials;
   private SimpleGarbageCollector gc;
   private ConfigurationCopy systemConfig;
-  private static SiteConfiguration siteConfig = SiteConfiguration.auto();
+  private static SiteConfiguration siteConfig = SiteConfiguration.empty().build();
 
-  @Before
+  @BeforeEach
   public void setUp() {
     volMgr = createMock(VolumeManager.class);
     context = createMock(ServerContext.class);
-    expect(context.getInstanceID()).andReturn("mock").anyTimes();
+    expect(context.getInstanceID()).andReturn(InstanceId.of("mock")).anyTimes();
     expect(context.getZooKeepers()).andReturn("localhost").anyTimes();
     expect(context.getZooKeepersSessionTimeOut()).andReturn(30000).anyTimes();
 
@@ -73,7 +79,7 @@ public class SimpleGarbageCollectorTest {
     expect(context.getConfiguration()).andReturn(systemConfig).anyTimes();
     expect(context.getVolumeManager()).andReturn(volMgr).anyTimes();
 
-    credentials = SystemCredentials.get("mock", siteConfig);
+    credentials = SystemCredentials.get(InstanceId.of("mock"), siteConfig);
     expect(context.getPrincipal()).andReturn(credentials.getPrincipal()).anyTimes();
     expect(context.getAuthenticationToken()).andReturn(credentials.getToken()).anyTimes();
     expect(context.getCredentials()).andReturn(credentials).anyTimes();
@@ -92,7 +98,6 @@ public class SimpleGarbageCollectorTest {
     conf.put(Property.GC_CYCLE_START.getKey(), "1");
     conf.put(Property.GC_CYCLE_DELAY.getKey(), "20");
     conf.put(Property.GC_DELETE_THREADS.getKey(), "2");
-    conf.put(Property.GC_TRASH_IGNORE.getKey(), "false");
 
     return new ConfigurationCopy(conf);
   }
@@ -101,7 +106,6 @@ public class SimpleGarbageCollectorTest {
   public void testInit() {
     assertSame(volMgr, gc.getContext().getVolumeManager());
     assertEquals(credentials, gc.getContext().getCredentials());
-    assertTrue(gc.isUsingTrash());
     assertEquals(1000L, gc.getStartDelay());
     assertEquals(2, gc.getNumDeleteThreads());
     assertFalse(gc.inSafeMode()); // false by default
@@ -123,13 +127,6 @@ public class SimpleGarbageCollectorTest {
     replay(volMgr);
     assertFalse(gc.moveToTrash(path));
     verify(volMgr);
-  }
-
-  @Test
-  public void testMoveToTrash_NotUsingTrash() throws Exception {
-    systemConfig.set(Property.GC_TRASH_IGNORE.getKey(), "true");
-    Path path = createMock(Path.class);
-    assertFalse(gc.moveToTrash(path));
   }
 
   @Test
@@ -161,38 +158,49 @@ public class SimpleGarbageCollectorTest {
 
     replay(vol1, vol2, volMgr2);
 
-    TreeMap<String,String> confirmed = new TreeMap<>();
-    confirmed.put("5a/t-0001", "hdfs://nn1/accumulo/tables/5a/t-0001");
-    confirmed.put("5a/t-0001/F0001.rf", "hdfs://nn1/accumulo/tables/5a/t-0001/F0001.rf");
-    confirmed.put("5a/t-0001/F0002.rf", "hdfs://nn1/accumulo/tables/5a/t-0001/F0002.rf");
-    confirmed.put("5a/t-0002/F0001.rf", "hdfs://nn1/accumulo/tables/5a/t-0002/F0001.rf");
-    confirmed.put("5b/t-0003",
-        GcVolumeUtil.getDeleteTabletOnAllVolumesUri(TableId.of("5b"), "t-0003"));
-    confirmed.put("5b/t-0003/F0001.rf", "hdfs://nn1/accumulo/tables/5b/t-0003/F0001.rf");
-    confirmed.put("5b/t-0003/F0002.rf", "hdfs://nn2/accumulo/tables/5b/t-0003/F0002.rf");
-    confirmed.put("5b/t-0003/F0003.rf", "hdfs://nn3/accumulo/tables/5b/t-0003/F0003.rf");
-    confirmed.put("5b/t-0004",
-        GcVolumeUtil.getDeleteTabletOnAllVolumesUri(TableId.of("5b"), "t-0004"));
-    confirmed.put("5b/t-0004/F0001.rf", "hdfs://nn1/accumulo/tables/5b/t-0004/F0001.rf");
+    TreeMap<String,GcCandidate> confirmed = new TreeMap<>();
+    confirmed.put("5a/t-0001", new GcCandidate("hdfs://nn1/accumulo/tables/5a/t-0001", 0L));
+    confirmed.put("5a/t-0001/F0001.rf",
+        new GcCandidate("hdfs://nn1/accumulo/tables/5a/t-0001/F0001.rf", 1L));
+    confirmed.put("5a/t-0001/F0002.rf",
+        new GcCandidate("hdfs://nn1/accumulo/tables/5a/t-0001/F0002.rf", 2L));
+    confirmed.put("5a/t-0002/F0001.rf",
+        new GcCandidate("hdfs://nn1/accumulo/tables/5a/t-0002/F0001.rf", 3L));
+    var allVolumesDirectory = new AllVolumesDirectory(TableId.of("5b"), "t-0003");
+    confirmed.put("5b/t-0003", new GcCandidate(allVolumesDirectory.getMetadataPath(), 4L));
+    confirmed.put("5b/t-0003/F0001.rf",
+        new GcCandidate("hdfs://nn1/accumulo/tables/5b/t-0003/F0001.rf", 5L));
+    confirmed.put("5b/t-0003/F0002.rf",
+        new GcCandidate("hdfs://nn2/accumulo/tables/5b/t-0003/F0002.rf", 6L));
+    confirmed.put("5b/t-0003/F0003.rf",
+        new GcCandidate("hdfs://nn3/accumulo/tables/5b/t-0003/F0003.rf", 7L));
+    allVolumesDirectory = new AllVolumesDirectory(TableId.of("5b"), "t-0004");
+    confirmed.put("5b/t-0004", new GcCandidate(allVolumesDirectory.getMetadataPath(), 8L));
+    confirmed.put("5b/t-0004/F0001.rf",
+        new GcCandidate("hdfs://nn1/accumulo/tables/5b/t-0004/F0001.rf", 9L));
 
-    List<String> processedDeletes = new ArrayList<>();
+    List<GcCandidate> processedDeletes = new ArrayList<>();
 
-    SimpleGarbageCollector.minimizeDeletes(confirmed, processedDeletes, volMgr2);
+    GCRun.minimizeDeletes(confirmed, processedDeletes, volMgr2, log);
 
-    TreeMap<String,String> expected = new TreeMap<>();
-    expected.put("5a/t-0001", "hdfs://nn1/accumulo/tables/5a/t-0001");
-    expected.put("5a/t-0002/F0001.rf", "hdfs://nn1/accumulo/tables/5a/t-0002/F0001.rf");
-    expected.put("5b/t-0003",
-        GcVolumeUtil.getDeleteTabletOnAllVolumesUri(TableId.of("5b"), "t-0003"));
-    expected.put("5b/t-0003/F0003.rf", "hdfs://nn3/accumulo/tables/5b/t-0003/F0003.rf");
-    expected.put("5b/t-0004",
-        GcVolumeUtil.getDeleteTabletOnAllVolumesUri(TableId.of("5b"), "t-0004"));
+    TreeMap<String,GcCandidate> expected = new TreeMap<>();
+    expected.put("5a/t-0001", new GcCandidate("hdfs://nn1/accumulo/tables/5a/t-0001", 0L));
+    expected.put("5a/t-0002/F0001.rf",
+        new GcCandidate("hdfs://nn1/accumulo/tables/5a/t-0002/F0001.rf", 3L));
+    allVolumesDirectory = new AllVolumesDirectory(TableId.of("5b"), "t-0003");
+    expected.put("5b/t-0003", new GcCandidate(allVolumesDirectory.getMetadataPath(), 4L));
+    expected.put("5b/t-0003/F0003.rf",
+        new GcCandidate("hdfs://nn3/accumulo/tables/5b/t-0003/F0003.rf", 7L));
+    allVolumesDirectory = new AllVolumesDirectory(TableId.of("5b"), "t-0004");
+    expected.put("5b/t-0004", new GcCandidate(allVolumesDirectory.getMetadataPath(), 8L));
 
     assertEquals(expected, confirmed);
-    assertEquals(Arrays.asList("hdfs://nn1/accumulo/tables/5a/t-0001/F0001.rf",
-        "hdfs://nn1/accumulo/tables/5a/t-0001/F0002.rf",
-        "hdfs://nn1/accumulo/tables/5b/t-0003/F0001.rf",
-        "hdfs://nn2/accumulo/tables/5b/t-0003/F0002.rf",
-        "hdfs://nn1/accumulo/tables/5b/t-0004/F0001.rf"), processedDeletes);
+    assertEquals(
+        Arrays.asList(new GcCandidate("hdfs://nn1/accumulo/tables/5a/t-0001/F0001.rf", 1L),
+            new GcCandidate("hdfs://nn1/accumulo/tables/5a/t-0001/F0002.rf", 2L),
+            new GcCandidate("hdfs://nn1/accumulo/tables/5b/t-0003/F0001.rf", 5L),
+            new GcCandidate("hdfs://nn2/accumulo/tables/5b/t-0003/F0002.rf", 6L),
+            new GcCandidate("hdfs://nn1/accumulo/tables/5b/t-0004/F0001.rf", 9L)),
+        processedDeletes);
   }
 }

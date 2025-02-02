@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -80,9 +80,8 @@ import org.apache.commons.lang3.mutable.MutableLong;
  * </code>
  * </pre>
  *
- * @param <K>
- *          The counter key type. This type must have good implementations of
- *          {@link Object#hashCode()} and {@link Object#equals(Object)}.
+ * @param <K> The counter key type. This type must have good implementations of
+ *        {@link Object#hashCode()} and {@link Object#equals(Object)}.
  * @see CounterSummary
  * @since 2.0.0
  */
@@ -178,8 +177,7 @@ public abstract class CountingSummarizer<K> implements Summarizer {
    */
   public interface Converter<K> {
     /**
-     * @param consumer
-     *          emit counter objects derived from key and value to this consumer
+     * @param consumer emit counter objects derived from key and value to this consumer
      */
     void convert(Key k, Value v, Consumer<K> consumer);
   }
@@ -220,15 +218,15 @@ public abstract class CountingSummarizer<K> implements Summarizer {
       // efficient than converting String for each Key. The
       // conversion to String is deferred until the summary is requested.
 
-      private Map<K,MutableLong> counters = new HashMap<>();
+      private final Map<K,MutableLong> counters = new HashMap<>();
       private long tooMany = 0;
       private long tooLong = 0;
       private long seen = 0;
       private long emitted = 0;
       private long deleted = 0;
-      private Converter<K> converter = converter();
-      private Function<K,String> encoder = encoder();
-      private UnaryOperator<K> copier = copier();
+      private final Converter<K> converter = converter();
+      private final Function<K,String> encoder = encoder();
+      private final UnaryOperator<K> copier = copier();
 
       private void incrementCounter(K counter) {
         emitted++;

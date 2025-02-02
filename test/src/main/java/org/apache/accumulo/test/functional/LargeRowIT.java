@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,14 +19,13 @@
 package org.apache.accumulo.test.functional;
 
 import static java.util.Collections.singletonMap;
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
-import static org.junit.Assert.assertTrue;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Random;
 import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
@@ -44,11 +43,11 @@ import org.apache.accumulo.minicluster.MemoryUnit;
 import org.apache.accumulo.minicluster.ServerType;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.accumulo.test.TestIngest;
+import org.apache.accumulo.test.util.Wait;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,17 +57,16 @@ public class LargeRowIT extends AccumuloClusterHarness {
   private static final Logger log = LoggerFactory.getLogger(LargeRowIT.class);
 
   @Override
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(4);
+  }
+
+  @Override
   public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
     cfg.setMemory(ServerType.TABLET_SERVER, cfg.getMemory(ServerType.TABLET_SERVER) * 2,
         MemoryUnit.BYTE);
     Map<String,String> siteConfig = cfg.getSiteConfig();
-    siteConfig.put(Property.TSERV_MAJC_DELAY.getKey(), "10ms");
     cfg.setSiteConfig(siteConfig);
-  }
-
-  @Override
-  protected int defaultTimeoutSeconds() {
-    return 4 * 60;
   }
 
   private static final int SEED = 42;
@@ -80,49 +78,25 @@ public class LargeRowIT extends AccumuloClusterHarness {
   private String REG_TABLE_NAME;
   private String PRE_SPLIT_TABLE_NAME;
   private int timeoutFactor = 1;
-  private String tservMajcDelay;
 
-  @Before
+  @BeforeEach
   public void getTimeoutFactor() throws Exception {
-    try {
-      timeoutFactor = Integer.parseInt(System.getProperty("timeout.factor"));
-    } catch (NumberFormatException e) {
-      log.warn("Could not parse property value for 'timeout.factor' as integer: {}",
-          System.getProperty("timeout.factor"));
-    }
-
-    assertTrue("Timeout factor must be greater than or equal to 1", timeoutFactor >= 1);
+    timeoutFactor = Wait.getTimeoutFactor(e -> 1); // default to 1
 
     String[] names = getUniqueNames(2);
     REG_TABLE_NAME = names[0];
     PRE_SPLIT_TABLE_NAME = names[1];
-
-    try (AccumuloClient c = Accumulo.newClient().from(getClientProps()).build()) {
-      tservMajcDelay =
-          c.instanceOperations().getSystemConfiguration().get(Property.TSERV_MAJC_DELAY.getKey());
-      c.instanceOperations().setProperty(Property.TSERV_MAJC_DELAY.getKey(), "10ms");
-    }
   }
 
-  @After
-  public void resetMajcDelay() throws Exception {
-    if (tservMajcDelay != null) {
-      try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
-        client.instanceOperations().setProperty(Property.TSERV_MAJC_DELAY.getKey(), tservMajcDelay);
-      }
-    }
-  }
-
-  @SuppressFBWarnings(value = "PREDICTABLE_RANDOM",
-      justification = "predictable random is okay for testing")
+  @SuppressFBWarnings(value = {"PREDICTABLE_RANDOM", "DMI_RANDOM_USED_ONLY_ONCE"},
+      justification = "predictable random with specific seed is intended for this test")
   @Test
   public void run() throws Exception {
-    Random r = new Random();
+    var random = new Random(SEED + 1);
     byte[] rowData = new byte[ROW_SIZE];
-    r.setSeed(SEED + 1);
     TreeSet<Text> splitPoints = new TreeSet<>();
     for (int i = 0; i < NUM_PRE_SPLITS; i++) {
-      r.nextBytes(rowData);
+      random.nextBytes(rowData);
       TestIngest.toPrintableChars(rowData);
       splitPoints.add(new Text(rowData));
     }
@@ -133,7 +107,7 @@ public class LargeRowIT extends AccumuloClusterHarness {
               .setProperties(singletonMap(Property.TABLE_MAX_END_ROW_SIZE.getKey(), "256K"))
               .withSplits(splitPoints));
 
-      sleepUninterruptibly(3, TimeUnit.SECONDS);
+      Thread.sleep(SECONDS.toMillis(3));
       test1(c);
       test2(c);
     }
@@ -146,7 +120,7 @@ public class LargeRowIT extends AccumuloClusterHarness {
     c.tableOperations().setProperty(REG_TABLE_NAME, Property.TABLE_SPLIT_THRESHOLD.getKey(),
         "" + SPLIT_THRESH);
 
-    sleepUninterruptibly(timeoutFactor * 12, TimeUnit.SECONDS);
+    Thread.sleep(SECONDS.toMillis(timeoutFactor * 12));
     log.info("checking splits");
     FunctionalTestUtils.checkSplits(c, REG_TABLE_NAME, NUM_PRE_SPLITS / 2, NUM_PRE_SPLITS * 4);
 
@@ -157,17 +131,16 @@ public class LargeRowIT extends AccumuloClusterHarness {
     basicTest(c, PRE_SPLIT_TABLE_NAME, NUM_PRE_SPLITS);
   }
 
-  @SuppressFBWarnings(value = "PREDICTABLE_RANDOM",
-      justification = "predictable random is okay for testing")
+  @SuppressFBWarnings(value = {"PREDICTABLE_RANDOM", "DMI_RANDOM_USED_ONLY_ONCE"},
+      justification = "predictable random with specific seed is intended for this test")
   private void basicTest(AccumuloClient c, String table, int expectedSplits) throws Exception {
     try (BatchWriter bw = c.createBatchWriter(table)) {
 
-      Random r = new Random();
+      var random = new Random(SEED);
       byte[] rowData = new byte[ROW_SIZE];
-      r.setSeed(SEED);
 
       for (int i = 0; i < NUM_ROWS; i++) {
-        r.nextBytes(rowData);
+        random.nextBytes(rowData);
         TestIngest.toPrintableChars(rowData);
         Mutation mut = new Mutation(new Text(rowData));
         mut.put("", "", Integer.toString(i));
@@ -196,19 +169,17 @@ public class LargeRowIT extends AccumuloClusterHarness {
     FunctionalTestUtils.checkSplits(c, table, expectedSplits, expectedSplits);
   }
 
-  @SuppressFBWarnings(value = "PREDICTABLE_RANDOM",
-      justification = "predictable random is okay for testing")
+  @SuppressFBWarnings(value = {"PREDICTABLE_RANDOM", "DMI_RANDOM_USED_ONLY_ONCE"},
+      justification = "predictable random with specific seed is intended for this test")
   private void verify(AccumuloClient c, String table) throws Exception {
-    Random r = new Random();
+    var random = new Random(SEED);
     byte[] rowData = new byte[ROW_SIZE];
-
-    r.setSeed(SEED);
 
     try (Scanner scanner = c.createScanner(table, Authorizations.EMPTY)) {
 
       for (int i = 0; i < NUM_ROWS; i++) {
 
-        r.nextBytes(rowData);
+        random.nextBytes(rowData);
         TestIngest.toPrintableChars(rowData);
 
         scanner.setRange(new Range(new Text(rowData)));

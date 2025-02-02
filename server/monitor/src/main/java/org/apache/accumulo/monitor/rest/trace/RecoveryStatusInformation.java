@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,7 @@
  */
 package org.apache.accumulo.monitor.rest.trace;
 
-import org.apache.accumulo.core.master.thrift.RecoveryStatus;
+import org.apache.accumulo.core.manager.thrift.RecoveryStatus;
 
 /**
  * Generates a recovery status
@@ -37,12 +37,9 @@ public class RecoveryStatusInformation {
   /**
    * Stores recovery information
    *
-   * @param name
-   *          Name of the table
-   * @param runtime
-   *          Runtime of the recovery
-   * @param progress
-   *          Progress of the recovery
+   * @param name Name of the table
+   * @param runtime Runtime of the recovery
+   * @param progress Progress of the recovery
    */
   public RecoveryStatusInformation(String name, Integer runtime, Double progress) {
     this.name = name;
@@ -53,8 +50,7 @@ public class RecoveryStatusInformation {
   /**
    * Stores recovery information
    *
-   * @param recovery
-   *          Recovery status to obtain name, runtime, and progress
+   * @param recovery Recovery status to obtain name, runtime, and progress
    */
   public RecoveryStatusInformation(RecoveryStatus recovery) {
     this.name = recovery.name;

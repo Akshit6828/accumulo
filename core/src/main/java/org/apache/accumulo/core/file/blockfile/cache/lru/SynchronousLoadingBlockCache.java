@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -38,18 +38,17 @@ public abstract class SynchronousLoadingBlockCache implements BlockCache {
   private final Lock[] loadLocks;
 
   /**
-   * @param numLocks
-   *          this controls how many load operations can run concurrently
+   * @param numLocks this controls how many load operations can run concurrently
    */
   SynchronousLoadingBlockCache(int numLocks) {
     loadLocks = new Lock[numLocks];
     for (int i = 0; i < loadLocks.length; i++) {
-      loadLocks[i] = new ReentrantLock();
+      loadLocks[i] = new ReentrantLock(true);
     }
   }
 
   public SynchronousLoadingBlockCache() {
-    this(2017);
+    this(5003);
   }
 
   private Map<String,byte[]> resolveDependencies(Map<String,Loader> loaderDeps) {
@@ -114,8 +113,8 @@ public abstract class SynchronousLoadingBlockCache implements BlockCache {
     int lockIndex = (blockName.hashCode() & 0x7fffffff) % loadLocks.length;
     Lock loadLock = loadLocks[lockIndex];
 
+    loadLock.lock();
     try {
-      loadLock.lock();
 
       // check again after getting lock, could have loaded while waiting on lock
       ce = getBlockNoStats(blockName);

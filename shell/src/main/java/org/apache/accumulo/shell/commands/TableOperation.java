@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,6 +20,7 @@ package org.apache.accumulo.shell.commands;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -27,7 +28,6 @@ import java.util.regex.Pattern;
 
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.clientImpl.Namespaces;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.data.NamespaceId;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.shell.Shell;
@@ -61,7 +61,7 @@ public abstract class TableOperation extends Command {
       NamespaceId namespaceId = Namespaces.getNamespaceId(shellState.getContext(),
           cl.getOptionValue(optNamespace.getOpt()));
       for (TableId tableId : Namespaces.getTableIds(shellState.getContext(), namespaceId)) {
-        tableSet.add(Tables.getTableName(shellState.getContext(), tableId));
+        tableSet.add(shellState.getContext().getTableName(tableId));
       }
     } else if (useCommandLine && cl.getArgs().length > 0) {
       Collections.addAll(tableSet, cl.getArgs());
@@ -70,29 +70,25 @@ public abstract class TableOperation extends Command {
       tableSet.add(shellState.getTableName());
     }
 
-    if (tableSet.isEmpty())
+    if (tableSet.isEmpty()) {
       Shell.log.warn("No tables found that match your criteria");
+    }
 
-    boolean more = true;
-    // flush the tables
+    // do op if forced or user answers prompt with yes
     for (String tableName : tableSet) {
-      if (!more) {
-        break;
-      }
       if (!shellState.getAccumuloClient().tableOperations().exists(tableName)) {
         throw new TableNotFoundException(null, tableName, null);
       }
-      boolean operate = true;
       if (!force) {
-        shellState.getWriter().flush();
-        String line =
-            shellState.getReader().readLine(getName() + " { " + tableName + " } (yes|no)? ");
-        more = line != null;
-        operate = line != null && (line.equalsIgnoreCase("y") || line.equalsIgnoreCase("yes"));
+        Optional<Boolean> confirmed = shellState.confirm(getName() + " { " + tableName + " }");
+        if (confirmed.isEmpty()) {
+          break;
+        }
+        if (!confirmed.orElseThrow()) {
+          continue;
+        }
       }
-      if (operate) {
-        doTableOp(shellState, tableName);
-      }
+      doTableOp(shellState, tableName);
     }
 
     return 0;
@@ -101,8 +97,7 @@ public abstract class TableOperation extends Command {
   /**
    * Allows implementation to remove certain tables from the set of tables to be operated on.
    *
-   * @param tables
-   *          A reference to the Set of tables to be operated on
+   * @param tables A reference to the Set of tables to be operated on
    */
   protected void pruneTables(Set<String> tables) {
     // Default no pruning
@@ -167,7 +162,8 @@ public abstract class TableOperation extends Command {
   @Override
   public void registerCompletion(final Token root,
       final Map<Command.CompletionSet,Set<String>> special) {
-    if (useCommandLine)
+    if (useCommandLine) {
       registerCompletionForTables(root, special);
+    }
   }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -36,7 +36,7 @@ import org.apache.hadoop.mapreduce.Job;
 public class FileOutputFormatBuilderImpl<T> implements FileOutputFormatBuilder,
     FileOutputFormatBuilder.PathParams<T>, FileOutputFormatBuilder.OutputOptions<T> {
 
-  Class<?> callingClass;
+  final Class<?> callingClass;
   Path outputPath;
   Optional<String> comp = Optional.empty();
   Optional<Long> dataBlockSize = Optional.empty();
@@ -115,21 +115,28 @@ public class FileOutputFormatBuilderImpl<T> implements FileOutputFormatBuilder,
   }
 
   private void _store(Configuration conf) {
-    if (comp.isPresent())
-      FileOutputConfigurator.setCompressionType(callingClass, conf, comp.get());
-    if (dataBlockSize.isPresent())
-      FileOutputConfigurator.setDataBlockSize(callingClass, conf, dataBlockSize.get());
-    if (fileBlockSize.isPresent())
-      FileOutputConfigurator.setFileBlockSize(callingClass, conf, fileBlockSize.get());
-    if (indexBlockSize.isPresent())
-      FileOutputConfigurator.setIndexBlockSize(callingClass, conf, indexBlockSize.get());
-    if (replication.isPresent())
-      FileOutputConfigurator.setReplication(callingClass, conf, replication.get());
-    if (sampler.isPresent())
-      FileOutputConfigurator.setSampler(callingClass, conf, sampler.get());
-    if (!summarizers.isEmpty())
+    if (comp.isPresent()) {
+      FileOutputConfigurator.setCompressionType(callingClass, conf, comp.orElseThrow());
+    }
+    if (dataBlockSize.isPresent()) {
+      FileOutputConfigurator.setDataBlockSize(callingClass, conf, dataBlockSize.orElseThrow());
+    }
+    if (fileBlockSize.isPresent()) {
+      FileOutputConfigurator.setFileBlockSize(callingClass, conf, fileBlockSize.orElseThrow());
+    }
+    if (indexBlockSize.isPresent()) {
+      FileOutputConfigurator.setIndexBlockSize(callingClass, conf, indexBlockSize.orElseThrow());
+    }
+    if (replication.isPresent()) {
+      FileOutputConfigurator.setReplication(callingClass, conf, replication.orElseThrow());
+    }
+    if (sampler.isPresent()) {
+      FileOutputConfigurator.setSampler(callingClass, conf, sampler.orElseThrow());
+    }
+    if (!summarizers.isEmpty()) {
       FileOutputConfigurator.setSummarizers(callingClass, conf,
           summarizers.toArray(new SummarizerConfiguration[0]));
+    }
   }
 
   private void store(JobConf job) {

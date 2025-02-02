@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -58,7 +58,7 @@ public class ColumnFamilySkippingIterator extends ServerSkippingIterator
   protected void consume() throws IOException {
     int count = 0;
 
-    if (inclusive)
+    if (inclusive) {
       while (source.hasTop() && !colFamSet.contains(source.getTopKey().getColumnFamilyData())) {
         if (count < 10) {
           // it is quicker to call next if we are close, but we never know if we are close
@@ -79,7 +79,7 @@ public class ColumnFamilySkippingIterator extends ServerSkippingIterator
           count = 0;
         }
       }
-    else if (colFamSet != null && !colFamSet.isEmpty())
+    } else if (colFamSet != null && !colFamSet.isEmpty()) {
       while (source.hasTop() && colFamSet.contains(source.getTopKey().getColumnFamilyData())) {
         if (count < 10) {
           source.next();
@@ -90,6 +90,7 @@ public class ColumnFamilySkippingIterator extends ServerSkippingIterator
           count = 0;
         }
       }
+    }
   }
 
   private void reseek(Key key) throws IOException {

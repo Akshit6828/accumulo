@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -85,7 +85,7 @@ public class OrIterator implements SortedKeyValueIterator<Key,Value>, OptionDesc
 
   private TermSource currentTerm;
   private List<TermSource> sources;
-  private PriorityQueue<TermSource> sorted = new PriorityQueue<>(5);
+  private final PriorityQueue<TermSource> sorted = new PriorityQueue<>(5);
 
   protected static class TermSource implements Comparable<TermSource> {
     private final SortedKeyValueIterator<Key,Value> iter;
@@ -177,8 +177,9 @@ public class OrIterator implements SortedKeyValueIterator<Key,Value>, OptionDesc
   private OrIterator(OrIterator other, IteratorEnvironment env) {
     ArrayList<TermSource> copiedSources = new ArrayList<>();
 
-    for (TermSource TS : other.sources)
+    for (TermSource TS : other.sources) {
       copiedSources.add(new TermSource(TS.iter.deepCopy(env), new Text(TS.term)));
+    }
     this.sources = Collections.unmodifiableList(copiedSources);
   }
 
@@ -199,8 +200,9 @@ public class OrIterator implements SortedKeyValueIterator<Key,Value>, OptionDesc
   @Override
   public final void next() throws IOException {
     LOG.trace("next()");
-    if (currentTerm == null)
+    if (currentTerm == null) {
       return;
+    }
 
     // Advance currentTerm
     currentTerm.iter.next();

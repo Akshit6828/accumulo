@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.SortedSet;
 
 import org.apache.accumulo.core.client.AccumuloException;
@@ -38,17 +39,18 @@ import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.client.summary.Summarizer;
 import org.apache.accumulo.core.client.summary.SummarizerConfiguration;
 import org.apache.accumulo.core.clientImpl.TableOperationsHelper;
-import org.apache.accumulo.core.conf.IterConfigUtil;
+import org.apache.accumulo.core.clientImpl.TabletMergeabilityUtil;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
 import org.apache.accumulo.core.iterators.user.VersioningIterator;
+import org.apache.accumulo.core.iteratorsImpl.IteratorConfigUtil;
 import org.apache.accumulo.core.sample.impl.SamplerConfigurationImpl;
 import org.apache.accumulo.core.summary.SummarizerConfigurationUtil;
 import org.apache.accumulo.core.util.LocalityGroupUtil;
 import org.apache.accumulo.core.util.LocalityGroupUtil.LocalityGroupConfigurationError;
 import org.apache.hadoop.io.Text;
 
-import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.ImmutableSortedMap;
 
 /**
  * This object stores table creation parameters. Currently includes: {@link TimeType}, whether to
@@ -71,7 +73,8 @@ public class NewTableConfiguration {
   private Map<String,String> summarizerProps = Collections.emptyMap();
   private Map<String,String> localityProps = Collections.emptyMap();
   private final Map<String,String> iteratorProps = new HashMap<>();
-  private SortedSet<Text> splitProps = Collections.emptySortedSet();
+  private SortedMap<Text,TabletMergeability> splitProps = Collections.emptySortedMap();
+  private TabletAvailability initialTabletAvailability = TabletAvailability.ONDEMAND;
 
   private void checkDisjoint(Map<String,String> props, Map<String,String> derivedProps,
       String kind) {
@@ -82,8 +85,7 @@ public class NewTableConfiguration {
   /**
    * Configure logical or millisecond time for tables created with this configuration.
    *
-   * @param tt
-   *          the time type to use; defaults to milliseconds
+   * @param tt the time type to use; defaults to milliseconds
    * @return this
    */
   public NewTableConfiguration setTimeType(TimeType tt) {
@@ -138,8 +140,7 @@ public class NewTableConfiguration {
    * Sets additional properties to be applied to tables created with this configuration. Additional
    * calls to this method replace properties set by previous calls.
    *
-   * @param props
-   *          additional properties to add to the table when it is created
+   * @param props additional properties to add to the table when it is created
    * @return this
    */
   public NewTableConfiguration setProperties(Map<String,String> props) {
@@ -169,8 +170,9 @@ public class NewTableConfiguration {
   public Map<String,String> getProperties() {
     Map<String,String> propertyMap = new HashMap<>();
 
-    if (limitVersion)
-      propertyMap.putAll(IterConfigUtil.generateInitialTableProperties(limitVersion));
+    if (limitVersion) {
+      propertyMap.putAll(IteratorConfigUtil.generateInitialTableProperties(limitVersion));
+    }
 
     propertyMap.putAll(summarizerProps);
     propertyMap.putAll(samplerProps);
@@ -188,11 +190,25 @@ public class NewTableConfiguration {
    * @since 2.0.0
    */
   public Collection<Text> getSplits() {
+    return splitProps.keySet();
+  }
+
+  /**
+   * Return Collection of split values and associated TabletMergeability.
+   *
+   * @return Collection containing splits and TabletMergeability associated with this
+   *         NewTableConfiguration object.
+   *
+   * @since 4.0.0
+   */
+  public SortedMap<Text,TabletMergeability> getSplitsMap() {
     return splitProps;
   }
 
   /**
    * Enable building a sample data set on the new table using the given sampler configuration.
+   *
+   * @return this
    *
    * @since 1.8.0
    */
@@ -207,6 +223,8 @@ public class NewTableConfiguration {
 
   /**
    * Enables creating summary statistics using {@link Summarizer}'s for the new table.
+   *
+   * @return this
    *
    * @since 2.0.0
    */
@@ -225,8 +243,7 @@ public class NewTableConfiguration {
    * Allows locality groups to be set prior to table creation. Additional calls to this method prior
    * to table creation will overwrite previous locality group mappings.
    *
-   * @param groups
-   *          mapping of locality group names to column families in the locality group
+   * @param groups mapping of locality group names to column families in the locality group
    *
    * @since 2.0.0
    *
@@ -250,16 +267,22 @@ public class NewTableConfiguration {
   /**
    * Create a new table with pre-configured splits from the provided input collection.
    *
-   * @param splits
-   *          A SortedSet of String values to be used as split points in a newly created table.
+   * @param splits A SortedSet of String values to be used as split points in a newly created table.
    * @return this
    *
    * @since 2.0.0
    */
+  @SuppressWarnings("unchecked")
   public NewTableConfiguration withSplits(final SortedSet<Text> splits) {
     checkArgument(splits != null, "splits set is null");
     checkArgument(!splits.isEmpty(), "splits set is empty");
-    this.splitProps = ImmutableSortedSet.copyOf(splits);
+    return withSplits(TabletMergeabilityUtil.userDefaultSplits(splits));
+  }
+
+  public NewTableConfiguration withSplits(final SortedMap<Text,TabletMergeability> splits) {
+    checkArgument(splits != null, "splits set is null");
+    checkArgument(!splits.isEmpty(), "splits set is empty");
+    this.splitProps = ImmutableSortedMap.copyOf(splits);
     return this;
   }
 
@@ -269,8 +292,8 @@ public class NewTableConfiguration {
    * Additional calls to this method before table creation will overwrite previous iterator
    * settings.
    *
-   * @param setting
-   *          object specifying the properties of the iterator
+   * @param setting object specifying the properties of the iterator
+   * @return this
    *
    * @since 2.0.0
    *
@@ -283,10 +306,9 @@ public class NewTableConfiguration {
   /**
    * Configure iterator settings for a table prior to its creation.
    *
-   * @param setting
-   *          object specifying the properties of the iterator
-   * @param scopes
-   *          enumerated set of iterator scopes
+   * @param setting object specifying the properties of the iterator
+   * @param scopes enumerated set of iterator scopes
+   * @return this
    *
    * @since 2.0.0
    *
@@ -313,6 +335,25 @@ public class NewTableConfiguration {
       checkDisjoint(properties, iteratorProps, "iterator");
     }
     return this;
+  }
+
+  /**
+   * Sets the initial tablet availability for all tablets. If not set, the default is
+   * {@link TabletAvailability#ONDEMAND}
+   *
+   * @since 4.0.0
+   */
+  public NewTableConfiguration
+      withInitialTabletAvailability(final TabletAvailability tabletAvailability) {
+    this.initialTabletAvailability = tabletAvailability;
+    return this;
+  }
+
+  /**
+   * @since 4.0.0
+   */
+  public TabletAvailability getInitialTabletAvailability() {
+    return this.initialTabletAvailability;
   }
 
   /**

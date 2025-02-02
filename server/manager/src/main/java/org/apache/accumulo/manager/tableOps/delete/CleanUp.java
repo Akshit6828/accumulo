@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -26,31 +26,24 @@ import java.util.Map.Entry;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.BatchScanner;
 import org.apache.accumulo.core.client.IteratorSetting;
-import org.apache.accumulo.core.client.Scanner;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.clientImpl.thrift.ThriftSecurityException;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.NamespaceId;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.Value;
-import org.apache.accumulo.core.dataImpl.KeyExtent;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.Repo;
+import org.apache.accumulo.core.fate.zookeeper.DistributedReadWriteLock.LockType;
 import org.apache.accumulo.core.iterators.user.GrepIterator;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.TabletLocationState;
-import org.apache.accumulo.core.metadata.TabletState;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.DataFileColumnFamily;
 import org.apache.accumulo.core.security.Authorizations;
-import org.apache.accumulo.fate.Repo;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tableOps.ManagerRepo;
 import org.apache.accumulo.manager.tableOps.Utils;
-import org.apache.accumulo.server.ServerConstants;
 import org.apache.accumulo.server.fs.VolumeManager;
-import org.apache.accumulo.server.manager.state.MetaDataTableScanner;
-import org.apache.accumulo.server.problems.ProblemReports;
-import org.apache.accumulo.server.security.AuditedSecurityOperation;
 import org.apache.accumulo.server.util.MetadataTableUtil;
 import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
@@ -62,63 +55,16 @@ class CleanUp extends ManagerRepo {
 
   private static final long serialVersionUID = 1L;
 
-  private TableId tableId;
-  private NamespaceId namespaceId;
-
-  private long creationTime;
-
-  private void readObject(java.io.ObjectInputStream in) throws IOException, ClassNotFoundException {
-    in.defaultReadObject();
-
-    // handle the case where we start executing on a new machine where the current time is in the
-    // past relative to the previous machine
-    // if the new machine has time in the future, that will work ok w/ hasCycled
-    if (System.currentTimeMillis() < creationTime) {
-      creationTime = System.currentTimeMillis();
-    }
-
-  }
+  private final TableId tableId;
+  private final NamespaceId namespaceId;
 
   public CleanUp(TableId tableId, NamespaceId namespaceId) {
     this.tableId = tableId;
     this.namespaceId = namespaceId;
-    creationTime = System.currentTimeMillis();
   }
 
   @Override
-  public long isReady(long tid, Manager manager) throws Exception {
-    if (!manager.hasCycled(creationTime)) {
-      return 50;
-    }
-
-    boolean done = true;
-    Range tableRange = new KeyExtent(tableId, null, null).toMetaRange();
-    Scanner scanner = manager.getContext().createScanner(MetadataTable.NAME, Authorizations.EMPTY);
-    MetaDataTableScanner.configureScanner(scanner, manager);
-    scanner.setRange(tableRange);
-
-    for (Entry<Key,Value> entry : scanner) {
-      TabletLocationState locationState =
-          MetaDataTableScanner.createTabletLocationState(entry.getKey(), entry.getValue());
-      TabletState state = locationState.getState(manager.onlineTabletServers());
-      if (!state.equals(TabletState.UNASSIGNED)) {
-        // This code will even wait on tablets that are assigned to dead tablets servers. This is
-        // intentional because the manager may make metadata writes for these tablets. See #587
-        log.debug("Still waiting for table({}) to be deleted; Target tablet state: UNASSIGNED, "
-            + "Current tablet state: {}, locationState: {}", tableId, state, locationState);
-        done = false;
-        break;
-      }
-    }
-
-    if (!done)
-      return 50;
-
-    return 0;
-  }
-
-  @Override
-  public Repo<Manager> call(long tid, Manager manager) {
+  public Repo<Manager> call(FateId fateId, Manager manager) {
 
     manager.clearMigrations(tableId);
 
@@ -128,7 +74,7 @@ class CleanUp extends ManagerRepo {
       // look for other tables that references this table's files
       AccumuloClient client = manager.getContext();
       try (BatchScanner bs =
-          client.createBatchScanner(MetadataTable.NAME, Authorizations.EMPTY, 8)) {
+          client.createBatchScanner(AccumuloTable.METADATA.tableName(), Authorizations.EMPTY, 8)) {
         Range allTables = TabletsSection.getRange();
         Range tableRange = TabletsSection.getRange(tableId);
         Range beforeTable =
@@ -149,8 +95,8 @@ class CleanUp extends ManagerRepo {
 
     } catch (Exception e) {
       refCount = -1;
-      log.error("Failed to scan " + MetadataTable.NAME + " looking for references to deleted table "
-          + tableId, e);
+      log.error("Failed to scan " + AccumuloTable.METADATA.tableName()
+          + " looking for references to deleted table " + tableId, e);
     }
 
     // remove metadata table entries
@@ -165,18 +111,11 @@ class CleanUp extends ManagerRepo {
       log.error("error deleting " + tableId + " from metadata table", e);
     }
 
-    // remove any problem reports the table may have
-    try {
-      ProblemReports.getInstance(manager.getContext()).deleteProblemReports(tableId);
-    } catch (Exception e) {
-      log.error("Failed to delete problem reports for table " + tableId, e);
-    }
-
     if (refCount == 0) {
-      // delete the map files
+      // delete the data files
       try {
         VolumeManager fs = manager.getVolumeManager();
-        for (String dir : ServerConstants.getTablesDirs(manager.getContext())) {
+        for (String dir : manager.getContext().getTablesDirs()) {
           fs.deleteRecursively(new Path(dir, tableId.canonical()));
         }
       } catch (IOException e) {
@@ -194,21 +133,21 @@ class CleanUp extends ManagerRepo {
     // remove table from zookeeper
     try {
       manager.getTableManager().removeTable(tableId);
-      Tables.clearCache(manager.getContext());
+      manager.getContext().clearTableListCache();
     } catch (Exception e) {
       log.error("Failed to find table id in zookeeper", e);
     }
 
     // remove any permissions associated with this table
     try {
-      AuditedSecurityOperation.getInstance(manager.getContext())
-          .deleteTable(manager.getContext().rpcCreds(), tableId, namespaceId);
+      manager.getContext().getSecurityOperation().deleteTable(manager.getContext().rpcCreds(),
+          tableId, namespaceId);
     } catch (ThriftSecurityException e) {
       log.error("{}", e.getMessage(), e);
     }
 
-    Utils.unreserveTable(manager, tableId, tid, true);
-    Utils.unreserveNamespace(manager, namespaceId, tid, false);
+    Utils.unreserveTable(manager, tableId, fateId, LockType.WRITE);
+    Utils.unreserveNamespace(manager, namespaceId, fateId, LockType.READ);
 
     LoggerFactory.getLogger(CleanUp.class).debug("Deleted table " + tableId);
 
@@ -216,7 +155,7 @@ class CleanUp extends ManagerRepo {
   }
 
   @Override
-  public void undo(long tid, Manager environment) {
+  public void undo(FateId fateId, Manager environment) {
     // nothing to do
   }
 

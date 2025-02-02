@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 /**
  * An {@link AccumuloConfiguration} which holds a flat copy of properties defined in another
@@ -35,8 +36,7 @@ public class ConfigurationCopy extends AccumuloConfiguration {
   /**
    * Creates a new configuration.
    *
-   * @param config
-   *          configuration property key/value pairs to copy
+   * @param config configuration property key/value pairs to copy
    */
   public ConfigurationCopy(Map<String,String> config) {
     this(config.entrySet());
@@ -45,13 +45,19 @@ public class ConfigurationCopy extends AccumuloConfiguration {
   /**
    * Creates a new configuration.
    *
-   * @param config
-   *          configuration property iterable to use for copying
+   * @param config configuration property stream to use for copying
+   */
+  public ConfigurationCopy(Stream<Entry<String,String>> config) {
+    this(config::iterator);
+  }
+
+  /**
+   * Creates a new configuration.
+   *
+   * @param config configuration property iterable to use for copying
    */
   public ConfigurationCopy(Iterable<Entry<String,String>> config) {
-    for (Entry<String,String> entry : config) {
-      copy.put(entry.getKey(), entry.getValue());
-    }
+    config.forEach(e -> copy.put(e.getKey(), e.getValue()));
   }
 
   /**
@@ -78,10 +84,8 @@ public class ConfigurationCopy extends AccumuloConfiguration {
   /**
    * Sets a property in this configuration.
    *
-   * @param prop
-   *          property to set
-   * @param value
-   *          property value
+   * @param prop property to set
+   * @param value property value
    */
   public void set(Property prop, String value) {
     synchronized (copy) {
@@ -93,10 +97,8 @@ public class ConfigurationCopy extends AccumuloConfiguration {
   /**
    * Sets a property in this configuration.
    *
-   * @param key
-   *          key of property to set
-   * @param value
-   *          property value
+   * @param key key of property to set
+   * @param value property value
    */
   public void set(String key, String value) {
     synchronized (copy) {
@@ -113,7 +115,7 @@ public class ConfigurationCopy extends AccumuloConfiguration {
   }
 
   @Override
-  public boolean isPropertySet(Property prop, boolean cacheAndWatch) {
+  public boolean isPropertySet(Property prop) {
     return copy.containsKey(prop.getKey());
   }
 }

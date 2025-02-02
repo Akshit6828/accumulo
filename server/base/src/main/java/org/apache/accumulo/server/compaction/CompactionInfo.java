@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -38,12 +38,14 @@ public class CompactionInfo {
   private final String localityGroup;
   private final long entriesRead;
   private final long entriesWritten;
+  private final long timesPaused;
   private final TCompactionReason reason;
 
   CompactionInfo(FileCompactor compactor) {
     this.localityGroup = compactor.getCurrentLocalityGroup();
     this.entriesRead = compactor.getEntriesRead();
     this.entriesWritten = compactor.getEntriesWritten();
+    this.timesPaused = compactor.getTimesPaused();
     this.reason = compactor.getReason();
     this.compactor = compactor;
   }
@@ -64,11 +66,15 @@ public class CompactionInfo {
     return entriesWritten;
   }
 
+  public long getTimesPaused() {
+    return timesPaused;
+  }
+
   public Thread getThread() {
     return compactor.thread;
   }
 
-  public String getOutputFile() {
+  public StoredTabletFile getOutputFile() {
     return compactor.getOutputFile();
   }
 
@@ -76,15 +82,17 @@ public class CompactionInfo {
 
     TCompactionType type;
 
-    if (compactor.hasIMM())
-      if (!compactor.getFilesToCompact().isEmpty())
+    if (compactor.hasIMM()) {
+      if (!compactor.getFilesToCompact().isEmpty()) {
         type = TCompactionType.MERGE;
-      else
+      } else {
         type = TCompactionType.MINOR;
-    else if (!compactor.willPropogateDeletes())
+      }
+    } else if (!compactor.willPropagateDeletes()) {
       type = TCompactionType.FULL;
-    else
+    } else {
       type = TCompactionType.MAJOR;
+    }
 
     List<IterInfo> iiList = new ArrayList<>();
     Map<String,Map<String,String>> iterOptions = new HashMap<>();
@@ -94,10 +102,10 @@ public class CompactionInfo {
           iterSetting.getName()));
       iterOptions.put(iterSetting.getName(), iterSetting.getOptions());
     }
-    List<String> files = compactor.getFilesToCompact().stream().map(StoredTabletFile::getPathStr)
-        .collect(Collectors.toList());
-    return new ActiveCompaction(compactor.extent.toThrift(),
-        System.currentTimeMillis() - compactor.getStartTime(), files, compactor.getOutputFile(),
-        type, reason, localityGroup, entriesRead, entriesWritten, iiList, iterOptions);
+    List<String> files = compactor.getFilesToCompact().stream()
+        .map(StoredTabletFile::getNormalizedPathStr).collect(Collectors.toList());
+    return new ActiveCompaction(compactor.extent.toThrift(), compactor.getAge().toMillis(), files,
+        compactor.getOutputFile().getMetadataPath(), type, reason, localityGroup, entriesRead,
+        entriesWritten, iiList, iterOptions, timesPaused);
   }
 }

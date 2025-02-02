@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,6 +23,7 @@ import java.io.OutputStream;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.function.Predicate;
 
 import org.apache.accumulo.core.client.Scanner;
@@ -34,9 +35,12 @@ import org.apache.accumulo.core.client.summary.Summary;
 import org.apache.accumulo.core.client.summary.Summary.FileStatistics;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.Key;
+import org.apache.accumulo.core.data.LoadPlan;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.security.Authorizations;
+import org.apache.accumulo.core.util.RowRangeUtil;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
 
 /**
@@ -63,8 +67,7 @@ public class RFile {
      * Specify RFiles to read from. When multiple inputs are specified the {@link Scanner}
      * constructed will present a merged view.
      *
-     * @param inputs
-     *          one or more RFiles to read.
+     * @param inputs one or more RFiles to read.
      * @return this
      */
     ScannerOptions from(RFileSource... inputs);
@@ -73,11 +76,42 @@ public class RFile {
      * Specify RFiles to read from. When multiple are specified the {@link Scanner} constructed will
      * present a merged view.
      *
-     * @param files
-     *          one or more RFiles to read.
+     * @param files one or more RFiles to read.
      * @return this
      */
     ScannerFSOptions from(String... files);
+
+    /**
+     * Specify FencedPath files to read from. When multiple are specified the {@link Scanner}
+     * constructed will present a merged view.
+     *
+     * @param files one or more FencedPaths to read.
+     * @return this
+     *
+     * @since 3.1.0
+     */
+    ScannerFSOptions from(FencedPath... files);
+
+    /**
+     * @since 3.1.0
+     */
+    class FencedPath {
+      private final Path path;
+      private final Range fence;
+
+      public FencedPath(Path path, Range fence) {
+        this.path = Objects.requireNonNull(path);
+        this.fence = RowRangeUtil.requireKeyExtentDataRange(fence);
+      }
+
+      public Path getPath() {
+        return path;
+      }
+
+      public Range getFence() {
+        return fence;
+      }
+    }
   }
 
   /**
@@ -91,8 +125,7 @@ public class RFile {
      * Optionally provide a FileSystem to open RFiles. If not specified, the FileSystem will be
      * constructed using configuration on the classpath.
      *
-     * @param fs
-     *          use this FileSystem to open files.
+     * @param fs use this FileSystem to open files.
      * @return this
      */
     ScannerOptions withFileSystem(FileSystem fs);
@@ -135,8 +168,7 @@ public class RFile {
      * The authorizations passed here will be used to filter Keys, from the {@link Scanner}, based
      * on the content of the column visibility field.
      *
-     * @param auths
-     *          scan with these authorizations
+     * @param auths scan with these authorizations
      * @return this
      */
     ScannerOptions withAuthorizations(Authorizations auths);
@@ -145,8 +177,7 @@ public class RFile {
      * Enabling this option will cache RFiles data in memory. This option is useful when doing lots
      * of random accesses.
      *
-     * @param cacheSize
-     *          the size of the data cache in bytes.
+     * @param cacheSize the size of the data cache in bytes.
      * @return this
      */
     ScannerOptions withDataCache(long cacheSize);
@@ -156,8 +187,7 @@ public class RFile {
      * to find data when seeking to a {@link Key}. This option is useful when doing lots of random
      * accesses.
      *
-     * @param cacheSize
-     *          the size of the index cache in bytes.
+     * @param cacheSize the size of the index cache in bytes.
      * @return this
      */
     ScannerOptions withIndexCache(long cacheSize);
@@ -178,8 +208,7 @@ public class RFile {
      * {@link Property#TABLE_PREFIX} may be accepted and used. For example, cache and crypto
      * properties could be passed here.
      *
-     * @param props
-     *          iterable over Accumulo table key value properties.
+     * @param props iterable over Accumulo table key value properties.
      * @return this
      */
     ScannerOptions withTableProperties(Iterable<Entry<String,String>> props);
@@ -188,8 +217,7 @@ public class RFile {
      * @see #withTableProperties(Iterable) Any property that impacts file behavior regardless of
      *      whether it has the {@link Property#TABLE_PREFIX} may be accepted and used. For example,
      *      cache and crypto properties could be passed here.
-     * @param props
-     *          a map instead of an Iterable
+     * @param props a map instead of an Iterable
      * @return this
      */
     ScannerOptions withTableProperties(Map<String,String> props);
@@ -218,8 +246,7 @@ public class RFile {
      * Specify RFiles to read from. When multiple inputs are specified the summary data will be
      * merged.
      *
-     * @param inputs
-     *          one or more RFiles to read.
+     * @param inputs one or more RFiles to read.
      * @return this
      */
     SummaryOptions from(RFileSource... inputs);
@@ -227,8 +254,7 @@ public class RFile {
     /**
      * Specify RFiles to read from. When multiple are specified the summary data will be merged.
      *
-     * @param files
-     *          one or more RFiles to read.
+     * @param files one or more RFiles to read.
      * @return this
      */
     SummaryFSOptions from(String... files);
@@ -245,8 +271,7 @@ public class RFile {
      * Optionally provide a FileSystem to open RFiles. If not specified, the FileSystem will be
      * constructed using configuration on the classpath.
      *
-     * @param fs
-     *          use this FileSystem to open files.
+     * @param fs use this FileSystem to open files.
      * @return this
      */
     SummaryOptions withFileSystem(FileSystem fs);
@@ -265,8 +290,7 @@ public class RFile {
      * behavior regardless of whether it has the {@link Property#TABLE_PREFIX} may be accepted and
      * used. For example, cache and crypto properties could be passed here.
      *
-     * @param props
-     *          iterable over Accumulo table key value properties.
+     * @param props iterable over Accumulo table key value properties.
      * @return this
      */
     SummaryOptions withTableProperties(Iterable<Entry<String,String>> props);
@@ -275,8 +299,7 @@ public class RFile {
      * @see #withTableProperties(Iterable) Any property that impacts file behavior regardless of
      *      whether it has the {@link Property#TABLE_PREFIX} may be accepted and used. For example,
      *      cache and crypto properties could be passed here.
-     * @param props
-     *          a map instead of an Iterable
+     * @param props a map instead of an Iterable
      * @return this
      */
     SummaryOptions withTableProperties(Map<String,String> props);
@@ -285,9 +308,8 @@ public class RFile {
      * This method allows retrieving a subset of summary data from a file. If a file has lots of
      * separate summaries, reading a subset may be faster.
      *
-     * @param summarySelector
-     *          Only read summary data that was generated with configuration that this predicate
-     *          matches.
+     * @param summarySelector Only read summary data that was generated with configuration that this
+     *        predicate matches.
      * @return this
      */
     SummaryOptions selectSummaries(Predicate<SummarizerConfiguration> summarySelector);
@@ -298,8 +320,7 @@ public class RFile {
      * will get a subset of the summary data. The subset will very likely be an inaccurate
      * approximation.
      *
-     * @param startRow
-     *          A non-null start row. The startRow is used exclusively.
+     * @param startRow A non-null start row. The startRow is used exclusively.
      * @return this
      *
      * @see FileStatistics#getExtra()
@@ -307,8 +328,7 @@ public class RFile {
     SummaryOptions startRow(Text startRow);
 
     /**
-     * @param startRow
-     *          UTF-8 encodes startRow. The startRow is used exclusively.
+     * @param startRow UTF-8 encodes startRow. The startRow is used exclusively.
      * @return this
      * @see #startRow(Text)
      */
@@ -320,8 +340,7 @@ public class RFile {
      * will get a subset of the summary data. The subset will very likely be an inaccurate
      * approximation.
      *
-     * @param endRow
-     *          A non-null end row. The end row is used inclusively.
+     * @param endRow A non-null end row. The end row is used inclusively.
      * @return this
      *
      * @see FileStatistics#getExtra()
@@ -329,8 +348,7 @@ public class RFile {
     SummaryOptions endRow(Text endRow);
 
     /**
-     * @param endRow
-     *          UTF-8 encodes endRow. The end row is used inclusively.
+     * @param endRow UTF-8 encodes endRow. The end row is used inclusively.
      * @return this
      * @see #endRow(Text)
      */
@@ -361,15 +379,13 @@ public class RFile {
    */
   public interface OutputArguments {
     /**
-     * @param filename
-     *          name of file to write RFile data, ending with the ".rf" extension
+     * @param filename name of file to write RFile data, ending with the ".rf" extension
      * @return this
      */
     WriterFSOptions to(String filename);
 
     /**
-     * @param out
-     *          output stream to write RFile data
+     * @param out output stream to write RFile data
      * @return this
      */
     WriterOptions to(OutputStream out);
@@ -386,8 +402,7 @@ public class RFile {
      * Optionally provide a FileSystem to open a file to write a RFile. If not specified, the
      * FileSystem will be constructed using configuration on the classpath.
      *
-     * @param fs
-     *          use this FileSystem to open files.
+     * @param fs use this FileSystem to open files.
      * @return this
      */
     WriterOptions withFileSystem(FileSystem fs);
@@ -405,8 +420,7 @@ public class RFile {
      * Enable generating summary data in the created RFile by running {@link Summarizer}'s based on
      * the specified configuration.
      *
-     * @param summarizerConf
-     *          Configuration for summarizer to run.
+     * @param summarizerConf Configuration for summarizer to run.
      * @since 2.0.0
      */
     default WriterOptions withSummarizers(SummarizerConfiguration... summarizerConf) {
@@ -416,11 +430,9 @@ public class RFile {
     /**
      * An option to store sample data in the generated RFile.
      *
-     * @param samplerConf
-     *          configuration to use when generating sample data.
-     * @throws IllegalArgumentException
-     *           if table properties were previously specified and the table properties also specify
-     *           a sampler.
+     * @param samplerConf configuration to use when generating sample data.
+     * @throws IllegalArgumentException if table properties were previously specified and the table
+     *         properties also specify a sampler.
      * @return this
      */
     WriterOptions withSampler(SamplerConfiguration samplerConf);
@@ -431,11 +443,9 @@ public class RFile {
      * impacts file behavior regardless of whether it has the {@link Property#TABLE_PREFIX} may be
      * accepted and used. For example, cache and crypto properties could be passed here.
      *
-     * @param props
-     *          iterable over Accumulo table key value properties.
-     * @throws IllegalArgumentException
-     *           if sampler was previously specified and the table properties also specify a
-     *           sampler.
+     * @param props iterable over Accumulo table key value properties.
+     * @throws IllegalArgumentException if sampler was previously specified and the table properties
+     *         also specify a sampler.
      * @return this
      */
     WriterOptions withTableProperties(Iterable<Entry<String,String>> props);
@@ -446,14 +456,22 @@ public class RFile {
     WriterOptions withTableProperties(Map<String,String> props);
 
     /**
-     * @param maxSize
-     *          As keys are added to an RFile the visibility field is validated. Validating the
-     *          visibility field requires parsing it. In order to make validation faster, previously
-     *          seen visibilities are cached. This option allows setting the maximum size of this
-     *          cache.
+     * @param maxSize As keys are added to an RFile the visibility field is validated. Validating
+     *        the visibility field requires parsing it. In order to make validation faster,
+     *        previously seen visibilities are cached. This option allows setting the maximum size
+     *        of this cache.
      * @return this
      */
     WriterOptions withVisibilityCacheSize(int maxSize);
+
+    /**
+     * @param splitResolver builds a {@link LoadPlan} using table split points provided by the given
+     *        splitResolver.
+     * @return this
+     * @see RFileWriter#getLoadPlan(String)
+     * @since 2.1.4
+     */
+    WriterOptions withSplitResolver(LoadPlan.SplitResolver splitResolver);
 
     /**
      * @return a new RfileWriter created with the options previously specified.

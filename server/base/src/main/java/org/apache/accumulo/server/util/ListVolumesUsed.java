@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,6 +22,7 @@ import java.util.Iterator;
 import java.util.TreeSet;
 
 import org.apache.accumulo.core.conf.SiteConfiguration;
+import org.apache.accumulo.core.gc.GcCandidate;
 import org.apache.accumulo.core.metadata.schema.Ample;
 import org.apache.accumulo.core.metadata.schema.TabletMetadata;
 import org.apache.accumulo.core.metadata.schema.TabletsMetadata;
@@ -54,7 +55,7 @@ public class ListVolumesUsed {
   }
 
   private static void getLogURIs(TreeSet<String> volumes, LogEntry logEntry) {
-    volumes.add(getLogURI(logEntry.filename));
+    volumes.add(getLogURI(logEntry.getPath()));
   }
 
   private static void listTable(Ample.DataLevel level, ServerContext context) throws Exception {
@@ -65,7 +66,8 @@ public class ListVolumesUsed {
     try (TabletsMetadata tablets = TabletsMetadata.builder(context).forLevel(level)
         .fetch(TabletMetadata.ColumnType.FILES, TabletMetadata.ColumnType.LOGS).build()) {
       for (TabletMetadata tabletMetadata : tablets) {
-        tabletMetadata.getFiles().forEach(file -> volumes.add(getTableURI(file.getPathStr())));
+        tabletMetadata.getFiles()
+            .forEach(file -> volumes.add(getTableURI(file.getNormalizedPathStr())));
         tabletMetadata.getLogs().forEach(le -> getLogURIs(volumes, le));
       }
     }
@@ -78,9 +80,9 @@ public class ListVolumesUsed {
         + " deletes section (volume replacement occurs at deletion time)");
     volumes.clear();
 
-    Iterator<String> delPaths = context.getAmple().getGcCandidates(level, "");
+    Iterator<GcCandidate> delPaths = context.getAmple().getGcCandidates(level);
     while (delPaths.hasNext()) {
-      volumes.add(getTableURI(delPaths.next()));
+      volumes.add(getTableURI(delPaths.next().getPath()));
     }
     for (String volume : volumes) {
       System.out.println("\tVolume : " + volume);

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,20 +18,22 @@
  */
 package org.apache.accumulo.core.security;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.ByteBuffer;
 
 import org.apache.accumulo.core.util.ByteArraySet;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class AuthorizationsTest {
 
   @Test
   public void testSetOfByteArrays() {
-    assertTrue(ByteArraySet.fromStrings("a", "b", "c").contains("a".getBytes()));
+    assertTrue(ByteArraySet.fromStrings("a", "b", "c").contains("a".getBytes(UTF_8)));
   }
 
   @Test
@@ -93,12 +95,13 @@ public class AuthorizationsTest {
     assertArrayEquals(expected.getAuthorizationsArray(), actual.getAuthorizationsArray());
   }
 
-  @Test(expected = UnsupportedOperationException.class)
+  @Test
   public void testUnmodifiableList() {
     Authorizations expected = new Authorizations("foo");
     Authorizations actual = new Authorizations("foo");
 
     assertArrayEquals(expected.getAuthorizationsArray(), actual.getAuthorizationsArray());
-    actual.getAuthorizationsBB().add(ByteBuffer.wrap(new byte[] {'a'}));
+    assertThrows(UnsupportedOperationException.class,
+        () -> actual.getAuthorizationsBB().add(ByteBuffer.wrap(new byte[] {'a'})));
   }
 }

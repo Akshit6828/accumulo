@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -54,6 +54,8 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Joiner;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 public class LocalityGroupUtil {
 
   private static final Logger log = LoggerFactory.getLogger(LocalityGroupUtil.class);
@@ -63,8 +65,7 @@ public class LocalityGroupUtil {
    * set of columns. We are using the immutable set to enable faster comparisons down in the
    * LocalityGroupIterator.
    *
-   * @param columns
-   *          The set of columns
+   * @param columns The set of columns
    * @return An immutable set of columns
    */
   public static Set<ByteSequence> families(Collection<Column> columns) {
@@ -75,8 +76,9 @@ public class LocalityGroupUtil {
         .collect(toUnmodifiableSet());
   }
 
-  @SuppressWarnings("serial")
   public static class LocalityGroupConfigurationError extends AccumuloException {
+    private static final long serialVersionUID = 855450342044719186L;
+
     LocalityGroupConfigurationError(String why) {
       super(why);
     }
@@ -273,6 +275,8 @@ public class LocalityGroupUtil {
     }
 
     @Override
+    @SuppressFBWarnings(value = "EQ_UNUSUAL",
+        justification = "method expected to be unused or overridden")
     public boolean equals(Object o) {
       throw new UnsupportedOperationException();
     }
@@ -302,7 +306,7 @@ public class LocalityGroupUtil {
     public void partition(List<Mutation> mutations,
         PreAllocatedArray<List<Mutation>> partitionedMutations) {
 
-      MutableByteSequence mbs = new MutableByteSequence(new byte[0], 0, 0);
+      final var mbs = new ArrayByteSequence(new byte[0], 0, 0);
 
       PreAllocatedArray<List<ColumnUpdate>> parts = new PreAllocatedArray<>(groups.length + 1);
 
@@ -347,8 +351,8 @@ public class LocalityGroupUtil {
       }
     }
 
-    private Integer getLgid(MutableByteSequence mbs, ColumnUpdate cu) {
-      mbs.setArray(cu.getColumnFamily(), 0, cu.getColumnFamily().length);
+    private Integer getLgid(ArrayByteSequence mbs, ColumnUpdate cu) {
+      mbs.reset(cu.getColumnFamily(), 0, cu.getColumnFamily().length);
       Integer lgid = colfamToLgidMap.get(mbs);
       if (lgid == null) {
         lgid = groups.length;

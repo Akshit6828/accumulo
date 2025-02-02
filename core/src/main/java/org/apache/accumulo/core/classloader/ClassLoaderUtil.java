@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -21,6 +21,7 @@ package org.apache.accumulo.core.classloader;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.spi.common.ContextClassLoaderFactory;
+import org.apache.accumulo.core.util.ConfigurationImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,18 +40,19 @@ public class ClassLoaderUtil {
   public static synchronized void initContextFactory(AccumuloConfiguration conf) {
     if (FACTORY == null) {
       LOG.debug("Creating {}", ContextClassLoaderFactory.class.getName());
-      String factoryName = conf.get(Property.GENERAL_CONTEXT_CLASSLOADER_FACTORY.getKey());
+      String factoryName = conf.get(Property.GENERAL_CONTEXT_CLASSLOADER_FACTORY);
       if (factoryName == null || factoryName.isEmpty()) {
         // load the default implementation
         LOG.info("Using default {}, which is subject to change in a future release",
             ContextClassLoaderFactory.class.getName());
-        FACTORY = new DefaultContextClassLoaderFactory(conf);
+        FACTORY = new URLContextClassLoaderFactory();
       } else {
-        // load user's selected implementation
+        // load user's selected implementation and provide it with the service environment
         try {
           var factoryClass = Class.forName(factoryName).asSubclass(ContextClassLoaderFactory.class);
           LOG.info("Creating {}: {}", ContextClassLoaderFactory.class.getName(), factoryName);
           FACTORY = factoryClass.getDeclaredConstructor().newInstance();
+          FACTORY.init(() -> new ConfigurationImpl(conf));
         } catch (ReflectiveOperationException e) {
           throw new IllegalStateException("Unable to load and initialize class: " + factoryName, e);
         }
@@ -67,16 +69,38 @@ public class ClassLoaderUtil {
   }
 
   // for testing
-  static synchronized void resetContextFactoryForTests() {
+  public static synchronized void resetContextFactoryForTests() {
     FACTORY = null;
   }
 
-  @SuppressWarnings("deprecation")
+  public static ClassLoader getClassLoader() {
+    return getClassLoader(null);
+  }
+
   public static ClassLoader getClassLoader(String context) {
     if (context != null && !context.isEmpty()) {
       return FACTORY.getClassLoader(context);
     } else {
-      return org.apache.accumulo.start.classloader.vfs.AccumuloVFSClassLoader.getClassLoader();
+      return ClassLoader.getSystemClassLoader();
+    }
+  }
+
+  public static boolean isValidContext(String context) {
+    if (context != null && !context.isEmpty()) {
+      try {
+        var loader = FACTORY.getClassLoader(context);
+        if (loader == null) {
+          LOG.debug("Context {} resulted in a null classloader from {}.", context,
+              FACTORY.getClass().getName());
+          return false;
+        }
+        return true;
+      } catch (RuntimeException e) {
+        LOG.debug("Context {} is not valid.", context, e);
+        return false;
+      }
+    } else {
+      return true;
     }
   }
 
@@ -93,9 +117,8 @@ public class ClassLoaderUtil {
   /**
    * Retrieve the classloader context from a table's configuration.
    */
-  @SuppressWarnings("removal")
   public static String tableContext(AccumuloConfiguration conf) {
-    return conf.get(conf.resolve(Property.TABLE_CLASSLOADER_CONTEXT, Property.TABLE_CLASSPATH));
+    return conf.get(Property.TABLE_CLASSLOADER_CONTEXT);
   }
 
 }

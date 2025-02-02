@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,12 @@
  */
 package org.apache.accumulo.core.conf;
 
-import java.io.IOException;
+import static java.util.concurrent.TimeUnit.DAYS;
+import static java.util.concurrent.TimeUnit.HOURS;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.concurrent.TimeUnit.SECONDS;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -36,8 +41,7 @@ public class ConfigurationTypeHelper {
    * Interprets a string specifying bytes. A bytes type is specified as a long integer followed by
    * an optional B (bytes), K (KB), M (MB), or G (GB).
    *
-   * @param str
-   *          String value
+   * @param str String value
    * @return interpreted memory size in bytes
    */
   public static long getFixedMemoryAsBytes(String str) {
@@ -78,8 +82,7 @@ public class ConfigurationTypeHelper {
    * Interprets a string specifying a Memory type which is specified as a long integer followed by
    * an optional B (bytes), K (KB), M (MB), G (GB) or % (percentage).
    *
-   * @param str
-   *          String value
+   * @param str String value
    * @return interpreted memory size in bytes
    */
   public static long getMemoryAsBytes(String str) {
@@ -105,8 +108,7 @@ public class ConfigurationTypeHelper {
    * followed by an optional d (days), h (hours), m (minutes), s (seconds), or ms (milliseconds). A
    * value without a unit is interpreted as seconds.
    *
-   * @param str
-   *          string value
+   * @param str string value
    * @return interpreted time duration in milliseconds
    */
   public static long getTimeInMillis(String str) {
@@ -114,23 +116,23 @@ public class ConfigurationTypeHelper {
     int unitsLen = 1;
     switch (str.charAt(str.length() - 1)) {
       case 'd':
-        timeUnit = TimeUnit.DAYS;
+        timeUnit = DAYS;
         break;
       case 'h':
-        timeUnit = TimeUnit.HOURS;
+        timeUnit = HOURS;
         break;
       case 'm':
-        timeUnit = TimeUnit.MINUTES;
+        timeUnit = MINUTES;
         break;
       case 's':
-        timeUnit = TimeUnit.SECONDS;
+        timeUnit = SECONDS;
         if (str.endsWith("ms")) {
-          timeUnit = TimeUnit.MILLISECONDS;
+          timeUnit = MILLISECONDS;
           unitsLen = 2;
         }
         break;
       default:
-        timeUnit = TimeUnit.SECONDS;
+        timeUnit = SECONDS;
         unitsLen = 0;
         break;
     }
@@ -141,31 +143,27 @@ public class ConfigurationTypeHelper {
    * Interprets a string specifying a fraction. A fraction is specified as a double. An optional %
    * at the end signifies a percentage.
    *
-   * @param str
-   *          string value
+   * @param str string value
    * @return interpreted fraction as a decimal value
    */
   public static double getFraction(String str) {
-    if (!str.isEmpty() && str.charAt(str.length() - 1) == '%')
+    if (!str.isEmpty() && str.charAt(str.length() - 1) == '%') {
       return Double.parseDouble(str.substring(0, str.length() - 1)) / 100.0;
+    }
     return Double.parseDouble(str);
   }
 
   // This is not a cache for loaded classes, just a way to avoid spamming the debug log
-  private static Map<String,Class<?>> loaded = Collections.synchronizedMap(new HashMap<>());
+  private static final Map<String,Class<?>> loaded = Collections.synchronizedMap(new HashMap<>());
 
   /**
    * Loads a class in the given classloader context, suppressing any exceptions, and optionally
    * providing a default instance to use.
    *
-   * @param context
-   *          the per-table context, can be null
-   * @param clazzName
-   *          the name of the class to load
-   * @param base
-   *          the type of the class
-   * @param defaultInstance
-   *          a default instance if the class cannot be loaded
+   * @param context the per-table context, can be null
+   * @param clazzName the name of the class to load
+   * @param base the type of the class
+   * @param defaultInstance a default instance if the class cannot be loaded
    * @return a new instance of the class, or the defaultInstance
    */
   public static <T> T getClassInstance(String context, String clazzName, Class<T> base,
@@ -174,12 +172,13 @@ public class ConfigurationTypeHelper {
 
     try {
       instance = getClassInstance(context, clazzName, base);
-    } catch (RuntimeException | IOException | ReflectiveOperationException e) {
-      log.warn("Failed to load class {}", clazzName, e);
+    } catch (RuntimeException | ReflectiveOperationException e) {
+      log.error("Failed to load class {} in classloader context {}", clazzName, context, e);
     }
 
-    if (instance == null && defaultInstance != null) {
-      log.info("Using default class {}", defaultInstance.getClass().getName());
+    if (instance == null) {
+      log.info("Using default class ({})",
+          defaultInstance == null ? null : defaultInstance.getClass().getName());
       instance = defaultInstance;
     }
     return instance;
@@ -188,22 +187,20 @@ public class ConfigurationTypeHelper {
   /**
    * Loads a class in the given classloader context.
    *
-   * @param context
-   *          the per-table context, can be null
-   * @param clazzName
-   *          the name of the class to load
-   * @param base
-   *          the type of the class
+   * @param context the per-table context, can be null
+   * @param clazzName the name of the class to load
+   * @param base the type of the class
    * @return a new instance of the class
    */
   public static <T> T getClassInstance(String context, String clazzName, Class<T> base)
-      throws IOException, ReflectiveOperationException {
+      throws ReflectiveOperationException {
     T instance;
 
     Class<? extends T> clazz = ClassLoaderUtil.loadClass(context, clazzName, base);
     instance = clazz.getDeclaredConstructor().newInstance();
-    if (loaded.put(clazzName, clazz) != clazz)
+    if (loaded.put(clazzName, clazz) != clazz) {
       log.debug("Loaded class : {}", clazzName);
+    }
 
     return instance;
   }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,8 +18,8 @@
  */
 package org.apache.accumulo.core.iterators;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.Set;
@@ -31,13 +31,14 @@ import org.apache.accumulo.core.data.PartialKey;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iteratorsImpl.system.CountingIterator;
-import org.junit.Test;
+import org.apache.accumulo.core.iteratorsImpl.system.SortedMapIterator;
+import org.junit.jupiter.api.Test;
 
 public class FirstEntryInRowIteratorTest {
 
   private static long process(TreeMap<Key,Value> sourceMap, TreeMap<Key,Value> resultMap,
       Range range, IteratorSetting iteratorSetting) throws IOException {
-    org.apache.accumulo.core.iterators.SortedMapIterator source = new SortedMapIterator(sourceMap);
+    SortedMapIterator source = new SortedMapIterator(sourceMap);
     CountingIterator counter = new CountingIterator(source);
     FirstEntryInRowIterator feiri = new FirstEntryInRowIterator();
     IteratorEnvironment env = new DefaultIteratorEnvironment();

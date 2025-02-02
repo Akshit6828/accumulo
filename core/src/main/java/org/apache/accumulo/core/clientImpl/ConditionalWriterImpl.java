@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,8 +18,11 @@
  */
 package org.apache.accumulo.core.clientImpl;
 
+import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.accumulo.core.util.threads.ThreadPoolNames.CONDITIONAL_WRITER_POOL;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -36,10 +39,12 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.accumulo.access.AccessEvaluator;
+import org.apache.accumulo.access.InvalidAccessExpressionException;
 import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.AccumuloSecurityException;
@@ -47,7 +52,8 @@ import org.apache.accumulo.core.client.ConditionalWriter;
 import org.apache.accumulo.core.client.ConditionalWriterConfig;
 import org.apache.accumulo.core.client.Durability;
 import org.apache.accumulo.core.client.TimedOutException;
-import org.apache.accumulo.core.clientImpl.TabletLocator.TabletServerMutations;
+import org.apache.accumulo.core.clientImpl.ClientTabletCache.TabletServerMutations;
+import org.apache.accumulo.core.clientImpl.thrift.TInfo;
 import org.apache.accumulo.core.clientImpl.thrift.ThriftSecurityException;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Condition;
@@ -61,65 +67,61 @@ import org.apache.accumulo.core.dataImpl.thrift.TConditionalMutation;
 import org.apache.accumulo.core.dataImpl.thrift.TConditionalSession;
 import org.apache.accumulo.core.dataImpl.thrift.TKeyExtent;
 import org.apache.accumulo.core.dataImpl.thrift.TMutation;
+import org.apache.accumulo.core.fate.zookeeper.ZooUtil.LockID;
+import org.apache.accumulo.core.lock.ServiceLock;
 import org.apache.accumulo.core.rpc.ThriftUtil;
+import org.apache.accumulo.core.rpc.clients.ThriftClientTypes;
 import org.apache.accumulo.core.security.Authorizations;
-import org.apache.accumulo.core.security.ColumnVisibility;
-import org.apache.accumulo.core.security.VisibilityEvaluator;
-import org.apache.accumulo.core.security.VisibilityParseException;
+import org.apache.accumulo.core.tabletingest.thrift.TabletIngestClientService;
 import org.apache.accumulo.core.tabletserver.thrift.NoSuchScanIDException;
-import org.apache.accumulo.core.tabletserver.thrift.TabletClientService;
 import org.apache.accumulo.core.trace.TraceUtil;
-import org.apache.accumulo.core.trace.thrift.TInfo;
-import org.apache.accumulo.core.util.BadArgumentException;
 import org.apache.accumulo.core.util.ByteBufferUtil;
-import org.apache.accumulo.core.util.HostAndPort;
 import org.apache.accumulo.core.util.threads.ThreadPools;
 import org.apache.accumulo.core.util.threads.Threads;
-import org.apache.accumulo.fate.zookeeper.ServiceLock;
-import org.apache.accumulo.fate.zookeeper.ZooUtil.LockID;
 import org.apache.commons.collections4.map.LRUMap;
 import org.apache.commons.lang3.mutable.MutableLong;
 import org.apache.hadoop.io.Text;
-import org.apache.htrace.Trace;
 import org.apache.thrift.TApplicationException;
 import org.apache.thrift.TException;
 import org.apache.thrift.TServiceClient;
 import org.apache.thrift.transport.TTransportException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-class ConditionalWriterImpl implements ConditionalWriter {
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.net.HostAndPort;
 
-  private static ThreadPoolExecutor cleanupThreadPool = ThreadPools.createFixedThreadPool(1, 3,
-      TimeUnit.SECONDS, "Conditional Writer Cleanup Thread", false);
+public class ConditionalWriterImpl implements ConditionalWriter {
 
-  static {
-    cleanupThreadPool.allowCoreThreadTimeOut(true);
-  }
+  private static final Logger log = LoggerFactory.getLogger(ConditionalWriterImpl.class);
 
   private static final int MAX_SLEEP = 30000;
 
-  private Authorizations auths;
-  private VisibilityEvaluator ve;
-  private Map<Text,Boolean> cache = Collections.synchronizedMap(new LRUMap<>(1000));
+  private final Authorizations auths;
+  private final AccessEvaluator accessEvaluator;
+  private final Map<Text,Boolean> cache = Collections.synchronizedMap(new LRUMap<>(1000));
   private final ClientContext context;
-  private TabletLocator locator;
+  private final ClientTabletCache locator;
   private final TableId tableId;
   private final String tableName;
-  private long timeout;
+  private final long timeout;
   private final Durability durability;
   private final String classLoaderContext;
+  private final ConditionalWriterConfig config;
 
   private static class ServerQueue {
-    BlockingQueue<TabletServerMutations<QCMutation>> queue = new LinkedBlockingQueue<>();
+    final BlockingQueue<TabletServerMutations<QCMutation>> queue = new LinkedBlockingQueue<>();
     boolean taskQueued = false;
   }
 
-  private Map<String,ServerQueue> serverQueues;
-  private DelayQueue<QCMutation> failedMutations = new DelayQueue<>();
-  private ScheduledThreadPoolExecutor threadPool;
+  private final Map<String,ServerQueue> serverQueues;
+  private final DelayQueue<QCMutation> failedMutations = new DelayQueue<>();
+  private final ScheduledThreadPoolExecutor threadPool;
+  private final ScheduledFuture<?> failureTaskFuture;
 
   private class RQIterator implements Iterator<Result> {
 
-    private BlockingQueue<Result> rq;
+    private final BlockingQueue<Result> rq;
     private int count;
 
     public RQIterator(BlockingQueue<Result> resultQueue, int count) {
@@ -134,23 +136,24 @@ class ConditionalWriterImpl implements ConditionalWriter {
 
     @Override
     public Result next() {
-      if (count <= 0)
+      if (count <= 0) {
         throw new NoSuchElementException();
+      }
 
       try {
-        Result result = rq.poll(1, TimeUnit.SECONDS);
+        Result result = rq.poll(1, SECONDS);
         while (result == null) {
 
           if (threadPool.isShutdown()) {
             throw new NoSuchElementException("ConditionalWriter closed");
           }
 
-          result = rq.poll(1, TimeUnit.SECONDS);
+          result = rq.poll(1, SECONDS);
         }
         count--;
         return result;
       } catch (InterruptedException e) {
-        throw new RuntimeException(e);
+        throw new IllegalStateException(e);
       }
     }
 
@@ -162,10 +165,10 @@ class ConditionalWriterImpl implements ConditionalWriter {
   }
 
   private static class QCMutation extends ConditionalMutation implements Delayed {
-    private BlockingQueue<Result> resultQueue;
+    private final BlockingQueue<Result> resultQueue;
     private long resetTime;
     private long delay = 50;
-    private long entryTime;
+    private final long entryTime;
 
     QCMutation(ConditionalMutation cm, BlockingQueue<Result> resultQueue, long entryTime) {
       super(cm);
@@ -186,14 +189,15 @@ class ConditionalWriterImpl implements ConditionalWriter {
 
     @Override
     public boolean equals(Object o) {
-      if (o instanceof QCMutation)
+      if (o instanceof QCMutation) {
         return compareTo((QCMutation) o) == 0;
+      }
       return false;
     }
 
     @Override
     public long getDelay(TimeUnit unit) {
-      return unit.convert(delay - (System.currentTimeMillis() - resetTime), TimeUnit.MILLISECONDS);
+      return unit.convert(delay - (System.currentTimeMillis() - resetTime), MILLISECONDS);
     }
 
     void resetDelay() {
@@ -220,7 +224,7 @@ class ConditionalWriterImpl implements ConditionalWriter {
   }
 
   private class CleanupTask implements Runnable {
-    private List<SessionID> sessions;
+    private final List<SessionID> sessions;
 
     CleanupTask(List<SessionID> activeSessions) {
       this.sessions = activeSessions;
@@ -228,18 +232,19 @@ class ConditionalWriterImpl implements ConditionalWriter {
 
     @Override
     public void run() {
-      TabletClientService.Iface client = null;
+      TabletIngestClientService.Iface client = null;
 
       for (SessionID sid : sessions) {
-        if (!sid.isActive())
+        if (!sid.isActive()) {
           continue;
+        }
 
         TInfo tinfo = TraceUtil.traceInfo();
         try {
           client = getClient(sid.location);
           client.closeConditionalUpdate(tinfo, sid.sessionID);
         } catch (Exception e) {} finally {
-          ThriftUtil.returnClient((TServiceClient) client);
+          ThriftUtil.returnClient((TServiceClient) client, context);
         }
 
       }
@@ -256,12 +261,13 @@ class ConditionalWriterImpl implements ConditionalWriter {
 
       for (QCMutation qcm : mutations) {
         qcm.resetDelay();
-        if (time + qcm.getDelay(TimeUnit.MILLISECONDS) > qcm.entryTime + timeout) {
+        if (time + qcm.getDelay(MILLISECONDS) > qcm.entryTime + timeout) {
           TimedOutException toe;
-          if (server != null)
+          if (server != null) {
             toe = new TimedOutException(Collections.singleton(server.toString()));
-          else
+          } else {
             toe = new TimedOutException("Conditional mutation timed out");
+          }
 
           qcm.queueResult(new Result(toe, qcm, (server == null ? null : server.toString())));
         } else {
@@ -269,8 +275,9 @@ class ConditionalWriterImpl implements ConditionalWriter {
         }
       }
 
-      if (!mutations2.isEmpty())
+      if (!mutations2.isEmpty()) {
         failedMutations.addAll(mutations2);
+      }
 
     } else {
       mutations.forEach(QCMutation::resetDelay);
@@ -298,8 +305,9 @@ class ConditionalWriterImpl implements ConditionalWriter {
       binnedMutations.clear();
     }
 
-    if (!failures.isEmpty())
+    if (!failures.isEmpty()) {
       queueRetry(failures, null);
+    }
 
     binnedMutations.forEach(this::queue);
   }
@@ -312,7 +320,7 @@ class ConditionalWriterImpl implements ConditionalWriter {
       serverQueue.queue.add(mutations);
       // never execute more than one task per server
       if (!serverQueue.taskQueued) {
-        threadPool.execute(Trace.wrap(new SendTask(location)));
+        threadPool.execute(new SendTask(location));
         serverQueue.taskQueued = true;
       }
     }
@@ -329,10 +337,11 @@ class ConditionalWriterImpl implements ConditionalWriter {
     // result in bigger batches and less RPC overhead
 
     synchronized (serverQueue) {
-      if (serverQueue.queue.isEmpty())
+      if (serverQueue.queue.isEmpty()) {
         serverQueue.taskQueued = false;
-      else
-        threadPool.execute(Trace.wrap(task));
+      } else {
+        threadPool.execute(task);
+      }
     }
 
   }
@@ -343,8 +352,9 @@ class ConditionalWriterImpl implements ConditionalWriter {
     var mutations = new ArrayList<TabletServerMutations<QCMutation>>();
     queue.drainTo(mutations);
 
-    if (mutations.isEmpty())
+    if (mutations.isEmpty()) {
       return null;
+    }
 
     if (mutations.size() == 1) {
       return mutations.get(0);
@@ -363,31 +373,36 @@ class ConditionalWriterImpl implements ConditionalWriter {
 
   ConditionalWriterImpl(ClientContext context, TableId tableId, String tableName,
       ConditionalWriterConfig config) {
+    this.config = config;
     this.context = context;
     this.auths = config.getAuthorizations();
-    this.ve = new VisibilityEvaluator(config.getAuthorizations());
-    this.threadPool = ThreadPools.createScheduledExecutorService(config.getMaxWriteThreads(),
-        this.getClass().getSimpleName(), false);
-    this.locator = new SyncingTabletLocator(context, tableId);
+    this.accessEvaluator = AccessEvaluator.of(config.getAuthorizations().toAccessAuthorizations());
+    this.threadPool = context.threadPools().createScheduledExecutorService(
+        config.getMaxWriteThreads(), CONDITIONAL_WRITER_POOL.poolName);
+    this.locator = new SyncingClientTabletCache(context, tableId);
     this.serverQueues = new HashMap<>();
     this.tableId = tableId;
     this.tableName = tableName;
-    this.timeout = config.getTimeout(TimeUnit.MILLISECONDS);
+    this.timeout = config.getTimeout(MILLISECONDS);
     this.durability = config.getDurability();
     this.classLoaderContext = config.getClassLoaderContext();
 
     Runnable failureHandler = () -> {
       List<QCMutation> mutations = new ArrayList<>();
       failedMutations.drainTo(mutations);
-      if (!mutations.isEmpty())
+      if (!mutations.isEmpty()) {
         queue(mutations);
+      }
     };
 
-    threadPool.scheduleAtFixedRate(failureHandler, 250, 250, TimeUnit.MILLISECONDS);
+    failureTaskFuture = threadPool.scheduleAtFixedRate(failureHandler, 250, 250, MILLISECONDS);
   }
 
   @Override
   public Iterator<Result> write(Iterator<ConditionalMutation> mutations) {
+
+    ThreadPools.ensureRunning(failureTaskFuture,
+        "Background task that re-queues failed mutations has exited.");
 
     BlockingQueue<Result> resultQueue = new LinkedBlockingQueue<>();
 
@@ -401,9 +416,10 @@ class ConditionalWriterImpl implements ConditionalWriter {
       ConditionalMutation mut = mutations.next();
       count++;
 
-      if (mut.getConditions().isEmpty())
+      if (mut.getConditions().isEmpty()) {
         throw new IllegalArgumentException(
             "ConditionalMutation had no conditions " + new String(mut.getRow(), UTF_8));
+      }
 
       for (Condition cond : mut.getConditions()) {
         if (!isVisible(cond.getVisibility())) {
@@ -423,7 +439,7 @@ class ConditionalWriterImpl implements ConditionalWriter {
 
   private class SendTask implements Runnable {
 
-    String location;
+    final String location;
 
     public SendTask(String location) {
       this.location = location;
@@ -434,8 +450,9 @@ class ConditionalWriterImpl implements ConditionalWriter {
     public void run() {
       try {
         TabletServerMutations<QCMutation> mutations = dequeue(location);
-        if (mutations != null)
+        if (mutations != null) {
           sendToServer(HostAndPort.fromString(location), mutations);
+        }
       } finally {
         reschedule(this);
       }
@@ -444,8 +461,8 @@ class ConditionalWriterImpl implements ConditionalWriter {
 
   private static class CMK {
 
-    QCMutation cm;
-    KeyExtent ke;
+    final QCMutation cm;
+    final KeyExtent ke;
 
     public CMK(KeyExtent ke, QCMutation cm) {
       this.ke = ke;
@@ -466,16 +483,17 @@ class ConditionalWriterImpl implements ConditionalWriter {
     }
   }
 
-  private HashMap<HostAndPort,SessionID> cachedSessionIDs = new HashMap<>();
+  private final HashMap<HostAndPort,SessionID> cachedSessionIDs = new HashMap<>();
 
-  private SessionID reserveSessionID(HostAndPort location, TabletClientService.Iface client,
+  private SessionID reserveSessionID(HostAndPort location, TabletIngestClientService.Iface client,
       TInfo tinfo) throws ThriftSecurityException, TException {
     // avoid cost of repeatedly making RPC to create sessions, reuse sessions
     synchronized (cachedSessionIDs) {
       SessionID sid = cachedSessionIDs.get(location);
       if (sid != null) {
-        if (sid.reserved)
+        if (sid.reserved) {
           throw new IllegalStateException();
+        }
 
         if (sid.isActive()) {
           sid.reserved = true;
@@ -497,8 +515,9 @@ class ConditionalWriterImpl implements ConditionalWriter {
       sid.lockId = tcs.tserverLock;
       sid.ttl = tcs.ttl;
       sid.location = location;
-      if (cachedSessionIDs.put(location, sid) != null)
+      if (cachedSessionIDs.put(location, sid) != null) {
         throw new IllegalStateException();
+      }
 
       return sid;
     }
@@ -516,8 +535,9 @@ class ConditionalWriterImpl implements ConditionalWriter {
     synchronized (cachedSessionIDs) {
       SessionID sid = cachedSessionIDs.get(location);
       if (sid != null) {
-        if (!sid.reserved)
+        if (!sid.reserved) {
           throw new IllegalStateException();
+        }
         sid.reserved = false;
         sid.lastAccessTime = System.currentTimeMillis();
       }
@@ -526,23 +546,27 @@ class ConditionalWriterImpl implements ConditionalWriter {
 
   List<SessionID> getActiveSessions() {
     ArrayList<SessionID> activeSessions = new ArrayList<>();
-    for (SessionID sid : cachedSessionIDs.values())
-      if (sid.isActive())
+    for (SessionID sid : cachedSessionIDs.values()) {
+      if (sid.isActive()) {
         activeSessions.add(sid);
+      }
+    }
     return activeSessions;
   }
 
-  private TabletClientService.Iface getClient(HostAndPort location) throws TTransportException {
-    TabletClientService.Iface client;
-    if (timeout < context.getClientTimeoutInMillis())
-      client = ThriftUtil.getTServerClient(location, context, timeout);
-    else
-      client = ThriftUtil.getTServerClient(location, context);
+  private TabletIngestClientService.Iface getClient(HostAndPort location)
+      throws TTransportException {
+    TabletIngestClientService.Iface client;
+    if (timeout < context.getClientTimeoutInMillis()) {
+      client = ThriftUtil.getClient(ThriftClientTypes.TABLET_INGEST, location, context, timeout);
+    } else {
+      client = ThriftUtil.getClient(ThriftClientTypes.TABLET_INGEST, location, context);
+    }
     return client;
   }
 
   private void sendToServer(HostAndPort location, TabletServerMutations<QCMutation> mutations) {
-    TabletClientService.Iface client = null;
+    TabletIngestClientService.Iface client = null;
 
     TInfo tinfo = TraceUtil.traceInfo();
 
@@ -596,7 +620,7 @@ class ConditionalWriterImpl implements ConditionalWriter {
     } catch (ThriftSecurityException tse) {
       AccumuloSecurityException ase =
           new AccumuloSecurityException(context.getCredentials().getPrincipal(), tse.getCode(),
-              Tables.getPrintableTableInfoFromId(context, tableId), tse);
+              context.getPrintableTableInfoFromId(tableId), tse);
       queueException(location, cmidToCm, ase);
     } catch (TApplicationException tae) {
       queueException(location, cmidToCm, new AccumuloServerException(location.toString(), tae));
@@ -606,22 +630,25 @@ class ConditionalWriterImpl implements ConditionalWriter {
     } catch (Exception e) {
       queueException(location, cmidToCm, e);
     } finally {
-      if (sessionId != null)
+      if (sessionId != null) {
         unreserveSessionID(location);
-      ThriftUtil.returnClient((TServiceClient) client);
+      }
+      ThriftUtil.returnClient((TServiceClient) client, context);
     }
   }
 
   private void queueRetry(Map<Long,CMK> cmidToCm, HostAndPort location) {
     ArrayList<QCMutation> ignored = new ArrayList<>();
-    for (CMK cmk : cmidToCm.values())
+    for (CMK cmk : cmidToCm.values()) {
       ignored.add(cmk.cm);
+    }
     queueRetry(ignored, location);
   }
 
   private void queueException(HostAndPort location, Map<Long,CMK> cmidToCm, Exception e) {
-    for (CMK cmk : cmidToCm.values())
+    for (CMK cmk : cmidToCm.values()) {
       cmk.cm.queueResult(new Result(e, cmk.cm, location.toString()));
+    }
   }
 
   private void invalidateSession(HostAndPort location, Map<Long,CMK> cmidToCm,
@@ -631,8 +658,9 @@ class ConditionalWriterImpl implements ConditionalWriter {
     } else {
       try {
         invalidateSession(sessionId, location);
-        for (CMK cmk : cmidToCm.values())
+        for (CMK cmk : cmidToCm.values()) {
           cmk.cm.queueResult(new Result(Status.UNKNOWN, cmk.cm, location.toString()));
+        }
       } catch (Exception e2) {
         queueException(location, cmidToCm, e2);
       }
@@ -663,25 +691,31 @@ class ConditionalWriterImpl implements ConditionalWriter {
         // invalidation prevents future attempts to contact the
         // tserver even its gone zombie and is still running w/o a lock
         locator.invalidateCache(context, location.toString());
+        log.trace("tablet server {} {} is dead, so no need to invalidate {}", location,
+            sessionId.lockId, sessionId.sessionID);
         return;
       }
 
       try {
         // if the mutation is currently processing, this method will block until its done or times
         // out
+        log.trace("Attempting to invalidate {} at {}", sessionId.sessionID, location);
         invalidateSession(sessionId.sessionID, location);
-
+        log.trace("Invalidated {} at {}", sessionId.sessionID, location);
         return;
       } catch (TApplicationException tae) {
         throw new AccumuloServerException(location.toString(), tae);
       } catch (TException e) {
         locator.invalidateCache(context, location.toString());
+        log.trace("Failed to invalidate {} at {} {}", sessionId.sessionID, location,
+            e.getMessage());
       }
 
-      if ((System.currentTimeMillis() - startTime) + sleepTime > timeout)
+      if ((System.currentTimeMillis() - startTime) + sleepTime > timeout) {
         throw new TimedOutException(Collections.singleton(location.toString()));
+      }
 
-      sleepUninterruptibly(sleepTime, TimeUnit.MILLISECONDS);
+      sleepUninterruptibly(sleepTime, MILLISECONDS);
       sleepTime = Math.min(2 * sleepTime, MAX_SLEEP);
 
     }
@@ -689,7 +723,7 @@ class ConditionalWriterImpl implements ConditionalWriter {
   }
 
   private void invalidateSession(long sessionId, HostAndPort location) throws TException {
-    TabletClientService.Iface client = null;
+    TabletIngestClientService.Iface client = null;
 
     TInfo tinfo = TraceUtil.traceInfo();
 
@@ -697,11 +731,11 @@ class ConditionalWriterImpl implements ConditionalWriter {
       client = getClient(location);
       client.invalidateConditionalUpdate(tinfo, sessionId);
     } finally {
-      ThriftUtil.returnClient((TServiceClient) client);
+      ThriftUtil.returnClient((TServiceClient) client, context);
     }
   }
 
-  private Status fromThrift(TCMStatus status) {
+  public static Status fromThrift(TCMStatus status) {
     switch (status) {
       case ACCEPTED:
         return Status.ACCEPTED;
@@ -722,18 +756,25 @@ class ConditionalWriterImpl implements ConditionalWriter {
       var tcondMutaions = new ArrayList<TConditionalMutation>();
 
       for (var cm : mutationList) {
-        TMutation tm = cm.toThrift();
+        var id = cmid.longValue();
 
-        List<TCondition> conditions = convertConditions(cm, compressedIters);
+        TConditionalMutation tcm = convertConditionalMutation(compressedIters, cm, id);
 
         cmidToCm.put(cmid.longValue(), new CMK(keyExtent, cm));
-        TConditionalMutation tcm = new TConditionalMutation(conditions, tm, cmid.longValue());
         cmid.increment();
         tcondMutaions.add(tcm);
       }
 
       tmutations.put(keyExtent.toThrift(), tcondMutaions);
     });
+  }
+
+  public static TConditionalMutation convertConditionalMutation(CompressedIterators compressedIters,
+      ConditionalMutation cm, long id) {
+    TMutation tm = cm.toThrift();
+    List<TCondition> conditions = convertConditions(cm, compressedIters);
+    TConditionalMutation tcm = new TConditionalMutation(conditions, tm, id);
+    return tcm;
   }
 
   private static final Comparator<Long> TIMESTAMP_COMPARATOR =
@@ -744,7 +785,7 @@ class ConditionalWriterImpl implements ConditionalWriter {
           .thenComparing(Condition::getVisibility)
           .thenComparing(Condition::getTimestamp, TIMESTAMP_COMPARATOR);
 
-  private List<TCondition> convertConditions(ConditionalMutation cm,
+  private static List<TCondition> convertConditions(ConditionalMutation cm,
       CompressedIterators compressedIters) {
     List<TCondition> conditions = new ArrayList<>(cm.getConditions().size());
 
@@ -776,21 +817,31 @@ class ConditionalWriterImpl implements ConditionalWriter {
   }
 
   private boolean isVisible(ByteSequence cv) {
-    Text testVis = new Text(cv.toArray());
-    if (testVis.getLength() == 0)
+
+    if (cv.length() == 0) {
       return true;
+    }
+
+    byte[] arrayVis = cv.toArray();
+    Text testVis = new Text(arrayVis);
 
     Boolean b = cache.get(testVis);
-    if (b != null)
+    if (b != null) {
       return b;
+    }
 
     try {
-      boolean bb = ve.evaluate(new ColumnVisibility(testVis));
+      boolean bb = accessEvaluator.canAccess(arrayVis);
       cache.put(new Text(testVis), bb);
       return bb;
-    } catch (VisibilityParseException | BadArgumentException e) {
+    } catch (InvalidAccessExpressionException e) {
       return false;
     }
+  }
+
+  @VisibleForTesting
+  public ConditionalWriterConfig getConfig() {
+    return config;
   }
 
   @Override
@@ -801,7 +852,7 @@ class ConditionalWriterImpl implements ConditionalWriter {
   @Override
   public void close() {
     threadPool.shutdownNow();
-    cleanupThreadPool.execute(Threads.createNamedRunnable("ConditionalWriterCleanupTask",
+    context.executeCleanupTask(Threads.createNamedRunnable("ConditionalWriterCleanupTask",
         new CleanupTask(getActiveSessions())));
   }
 

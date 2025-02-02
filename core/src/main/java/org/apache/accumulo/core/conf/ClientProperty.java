@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,21 +28,21 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 
-import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.admin.TableOperations.ImportMappingOptions;
 import org.apache.accumulo.core.client.security.tokens.AuthenticationToken;
 import org.apache.accumulo.core.client.security.tokens.CredentialProviderToken;
 import org.apache.accumulo.core.client.security.tokens.DelegationToken;
 import org.apache.accumulo.core.client.security.tokens.KerberosToken;
 import org.apache.accumulo.core.client.security.tokens.PasswordToken;
+import org.apache.accumulo.core.spi.scan.ConfigurableScanServerSelector;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 public enum ClientProperty {
 
   // Instance
-  INSTANCE_NAME("instance.name", "", PropertyType.STRING,
-      "Name of Accumulo instance to " + "connect to", "2.0.0", true),
+  INSTANCE_NAME("instance.name", "", PropertyType.STRING, "Name of Accumulo instance to connect to",
+      "2.0.0", true),
   INSTANCE_ZOOKEEPERS("instance.zookeepers", "localhost:2181", PropertyType.HOSTLIST,
       "Zookeeper connection information for Accumulo instance", "2.0.0", true),
   INSTANCE_ZOOKEEPERS_TIMEOUT("instance.zookeepers.timeout", "30s", PropertyType.TIMEDURATION,
@@ -91,6 +91,13 @@ public enum ClientProperty {
   SCANNER_BATCH_SIZE("scanner.batch.size", "1000", PropertyType.COUNT,
       "Number of key/value pairs that will be fetched at time from tablet server", "2.0.0", false),
 
+  SCAN_SERVER_SELECTOR("scan.server.selector.impl", ConfigurableScanServerSelector.class.getName(),
+      PropertyType.CLASSNAME, "Class used by client to find Scan Servers", "2.1.0", false),
+
+  SCAN_SERVER_SELECTOR_OPTS_PREFIX("scan.server.selector.opts.", "", PropertyType.PREFIX,
+      "Properties in this category are related to the configuration of the scan.server.selector.impl class",
+      "2.1.0", false),
+
   // BatchScanner
   BATCH_SCANNER_NUM_QUERY_THREADS("batch.scanner.num.query.threads", "3", PropertyType.COUNT,
       "Number of concurrent query threads to spawn for querying", "2.0.0", false),
@@ -122,13 +129,12 @@ public enum ClientProperty {
   SASL_KERBEROS_SERVER_PRIMARY("sasl.kerberos.server.primary", "accumulo",
       "Kerberos principal/primary that Accumulo servers use to login"),
 
-  // Trace
-  TRACE_SPAN_RECEIVERS("trace.span.receivers", "org.apache.accumulo.tracer.ZooTraceClient",
-      "A list of span receiver classes to send trace spans"),
-  TRACE_ZOOKEEPER_PATH("trace.zookeeper.path", Constants.ZTRACERS, PropertyType.PATH,
-      "The zookeeper node where tracers are registered", "2.0.0", false);
+  // RPC
+  RPC_TRANSPORT_IDLE_TIMEOUT("rpc.transport.idle.timeout", "3s", PropertyType.TIMEDURATION,
+      "The maximum duration to leave idle transports open in the client's transport pool", "2.1.0",
+      false),
 
-  public static final String TRACE_SPAN_RECEIVER_PREFIX = "trace.span.receiver";
+  ;
 
   private final String key;
   private final String defaultValue;
@@ -235,8 +241,8 @@ public enum ClientProperty {
   }
 
   public void setBytes(Properties properties, Long bytes) {
-    checkState(getType() == PropertyType.BYTES, "Invalid type setting " + "bytes. Type must be "
-        + PropertyType.BYTES + ", not " + getType());
+    checkState(getType() == PropertyType.BYTES,
+        "Invalid type setting bytes. Type must be " + PropertyType.BYTES + ", not " + getType());
     properties.setProperty(getKey(), bytes.toString());
   }
 
@@ -335,8 +341,8 @@ public enum ClientProperty {
   }
 
   /**
-   * @throws IllegalArgumentException
-   *           if Properties does not contain all required
+   * @throws IllegalArgumentException if Properties does not contain all required
+   * @throws NullPointerException if {@code properties == null}
    */
   public static void validate(Properties properties) {
     validate(properties, true);

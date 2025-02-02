@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -24,7 +24,10 @@ import java.util.Map.Entry;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import org.apache.accumulo.core.conf.ConfigurationCopy;
+import org.apache.accumulo.core.conf.DefaultConfiguration;
 import org.apache.accumulo.core.data.TableId;
+import org.apache.accumulo.core.util.ConfigurationImpl;
 
 /**
  * This interface exposes Accumulo system level information to plugins in a stable manner. The
@@ -60,8 +63,7 @@ public interface PluginEnvironment {
     /**
      * Returns all properties with a given prefix
      *
-     * @param prefix
-     *          prefix of properties to be returned. Include the trailing '.' in the prefix.
+     * @param prefix prefix of properties to be returned. Include the trailing '.' in the prefix.
      * @return all properties with a given prefix
      * @since 2.1.0
      */
@@ -132,6 +134,20 @@ public interface PluginEnvironment {
      * reflected in the returned value.
      */
     <T> Supplier<T> getDerived(Function<Configuration,T> computeDerivedValue);
+
+    /**
+     * Creates a configuration object from a map of properties, this is useful for testing.
+     *
+     * @param includeDefaults If true will include accumulo's default properties and layer the
+     *        passed in map on top of these.
+     * @since 3.1.0
+     */
+    static Configuration from(Map<String,String> properties, boolean includeDefaults) {
+      ConfigurationCopy config = includeDefaults
+          ? new ConfigurationCopy(DefaultConfiguration.getInstance()) : new ConfigurationCopy();
+      properties.forEach(config::set);
+      return new ConfigurationImpl(config);
+    }
   }
 
   /**
@@ -161,21 +177,18 @@ public interface PluginEnvironment {
    * Instantiate a class using Accumulo's system classloader. The class must have a no argument
    * constructor.
    *
-   * @param className
-   *          Fully qualified name of the class.
-   * @param base
-   *          The expected super type of the class.
+   * @param className Fully qualified name of the class.
+   * @param base The expected super type of the class.
    */
-  <T> T instantiate(String className, Class<T> base) throws Exception;
+  <T> T instantiate(String className, Class<T> base) throws ReflectiveOperationException;
 
   /**
    * Instantiate a class using Accumulo's per table classloader. The class must have a no argument
    * constructor.
    *
-   * @param className
-   *          Fully qualified name of the class.
-   * @param base
-   *          The expected super type of the class.
+   * @param className Fully qualified name of the class.
+   * @param base The expected super type of the class.
    */
-  <T> T instantiate(TableId tableId, String className, Class<T> base) throws Exception;
+  <T> T instantiate(TableId tableId, String className, Class<T> base)
+      throws ReflectiveOperationException;
 }

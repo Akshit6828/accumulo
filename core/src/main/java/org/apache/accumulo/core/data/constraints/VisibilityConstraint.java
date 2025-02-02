@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -24,12 +24,11 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 
+import org.apache.accumulo.access.AccessEvaluator;
+import org.apache.accumulo.access.InvalidAccessExpressionException;
+import org.apache.accumulo.core.data.ArrayByteSequence;
 import org.apache.accumulo.core.data.ColumnUpdate;
 import org.apache.accumulo.core.data.Mutation;
-import org.apache.accumulo.core.security.ColumnVisibility;
-import org.apache.accumulo.core.security.VisibilityEvaluator;
-import org.apache.accumulo.core.security.VisibilityParseException;
-import org.apache.accumulo.core.util.BadArgumentException;
 
 /**
  * A constraint that checks the visibility of columns against the actor's authorizations. Violation
@@ -60,33 +59,39 @@ public class VisibilityConstraint implements Constraint {
     List<ColumnUpdate> updates = mutation.getUpdates();
 
     HashSet<String> ok = null;
-    if (updates.size() > 1)
+    if (updates.size() > 1) {
       ok = new HashSet<>();
+    }
 
-    VisibilityEvaluator ve = null;
+    AccessEvaluator ve = null;
 
     for (ColumnUpdate update : updates) {
 
       byte[] cv = update.getColumnVisibility();
       if (cv.length > 0) {
         String key = null;
-        if (ok != null && ok.contains(key = new String(cv, UTF_8)))
+        if (ok != null && ok.contains(key = new String(cv, UTF_8))) {
           continue;
+        }
 
         try {
 
-          if (ve == null)
-            ve = new VisibilityEvaluator(env.getAuthorizationsContainer());
+          if (ve == null) {
+            var authContainer = env.getAuthorizationsContainer();
+            ve = AccessEvaluator.of(auth -> authContainer.contains(new ArrayByteSequence(auth)));
+          }
 
-          if (!ve.evaluate(new ColumnVisibility(cv)))
+          if (!ve.canAccess(cv)) {
             return Collections.singletonList((short) 2);
+          }
 
-        } catch (BadArgumentException | VisibilityParseException bae) {
+        } catch (InvalidAccessExpressionException iaee) {
           return Collections.singletonList((short) 1);
         }
 
-        if (ok != null)
+        if (ok != null) {
           ok.add(key);
+        }
       }
     }
 

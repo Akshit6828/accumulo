@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -29,23 +29,25 @@ import org.apache.accumulo.core.cli.ClientOpts;
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.clientImpl.ClientContext;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
 import org.apache.accumulo.core.conf.ConfigurationTypeHelper;
 import org.apache.accumulo.core.conf.Property;
+import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.schema.DataFileValue;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.TabletsMetadata;
+import org.apache.accumulo.core.trace.TraceUtil;
 import org.apache.hadoop.io.Text;
-import org.apache.htrace.TraceScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.Parameter;
+
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 
 public class Merge {
 
@@ -96,7 +98,9 @@ public class Merge {
 
   public void start(String[] args) throws MergeException {
     Opts opts = new Opts();
-    try (TraceScope clientTrace = opts.parseArgsAndTrace(Merge.class.getName(), args)) {
+    opts.parseArgs(Merge.class.getName(), args);
+    Span span = TraceUtil.startSpan(Merge.class, "start");
+    try (Scope scope = span.makeCurrent()) {
 
       try (AccumuloClient client = Accumulo.newClient().from(opts.getClientProps()).build()) {
 
@@ -113,7 +117,10 @@ public class Merge {
         message("Merging tablets in table %s to %d bytes", opts.tableName, opts.goalSize);
         mergomatic(client, opts.tableName, opts.begin, opts.end, opts.goalSize, opts.force);
       } catch (Exception ex) {
+        TraceUtil.setException(span, ex, true);
         throw new MergeException(ex);
+      } finally {
+        span.end();
       }
     }
   }
@@ -136,23 +143,46 @@ public class Merge {
   public void mergomatic(AccumuloClient client, String table, Text start, Text end, long goalSize,
       boolean force) throws MergeException {
     try {
-      if (table.equals(MetadataTable.NAME)) {
+      if (table.equals(AccumuloTable.METADATA.tableName())) {
         throw new IllegalArgumentException("cannot merge tablets on the metadata table");
       }
       List<Size> sizes = new ArrayList<>();
       long totalSize = 0;
-      // Merge any until you get larger than the goal size, and then merge one less tablet
-      Iterator<Size> sizeIterator = getSizeIterator(client, table, start, end);
-      while (sizeIterator.hasNext()) {
-        Size next = sizeIterator.next();
-        totalSize += next.size;
-        sizes.add(next);
-        if (totalSize > goalSize) {
-          totalSize = mergeMany(client, table, sizes, goalSize, force, false);
+
+      TableId tableId;
+      ClientContext context = (ClientContext) client;
+      try {
+        tableId = context.getTableId(table);
+      } catch (Exception e) {
+        throw new MergeException(e);
+      }
+
+      try (TabletsMetadata tablets = TabletsMetadata.builder(context).scanMetadataTable()
+          .overRange(new KeyExtent(tableId, end, start).toMetaRange()).fetch(FILES, PREV_ROW)
+          .build()) {
+
+        Iterator<Size> sizeIterator =
+            tablets.stream().map(tm -> new Size(tm.getExtent(), tm.getFileSize())).iterator();
+
+        while (sizeIterator.hasNext()) {
+          Size next = sizeIterator.next();
+          totalSize += next.size;
+          sizes.add(next);
+
+          if (totalSize > goalSize) {
+            mergeMany(client, table, sizes, goalSize, force, false);
+            sizes.clear();
+            sizes.add(next);
+            totalSize = next.size;
+          }
         }
       }
-      if (sizes.size() > 1)
+
+      // merge one less tablet
+      if (sizes.size() > 1) {
         mergeMany(client, table, sizes, goalSize, force, true);
+      }
+
     } catch (Exception ex) {
       throw new MergeException(ex);
     }
@@ -162,8 +192,9 @@ public class Merge {
       boolean force, boolean last) throws MergeException {
     // skip the big tablets, which will be the typical case
     while (!sizes.isEmpty()) {
-      if (sizes.get(0).size < goalSize)
+      if (sizes.get(0).size < goalSize) {
         break;
+      }
       sizes.remove(0);
     }
     if (sizes.isEmpty()) {
@@ -218,34 +249,15 @@ public class Merge {
     try {
       Text start = sizes.get(0).extent.prevEndRow();
       Text end = sizes.get(numToMerge - 1).extent.endRow();
-      message("Merging %d tablets from (%s to %s]", numToMerge, start == null ? "-inf" : start,
-          end == null ? "+inf" : end);
+      message("Merging %d tablets from (%s to %s]", numToMerge,
+          start == null ? "-inf"
+              : Key.toPrintableString(start.getBytes(), 0, start.getLength(), start.getLength()),
+          end == null ? "+inf"
+              : Key.toPrintableString(end.getBytes(), 0, end.getLength(), end.getLength()));
       client.tableOperations().merge(table, start, end);
     } catch (Exception ex) {
       throw new MergeException(ex);
     }
-  }
-
-  protected Iterator<Size> getSizeIterator(AccumuloClient client, String tablename, Text start,
-      Text end) throws MergeException {
-    // open up metadata, walk through the tablets.
-
-    TableId tableId;
-    TabletsMetadata tablets;
-    try {
-      ClientContext context = (ClientContext) client;
-      tableId = Tables.getTableId(context, tablename);
-      tablets = TabletsMetadata.builder(context).scanMetadataTable()
-          .overRange(new KeyExtent(tableId, end, start).toMetaRange()).fetch(FILES, PREV_ROW)
-          .build();
-    } catch (Exception e) {
-      throw new MergeException(e);
-    }
-
-    return tablets.stream().map(tm -> {
-      long size = tm.getFilesMap().values().stream().mapToLong(DataFileValue::getSize).sum();
-      return new Size(tm.getExtent(), size);
-    }).iterator();
   }
 
 }

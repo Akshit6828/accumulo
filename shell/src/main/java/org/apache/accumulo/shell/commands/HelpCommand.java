@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -39,7 +39,8 @@ public class HelpCommand extends Command {
   @Override
   public int execute(final String fullCommand, final CommandLine cl, final Shell shellState)
       throws ShellCommandException, IOException {
-    int numColumns = shellState.getTerminal().getWidth();
+    int numColumns =
+        (shellState.getTerminal().getWidth() == 0) ? 80 : shellState.getTerminal().getWidth();
     if (cl.hasOption(noWrapOpt.getOpt())) {
       numColumns = Integer.MAX_VALUE;
     }
@@ -64,8 +65,9 @@ public class HelpCommand extends Command {
           }
           int beginIndex = 0;
           int endIndex = s.length();
-          while (beginIndex < endIndex && s.charAt(beginIndex) == ' ')
+          while (beginIndex < endIndex && s.charAt(beginIndex) == ' ') {
             beginIndex++;
+          }
           String dash = "-";
           while (endIndex > beginIndex && endIndex - beginIndex + i + 5 > numColumns) {
             endIndex = s.lastIndexOf(" ", numColumns + beginIndex - i - 5);

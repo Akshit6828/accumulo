@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -49,9 +49,8 @@ public class AccumuloInputFormat implements InputFormat<Key,Value> {
    * the specified ranges.
    *
    * @return the splits from the tables based on the ranges.
-   * @throws java.io.IOException
-   *           if a table set on the job doesn't exist or an error occurs initializing the tablet
-   *           locator
+   * @throws java.io.IOException if a table set on the job doesn't exist or an error occurs
+   *         initializing the tablet locator
    */
   @Override
   public InputSplit[] getSplits(JobConf job, int numSplits) throws IOException {
@@ -71,8 +70,9 @@ public class AccumuloInputFormat implements InputFormat<Key,Value> {
           Entry<Key,Value> entry = scannerIterator.next();
           key.set(currentKey = entry.getKey());
           value.set(entry.getValue().get());
-          if (log.isTraceEnabled())
+          if (log.isTraceEnabled()) {
             log.trace("Processing key/value pair: " + DefaultFormatter.formatEntry(entry, true));
+          }
           return true;
         }
         return false;

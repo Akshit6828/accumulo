@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,9 +18,10 @@
  */
 package org.apache.accumulo.server.data;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
@@ -29,7 +30,7 @@ import org.apache.accumulo.core.data.Value;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.util.ReflectionUtils;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ServerMutationTest {
 
@@ -44,12 +45,12 @@ public class ServerMutationTest {
 
     assertEquals(2, updates.size());
 
-    assertEquals("r1", new String(m.getRow()));
+    assertEquals("r1", new String(m.getRow(), UTF_8));
     ColumnUpdate cu = updates.get(0);
 
-    assertEquals("cf1", new String(cu.getColumnFamily()));
-    assertEquals("cq1", new String(cu.getColumnQualifier()));
-    assertEquals("", new String(cu.getColumnVisibility()));
+    assertEquals("cf1", new String(cu.getColumnFamily(), UTF_8));
+    assertEquals("cq1", new String(cu.getColumnQualifier(), UTF_8));
+    assertEquals("", new String(cu.getColumnVisibility(), UTF_8));
     assertFalse(cu.hasTimestamp());
     assertEquals(42L, cu.getTimestamp());
 
@@ -59,19 +60,19 @@ public class ServerMutationTest {
     updates = m2.getUpdates();
 
     assertEquals(2, updates.size());
-    assertEquals("r1", new String(m2.getRow()));
+    assertEquals("r1", new String(m2.getRow(), UTF_8));
 
     cu = updates.get(0);
-    assertEquals("cf1", new String(cu.getColumnFamily()));
-    assertEquals("cq1", new String(cu.getColumnQualifier()));
+    assertEquals("cf1", new String(cu.getColumnFamily(), UTF_8));
+    assertEquals("cq1", new String(cu.getColumnQualifier(), UTF_8));
     assertFalse(cu.hasTimestamp());
     assertEquals(42L, cu.getTimestamp());
 
     cu = updates.get(1);
 
-    assertEquals("r1", new String(m2.getRow()));
-    assertEquals("cf2", new String(cu.getColumnFamily()));
-    assertEquals("cq2", new String(cu.getColumnQualifier()));
+    assertEquals("r1", new String(m2.getRow(), UTF_8));
+    assertEquals("cf2", new String(cu.getColumnFamily(), UTF_8));
+    assertEquals("cq2", new String(cu.getColumnQualifier(), UTF_8));
     assertTrue(cu.hasTimestamp());
     assertEquals(56, cu.getTimestamp());
 

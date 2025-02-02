@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,12 +19,11 @@
 package org.apache.accumulo.tserver.metrics;
 
 import org.apache.accumulo.tserver.TabletServer;
+import org.apache.accumulo.tserver.TabletServerResourceManager.AssignmentWatcher;
 import org.apache.accumulo.tserver.tablet.Tablet;
 
 /**
  * Wrapper around extracting metrics from a TabletServer instance
- *
- * Necessary to support both old custom JMX metrics and Hadoop Metrics2
  */
 public class TabletServerMetricsUtil {
 
@@ -32,6 +31,10 @@ public class TabletServerMetricsUtil {
 
   public TabletServerMetricsUtil(TabletServer tserver) {
     this.tserver = tserver;
+  }
+
+  public long getLongTabletAssignments() {
+    return AssignmentWatcher.getLongAssignments();
   }
 
   public long getEntries() {
@@ -50,61 +53,28 @@ public class TabletServerMetricsUtil {
     return result;
   }
 
-  public double getIngest() {
+  public double getIngestCount() {
     double result = 0;
     for (Tablet tablet : tserver.getOnlineTablets().values()) {
-      result += tablet.ingestRate();
+      result += tablet.totalIngest();
     }
     return result;
   }
 
-  public double getIngestByteRate() {
+  public double getIngestByteCount() {
     double result = 0;
     for (Tablet tablet : tserver.getOnlineTablets().values()) {
-      result += tablet.ingestByteRate();
+      result += tablet.totalIngestBytes();
     }
     return result;
-  }
-
-  public double getQueryRate() {
-    double result = 0;
-    for (Tablet tablet : tserver.getOnlineTablets().values()) {
-      result += tablet.queryRate();
-    }
-    return result;
-  }
-
-  public double getQueryByteRate() {
-    double result = 0;
-    for (Tablet tablet : tserver.getOnlineTablets().values()) {
-      result += tablet.queryByteRate();
-    }
-    return result;
-  }
-
-  public double getScannedRate() {
-    double result = 0;
-    for (Tablet tablet : tserver.getOnlineTablets().values()) {
-      result += tablet.scanRate();
-    }
-    return result;
-  }
-
-  public int getMajorCompactions() {
-    var mgr = tserver.getCompactionManager();
-    return mgr == null ? 0 : mgr.getCompactionsRunning();
-  }
-
-  public int getMajorCompactionsQueued() {
-    var mgr = tserver.getCompactionManager();
-    return mgr == null ? 0 : mgr.getCompactionsQueued();
   }
 
   public int getMinorCompactions() {
     int result = 0;
     for (Tablet tablet : tserver.getOnlineTablets().values()) {
-      if (tablet.isMinorCompactionRunning())
+      if (tablet.isMinorCompactionRunning()) {
         result++;
+      }
     }
     return result;
   }
@@ -112,10 +82,25 @@ public class TabletServerMetricsUtil {
   public int getMinorCompactionsQueued() {
     int result = 0;
     for (Tablet tablet : tserver.getOnlineTablets().values()) {
-      if (tablet.isMinorCompactionQueued())
+      if (tablet.isMinorCompactionQueued()) {
         result++;
+      }
     }
     return result;
+  }
+
+  public int getOnDemandOnlineCount() {
+    int result = 0;
+    for (Tablet tablet : tserver.getOnlineTablets().values()) {
+      if (tablet.isOnDemand()) {
+        result++;
+      }
+    }
+    return result;
+  }
+
+  public int getOnDemandUnloadedLowMem() {
+    return tserver.getOnDemandOnlineUnloadedForLowMemory();
   }
 
   public int getOnlineCount() {
@@ -126,20 +111,8 @@ public class TabletServerMetricsUtil {
     return tserver.getOpeningCount();
   }
 
-  public long getQueries() {
-    long result = 0;
-    for (Tablet tablet : tserver.getOnlineTablets().values()) {
-      result += tablet.totalQueries();
-    }
-    return result;
-  }
-
   public int getUnopenedCount() {
     return tserver.getUnopenedCount();
-  }
-
-  public String getName() {
-    return tserver.getClientAddressString();
   }
 
   public long getTotalMinorCompactions() {
@@ -157,8 +130,9 @@ public class TabletServerMetricsUtil {
       result += tablet.getDatafiles().size();
       count++;
     }
-    if (count == 0)
+    if (count == 0) {
       return 0;
+    }
     return result / (double) count;
   }
 }

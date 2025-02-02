@@ -7,7 +7,10 @@ assignees: ''
 
 ---
 
-- [ ] Label this issue with the [project](https://github.com/apache/accumulo/projects) that corresponds to this release version
+- [Milestone](https://github.com/apache/accumulo/milestones) tasks
+  - [ ] Label this issue with the corresponding release milestone
+  - [ ] Create a milestone for the next version (if necessary) and move any open issues not completed in this release (except this issue) to the new milestone
+  - [ ] Close the milestone for this issue (the only issue remaining open should be this one)
 - [Git](https://github.com/apache/accumulo) tasks
   - [ ] Create a signed `rel/<version>` tag (and push it)
   - [ ] Merge `<version>-rc<N>-next` branch into a maintenance branch (if maintenance is expected),
@@ -24,27 +27,22 @@ assignees: ''
 - Verify published artifacts
   - [ ] In [Maven Central](https://repo1.maven.org/maven2/org/apache/accumulo/accumulo-core/)
   - [ ] In [ASF Downloads](https://downloads.apache.org/accumulo)
-  - [ ] In [several mirrors](https://www.apache.org/dyn/closer.lua/accumulo)
-- Update the [staging website](http://accumulo.staged.apache.org/)
+  - [ ] In [several mirrors or CDN](https://www.apache.org/dyn/closer.lua/accumulo)
+- Update the [website](https://accumulo.apache.org/)
   - [ ] Release notes
   - [ ] Add `LTM: true` to the release notes front-matter for LTM releases
   - [ ] Navigation
   - [ ] Downloads page
+  - [ ] If LTM release, update previous LTM release entry on downloads page and release notes with an EOL date 1 year from the current release date
   - [ ] DOAP file
   - [ ] Add manual/examples/javadoc (build javadoc from tag with `mvn clean package -DskipTests javadoc:aggregate -Paggregate-javadocs`)
-  - [ ] If javadoc is built with Java 11, [patch it](https://github.com/apache/accumulo/blob/main/contrib/javadoc11.patch)
+  - [ ] Add updated properties documentation (see [the website README](https://github.com/apache/accumulo-website#updating-property-documentation-for-releases))
   - [ ] Jekyll config
   - [ ] Grep for, and update any links to previous version to now point to the new version
   - [ ] Update any older release notes front-matter to indicate they are either `archived: true` or `archived_critical: true`
-  - [ ] [Publish to production](https://github.com/apache/accumulo-website#publishing-staging-to-production)
 - Announcement email
   - [ ] Prepare and get review on dev list (see examples [from previous announcement messages](https://lists.apache.org/list.html?announce@apache.org:gte=1d:accumulo))
-  - [ ] Send to announce@apache.org and user@accumulo.apache.org
+  - [ ] Send to announce@apache.org and user@accumulo.apache.org (use plain text mode only; html email will be rejected)
 - GitHub wrap-up
   - [ ] Close this issue
-  - [ ] Create a new "Automated Kanban" [project](https://github.com/apache/accumulo/projects) for the next version (if necessary) and move any open issues not completed in this release to that project
-  - [ ] Close the project that corresponds to this release
-- Twitter
-  - [ ] [Tweet it](https://tweetdeck.twitter.com)
-  - [ ] [Confirm the tweet](https://twitter.com/ApacheAccumulo)
 

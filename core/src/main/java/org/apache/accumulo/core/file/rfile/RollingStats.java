@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -34,7 +34,7 @@ import org.apache.commons.math3.util.FastMath;
  */
 class RollingStats {
   private int position;
-  private double[] window;
+  private final double[] window;
 
   private double average;
   private double variance;
@@ -53,7 +53,7 @@ class RollingStats {
 
   /**
    * @see <a href=
-   *      "http://jonisalonen.com/2014/efficient-and-accurate-rolling-standard-deviation/">Efficient
+   *      "https://jonisalonen.com/2014/efficient-and-accurate-rolling-standard-deviation">Efficient
    *      and accurate rolling standard deviation</a>
    */
   private void update(double newValue, double oldValue, int windowSize) {

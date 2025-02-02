@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -29,7 +29,7 @@ import org.apache.hadoop.io.Text;
  */
 public interface VolumeChooserEnvironment {
   /**
-   * A scope the volume chooser environment; a TABLE scope should be accompanied by a tableId.
+   * A scope for the volume chooser environment; a TABLE scope should be accompanied by a tableId.
    *
    * @since 2.1.0
    */
@@ -37,6 +37,12 @@ public interface VolumeChooserEnvironment {
     DEFAULT, TABLE, INIT, LOGGER
   }
 
+  /**
+   * The end row of the tablet for which a volume is being chosen. Only call this when the scope is
+   * TABLE
+   *
+   * @since 2.0.0
+   */
   public Text getEndRow();
 
   public Optional<TableId> getTable();

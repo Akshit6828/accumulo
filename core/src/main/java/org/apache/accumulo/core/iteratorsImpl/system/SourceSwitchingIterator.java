@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -54,6 +54,8 @@ public class SourceSwitchingIterator implements InterruptibleIterator {
     SortedKeyValueIterator<Key,Value> iterator() throws IOException;
 
     void setInterruptFlag(AtomicBoolean flag);
+
+    default void close(boolean sawErrors) {}
   }
 
   private DataSource source;
@@ -68,7 +70,7 @@ public class SourceSwitchingIterator implements InterruptibleIterator {
   private boolean inclusive;
   private Collection<ByteSequence> columnFamilies;
 
-  private boolean onlySwitchAfterRow;
+  private final boolean onlySwitchAfterRow;
 
   // Synchronization on copies synchronizes operations across all deep copies of this instance.
   //
@@ -152,27 +154,28 @@ public class SourceSwitchingIterator implements InterruptibleIterator {
 
     // we need to check here if we were yielded in case the source was switched out and re-seeked by
     // someone else (minor compaction/InMemoryMap)
-    boolean yielded = (yield.isPresent() && yield.get().hasYielded());
+    boolean yielded = (yield.isPresent() && yield.orElseThrow().hasYielded());
 
     // check of initialSeek second is intentional so that it does not short
     // circuit the call to switchSource
     boolean seekNeeded = yielded || (!onlySwitchAfterRow && switchSource()) || initialSeek;
 
-    if (seekNeeded)
-      if (initialSeek)
+    if (seekNeeded) {
+      if (initialSeek) {
         iter.seek(range, columnFamilies, inclusive);
-      else if (yielded) {
-        Key yieldPosition = yield.get().getPositionAndReset();
+      } else if (yielded) {
+        Key yieldPosition = yield.orElseThrow().getPositionAndReset();
         if (!range.contains(yieldPosition)) {
           throw new IOException("Underlying iterator yielded to a position outside of its range: "
               + yieldPosition + " not in " + range);
         }
         iter.seek(new Range(yieldPosition, false, range.getEndKey(), range.isEndKeyInclusive()),
             columnFamilies, inclusive);
-      } else
+      } else {
         iter.seek(new Range(key, false, range.getEndKey(), range.isEndKeyInclusive()),
             columnFamilies, inclusive);
-    else {
+      }
+    } else {
       iter.next();
       if (onlySwitchAfterRow && iter.hasTop() && !source.isCurrent()
           && !key.getRowData().equals(iter.getTopKey().getRowData())) {
@@ -183,9 +186,9 @@ public class SourceSwitchingIterator implements InterruptibleIterator {
     }
 
     if (iter.hasTop()) {
-      if (yield.isPresent() && yield.get().hasYielded()) {
+      if (yield.isPresent() && yield.orElseThrow().hasYielded()) {
         throw new IOException("Coding error: hasTop returned true but has yielded at "
-            + yield.get().getPositionAndReset());
+            + yield.orElseThrow().getPositionAndReset());
       }
 
       Key nextKey = iter.getTopKey();
@@ -208,7 +211,7 @@ public class SourceSwitchingIterator implements InterruptibleIterator {
       source = source.getNewDataSource();
       iter = source.iterator();
       if (!onlySwitchAfterRow && yield.isPresent()) {
-        iter.enableYielding(yield.get());
+        iter.enableYielding(yield.orElseThrow());
       }
       return true;
     }
@@ -227,7 +230,7 @@ public class SourceSwitchingIterator implements InterruptibleIterator {
       if (iter == null) {
         iter = source.iterator();
         if (!onlySwitchAfterRow && yield.isPresent()) {
-          iter.enableYielding(yield.get());
+          iter.enableYielding(yield.orElseThrow());
         }
       }
 
@@ -236,8 +239,9 @@ public class SourceSwitchingIterator implements InterruptibleIterator {
   }
 
   private void _switchNow() throws IOException {
-    if (onlySwitchAfterRow)
-      throw new IllegalStateException("Can only switch on row boundries");
+    if (onlySwitchAfterRow) {
+      throw new IllegalStateException("Can only switch on row boundaries");
+    }
 
     if (switchSource()) {
       if (key != null) {
@@ -249,20 +253,23 @@ public class SourceSwitchingIterator implements InterruptibleIterator {
 
   public void switchNow() throws IOException {
     synchronized (copies) {
-      for (SourceSwitchingIterator ssi : copies)
+      for (SourceSwitchingIterator ssi : copies) {
         ssi._switchNow();
+      }
     }
   }
 
   @Override
   public void setInterruptFlag(AtomicBoolean flag) {
     synchronized (copies) {
-      if (copies.size() != 1)
+      if (copies.size() != 1) {
         throw new IllegalStateException(
             "setInterruptFlag() called after deep copies made " + copies.size());
+      }
 
-      if (iter != null)
+      if (iter != null) {
         ((InterruptibleIterator) iter).setInterruptFlag(flag);
+      }
 
       source.setInterruptFlag(flag);
     }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,10 +23,9 @@ import java.util.Optional;
 
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.spi.common.ServiceEnvironment;
+import org.apache.accumulo.core.spi.fs.VolumeChooserEnvironment;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.accumulo.server.ServiceEnvironmentImpl;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
 
 /**
@@ -35,17 +34,14 @@ import org.apache.hadoop.io.Text;
  * {@code VolumeChooserEnvironment} should result in more stable code over time than using this
  * class.
  */
-@SuppressWarnings("deprecation")
 public class VolumeChooserEnvironmentImpl implements VolumeChooserEnvironment {
 
-  private final ServerContext context;
   private final Scope scope;
   private final Optional<TableId> tableId;
   private final Text endRow;
   private final ServiceEnvironment senv;
 
   public VolumeChooserEnvironmentImpl(Scope scope, ServerContext context) {
-    this.context = context;
     this.scope = Objects.requireNonNull(scope);
     this.tableId = Optional.empty();
     this.endRow = null;
@@ -53,7 +49,6 @@ public class VolumeChooserEnvironmentImpl implements VolumeChooserEnvironment {
   }
 
   public VolumeChooserEnvironmentImpl(TableId tableId, Text endRow, ServerContext context) {
-    this.context = context;
     this.scope = Scope.TABLE;
     this.tableId = Optional.of(tableId);
     this.endRow = endRow;
@@ -62,7 +57,6 @@ public class VolumeChooserEnvironmentImpl implements VolumeChooserEnvironment {
 
   public VolumeChooserEnvironmentImpl(Scope scope, TableId tableId, Text endRow,
       ServerContext context) {
-    this.context = context;
     this.scope = Objects.requireNonNull(scope);
     this.tableId = Optional.of(tableId);
     this.endRow = endRow;
@@ -77,24 +71,15 @@ public class VolumeChooserEnvironmentImpl implements VolumeChooserEnvironment {
    */
   @Override
   public Text getEndRow() {
-    if (scope != Scope.TABLE && scope != Scope.INIT)
+    if (scope != Scope.TABLE && scope != Scope.INIT) {
       throw new IllegalStateException("Can only request end row for tables, not for " + scope);
+    }
     return endRow;
   }
 
   @Override
   public Optional<TableId> getTable() {
     return tableId;
-  }
-
-  @Override
-  public boolean hasTableId() {
-    return tableId.isPresent();
-  }
-
-  @Override
-  public TableId getTableId() {
-    return tableId.get();
   }
 
   @Override
@@ -108,11 +93,6 @@ public class VolumeChooserEnvironmentImpl implements VolumeChooserEnvironment {
   }
 
   @Override
-  public FileSystem getFileSystem(String option) {
-    return context.getVolumeManager().getFileSystemByPath(new Path(option));
-  }
-
-  @Override
   public boolean equals(Object obj) {
     if (obj == this) {
       return true;
@@ -122,7 +102,7 @@ public class VolumeChooserEnvironmentImpl implements VolumeChooserEnvironment {
     }
     VolumeChooserEnvironmentImpl other = (VolumeChooserEnvironmentImpl) obj;
     return getChooserScope() == other.getChooserScope()
-        && Objects.equals(getTableId(), other.getTableId());
+        && Objects.equals(tableId.orElseThrow(), other.getTable().orElseThrow());
   }
 
   @Override

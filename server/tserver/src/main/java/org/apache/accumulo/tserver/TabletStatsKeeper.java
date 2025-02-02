@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -25,15 +25,14 @@ import org.apache.accumulo.server.util.ActionStatsUpdator;
 public class TabletStatsKeeper {
 
   // suspect we need more synchronization in this class
-  private ActionStats major = new ActionStats();
   private ActionStats minor = new ActionStats();
-  private ActionStats split = new ActionStats();
 
   public enum Operation {
-    MAJOR, SPLIT, MINOR
+    // TODO delete split
+    MINOR
   }
 
-  private ActionStats[] map = {major, split, minor};
+  private final ActionStats[] map = {minor};
 
   public void updateTime(Operation operation, long queued, long start, long count, boolean failed) {
     try {
@@ -52,31 +51,9 @@ public class TabletStatsKeeper {
         data.queueTime += q;
         data.sumDev += t * t;
         data.queueSumDev += q * q;
-        if (data.elapsed < 0 || data.sumDev < 0 || data.queueSumDev < 0 || data.queueTime < 0)
+        if (data.elapsed < 0 || data.sumDev < 0 || data.queueSumDev < 0 || data.queueTime < 0) {
           resetTimes();
-      }
-    } catch (Exception E) {
-      resetTimes();
-    }
-
-  }
-
-  public void updateTime(Operation operation, long start, boolean failed) {
-    try {
-      ActionStats data = map[operation.ordinal()];
-      if (failed) {
-        data.fail++;
-        data.status--;
-      } else {
-        double t = (System.currentTimeMillis() - start) / 1000.0;
-
-        data.status--;
-        data.num++;
-        data.elapsed += t;
-        data.sumDev += t * t;
-
-        if (data.elapsed < 0 || data.sumDev < 0 || data.queueSumDev < 0 || data.queueTime < 0)
-          resetTimes();
+        }
       }
     } catch (Exception E) {
       resetTimes();
@@ -86,12 +63,9 @@ public class TabletStatsKeeper {
 
   public void saveMajorMinorTimes(TabletStats t) {
     ActionStatsUpdator.update(minor, t.minors);
-    ActionStatsUpdator.update(major, t.majors);
   }
 
   private void resetTimes() {
-    major = new ActionStats();
-    split = new ActionStats();
     minor = new ActionStats();
   }
 
@@ -99,15 +73,7 @@ public class TabletStatsKeeper {
     minor.status++;
   }
 
-  public void incrementStatusMajor() {
-    major.status++;
-  }
-
-  void incrementStatusSplit() {
-    split.status++;
-  }
-
   public TabletStats getTabletStats() {
-    return new TabletStats(null, major, minor, split, 0, 0, 0, 0);
+    return new TabletStats(null, minor, 0, 0, 0);
   }
 }

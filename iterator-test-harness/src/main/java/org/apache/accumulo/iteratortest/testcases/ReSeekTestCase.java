@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,10 +18,10 @@
  */
 package org.apache.accumulo.iteratortest.testcases;
 
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+
 import java.io.IOException;
-import java.security.SecureRandom;
 import java.util.Collection;
-import java.util.Random;
 import java.util.TreeMap;
 
 import org.apache.accumulo.core.data.ByteSequence;
@@ -29,16 +29,16 @@ import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
+import org.apache.accumulo.iteratortest.IteratorTestCase;
 import org.apache.accumulo.iteratortest.IteratorTestInput;
 import org.apache.accumulo.iteratortest.IteratorTestOutput;
-import org.apache.accumulo.iteratortest.IteratorTestUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Test case that verifies that an iterator can use the generated instance from {@code deepCopy}.
  */
-public class ReSeekTestCase extends OutputVerifyingTestCase {
+public class ReSeekTestCase implements IteratorTestCase {
   private static final Logger log = LoggerFactory.getLogger(ReSeekTestCase.class);
 
   /**
@@ -46,12 +46,6 @@ public class ReSeekTestCase extends OutputVerifyingTestCase {
    * client, recreate and reseek the iterator.
    */
   private static final int RESEEK_INTERVAL = 4;
-
-  private final Random random;
-
-  public ReSeekTestCase() {
-    this.random = new SecureRandom();
-  }
 
   @Override
   public IteratorTestOutput test(IteratorTestInput testInput) {
@@ -73,7 +67,7 @@ public class ReSeekTestCase extends OutputVerifyingTestCase {
     final Range origRange = testInput.getRange();
     final Collection<ByteSequence> origFamilies = testInput.getFamilies();
     final boolean origInclusive = testInput.isInclusive();
-    int reseekCount = random.nextInt(RESEEK_INTERVAL);
+    int reseekCount = RANDOM.get().nextInt(RESEEK_INTERVAL);
 
     int i = 0;
     while (skvi.hasTop()) {

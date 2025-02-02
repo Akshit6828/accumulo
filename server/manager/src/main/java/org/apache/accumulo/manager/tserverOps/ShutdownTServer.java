@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,14 +20,13 @@ package org.apache.accumulo.manager.tserverOps;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-import org.apache.accumulo.core.Constants;
-import org.apache.accumulo.core.master.thrift.TabletServerStatus;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.Repo;
+import org.apache.accumulo.core.fate.zookeeper.ZooReaderWriter;
+import org.apache.accumulo.core.fate.zookeeper.ZooUtil.NodeExistsPolicy;
+import org.apache.accumulo.core.lock.ServiceLock;
+import org.apache.accumulo.core.manager.thrift.TabletServerStatus;
 import org.apache.accumulo.core.metadata.TServerInstance;
-import org.apache.accumulo.core.util.HostAndPort;
-import org.apache.accumulo.fate.Repo;
-import org.apache.accumulo.fate.zookeeper.ServiceLock;
-import org.apache.accumulo.fate.zookeeper.ZooReaderWriter;
-import org.apache.accumulo.fate.zookeeper.ZooUtil.NodeExistsPolicy;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tableOps.ManagerRepo;
 import org.apache.accumulo.server.manager.LiveTServerSet.TServerConnection;
@@ -35,22 +34,26 @@ import org.apache.thrift.transport.TTransportException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.net.HostAndPort;
+
 public class ShutdownTServer extends ManagerRepo {
 
   private static final long serialVersionUID = 2L;
   private static final Logger log = LoggerFactory.getLogger(ShutdownTServer.class);
+  private final String resourceGroup;
   private final HostAndPort hostAndPort;
   private final String serverSession;
   private final boolean force;
 
-  public ShutdownTServer(TServerInstance server, boolean force) {
+  public ShutdownTServer(TServerInstance server, String resourceGroup, boolean force) {
     this.hostAndPort = server.getHostAndPort();
+    this.resourceGroup = resourceGroup;
     this.serverSession = server.getSession();
     this.force = force;
   }
 
   @Override
-  public long isReady(long tid, Manager manager) {
+  public long isReady(FateId fateId, Manager manager) {
     TServerInstance server = new TServerInstance(hostAndPort, serverSession);
     // suppress assignment of tablets to the server
     if (force) {
@@ -70,6 +73,9 @@ public class ShutdownTServer extends ManagerRepo {
             connection.halt(manager.getManagerLock());
             log.info("tablet server asked to halt {}", server);
             return 0;
+          } else {
+            log.info("tablet server {} still has tablets for tables: {}", server,
+                (status.tableMap == null) ? "null" : status.tableMap.keySet());
           }
         } catch (TTransportException ex) {
           // expected
@@ -88,15 +94,15 @@ public class ShutdownTServer extends ManagerRepo {
   }
 
   @Override
-  public Repo<Manager> call(long tid, Manager manager) throws Exception {
+  public Repo<Manager> call(FateId fateId, Manager manager) throws Exception {
     // suppress assignment of tablets to the server
     if (force) {
-      ZooReaderWriter zoo = manager.getContext().getZooReaderWriter();
+      ZooReaderWriter zoo = manager.getContext().getZooSession().asReaderWriter();
       var path =
-          ServiceLock.path(manager.getZooKeeperRoot() + Constants.ZTSERVERS + "/" + hostAndPort);
+          manager.getContext().getServerPaths().createTabletServerPath(resourceGroup, hostAndPort);
       ServiceLock.deleteLock(zoo, path);
-      path = ServiceLock
-          .path(manager.getZooKeeperRoot() + Constants.ZDEADTSERVERS + "/" + hostAndPort);
+      path = manager.getContext().getServerPaths().createDeadTabletServerPath(resourceGroup,
+          hostAndPort);
       zoo.putPersistentData(path.toString(), "forced down".getBytes(UTF_8),
           NodeExistsPolicy.OVERWRITE);
     }
@@ -105,5 +111,5 @@ public class ShutdownTServer extends ManagerRepo {
   }
 
   @Override
-  public void undo(long tid, Manager m) {}
+  public void undo(FateId fateId, Manager m) {}
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,8 +18,6 @@
  */
 package org.apache.accumulo.core.util.threads;
 
-import java.util.OptionalInt;
-
 /**
  * Runnable implementation that has a name and priority. Used by the NamedThreadFactory when
  * creating new Threads
@@ -27,16 +25,10 @@ import java.util.OptionalInt;
 class NamedRunnable implements Runnable {
 
   private final String name;
-  private final OptionalInt priority;
   private final Runnable r;
 
   NamedRunnable(String name, Runnable r) {
-    this(name, OptionalInt.empty(), r);
-  }
-
-  NamedRunnable(String name, OptionalInt priority, Runnable r) {
     this.name = name;
-    this.priority = priority;
     this.r = r;
   }
 
@@ -44,10 +36,7 @@ class NamedRunnable implements Runnable {
     return name;
   }
 
-  public OptionalInt getPriority() {
-    return priority;
-  }
-
+  @Override
   public void run() {
     r.run();
   }

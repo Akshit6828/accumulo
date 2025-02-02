@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -30,18 +30,22 @@ public class RecoveryPath {
       String uuid = walPath.getName();
       // drop uuid
       walPath = walPath.getParent();
-      // recovered 1.4 WALs won't have a server component
-      if (!walPath.getName().equals(FileType.WAL.getDirectory())) {
-        // drop server
-        walPath = walPath.getParent();
+
+      // expect and drop the server component
+      if (walPath.getName().equals(FileType.WAL.getDirectory())) {
+        throw new IllegalArgumentException("Bath path " + walPath + " (missing server component)");
       }
-
-      if (!walPath.getName().equals(FileType.WAL.getDirectory()))
-        throw new IllegalArgumentException("Bad path " + walPath);
-
-      // drop wal
       walPath = walPath.getParent();
 
+      // expect and drop the wal component
+      if (!walPath.getName().equals(FileType.WAL.getDirectory())) {
+        throw new IllegalArgumentException(
+            "Bad path " + walPath + " (missing wal directory component)");
+      }
+      walPath = walPath.getParent();
+
+      // create new path in recovery directory that is a sibling to the wal directory (same volume),
+      // without the server component
       walPath = new Path(walPath, FileType.RECOVERY.getDirectory());
       walPath = new Path(walPath, uuid);
 
@@ -49,7 +53,6 @@ public class RecoveryPath {
     }
 
     throw new IllegalArgumentException("Bad path " + walPath);
-
   }
 
 }

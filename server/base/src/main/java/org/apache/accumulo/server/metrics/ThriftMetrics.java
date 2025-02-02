@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,19 +18,35 @@
  */
 package org.apache.accumulo.server.metrics;
 
-public class ThriftMetrics extends Metrics {
+import static org.apache.accumulo.core.metrics.Metric.THRIFT_EXECUTE;
+import static org.apache.accumulo.core.metrics.Metric.THRIFT_IDLE;
 
-  public ThriftMetrics(String serverName, String threadName) {
-    super("Thrift,sub=" + serverName, "Thrift Server Metrics - " + serverName + " " + threadName,
-        "thrift", serverName);
-  }
+import org.apache.accumulo.core.metrics.MetricsProducer;
+
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+
+public class ThriftMetrics implements MetricsProducer {
+
+  private DistributionSummary idle = NoopMetrics.useNoopDistributionSummary();
+  private DistributionSummary execute = NoopMetrics.useNoopDistributionSummary();
+
+  public ThriftMetrics() {}
 
   public void addIdle(long time) {
-    getRegistry().add("idle", time);
+    idle.record(time);
   }
 
   public void addExecute(long time) {
-    getRegistry().add("execute", time);
+    execute.record(time);
+  }
+
+  @Override
+  public void registerMetrics(MeterRegistry registry) {
+    idle = DistributionSummary.builder(THRIFT_IDLE.getName()).baseUnit("ms")
+        .description(THRIFT_IDLE.getDescription()).register(registry);
+    execute = DistributionSummary.builder(THRIFT_EXECUTE.getName()).baseUnit("ms")
+        .description(THRIFT_EXECUTE.getDescription()).register(registry);
   }
 
 }

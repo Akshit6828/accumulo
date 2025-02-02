@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,11 +18,14 @@
  */
 package org.apache.accumulo.core.file;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+import static org.apache.accumulo.core.util.threads.ThreadPoolNames.BLOOM_LOADER_POOL;
+
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -30,7 +33,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.accumulo.core.bloomfilter.DynamicBloomFilter;
@@ -39,20 +41,23 @@ import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
 import org.apache.accumulo.core.conf.Property;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.PartialKey;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
+import org.apache.accumulo.core.dataImpl.KeyExtent;
 import org.apache.accumulo.core.file.blockfile.impl.CacheProvider;
 import org.apache.accumulo.core.file.keyfunctor.KeyFunctor;
 import org.apache.accumulo.core.file.rfile.RFile;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
+import org.apache.accumulo.core.metadata.ReferencedTabletFile;
 import org.apache.accumulo.core.sample.impl.SamplerConfigurationImpl;
+import org.apache.accumulo.core.spi.crypto.NoCryptoServiceFactory;
 import org.apache.accumulo.core.util.threads.ThreadPools;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.util.bloom.Key;
 import org.apache.hadoop.util.hash.Hash;
@@ -64,6 +69,7 @@ import org.slf4j.LoggerFactory;
  * functionality.
  */
 public class BloomFilterLayer {
+
   private static final Logger LOG = LoggerFactory.getLogger(BloomFilterLayer.class);
   public static final String BLOOM_FILE_NAME = "acu_bloom";
   public static final int HASH_COUNT = 5;
@@ -76,10 +82,9 @@ public class BloomFilterLayer {
     }
 
     if (maxLoadThreads > 0) {
-      loadThreadPool = ThreadPools.createThreadPool(0, maxLoadThreads, 60, TimeUnit.SECONDS,
-          "bloom-loader", false);
+      loadThreadPool = ThreadPools.getServerThreadPools().getPoolBuilder(BLOOM_LOADER_POOL)
+          .numCoreThreads(0).numMaxThreads(maxLoadThreads).withTimeOut(60L, SECONDS).build();
     }
-
     return loadThreadPool;
   }
 
@@ -88,7 +93,7 @@ public class BloomFilterLayer {
     private int numKeys;
     private int vectorSize;
 
-    private FileSKVWriter writer;
+    private final FileSKVWriter writer;
     private KeyFunctor transformer = null;
     private boolean closed = false;
     private long length = -1;
@@ -120,10 +125,11 @@ public class BloomFilterLayer {
         String context = ClassLoaderUtil.tableContext(acuconf);
         String classname = acuconf.get(Property.TABLE_BLOOM_KEY_FUNCTOR);
         Class<? extends KeyFunctor> clazz;
-        if (!useAccumuloStart)
+        if (!useAccumuloStart) {
           clazz = Writer.class.getClassLoader().loadClass(classname).asSubclass(KeyFunctor.class);
-        else
+        } else {
           clazz = ClassLoaderUtil.loadClass(context, classname, KeyFunctor.class);
+        }
 
         transformer = clazz.getDeclaredConstructor().newInstance();
 
@@ -141,15 +147,17 @@ public class BloomFilterLayer {
         throws IOException {
       writer.append(key, val);
       Key bloomKey = transformer.transform(key);
-      if (bloomKey.getBytes().length > 0)
+      if (bloomKey.getBytes().length > 0) {
         bloomFilter.add(bloomKey);
+      }
     }
 
     @Override
     public synchronized void close() throws IOException {
 
-      if (closed)
+      if (closed) {
         return;
+      }
 
       DataOutputStream out = writer.createMetaStore(BLOOM_FILE_NAME);
       out.writeUTF(transformer.getClass().getName());
@@ -197,7 +205,7 @@ public class BloomFilterLayer {
     private volatile DynamicBloomFilter bloomFilter;
     private int loadRequest = 0;
     private int loadThreshold = 1;
-    private int maxLoadThreads;
+    private final int maxLoadThreads;
     private Runnable loadTask;
     private volatile KeyFunctor transformer = null;
     private volatile boolean closed = false;
@@ -211,9 +219,10 @@ public class BloomFilterLayer {
       final String context = ClassLoaderUtil.tableContext(acuconf);
 
       loadTask = () -> {
-        // no need to load the bloom filter if the map file is closed
-        if (closed)
+        // no need to load the bloom filter if the data file is closed
+        if (closed) {
           return;
+        }
         String ClassName = null;
         DataInputStream in = null;
 
@@ -222,8 +231,9 @@ public class BloomFilterLayer {
           DynamicBloomFilter tmpBloomFilter = new DynamicBloomFilter();
 
           // check for closed again after open but before reading the bloom filter in
-          if (closed)
+          if (closed) {
             return;
+          }
 
           /**
            * Load classname for keyFunctor
@@ -244,10 +254,11 @@ public class BloomFilterLayer {
         } catch (NoSuchMetaStoreException nsme) {
           // file does not have a bloom filter, ignore it
         } catch (IOException ioe) {
-          if (closed)
+          if (closed) {
             LOG.debug("Can't open BloomFilter, file closed : {}", ioe.getMessage());
-          else
+          } else {
             LOG.warn("Can't open BloomFilter", ioe);
+          }
 
           bloomFilter = null;
         } catch (ClassNotFoundException e) {
@@ -257,10 +268,11 @@ public class BloomFilterLayer {
           LOG.error("Could not instantiate KeyFunctor: " + sanitize(ClassName), e);
           bloomFilter = null;
         } catch (RuntimeException rte) {
-          if (closed)
+          if (closed) {
             LOG.debug("Can't open BloomFilter, RTE after closed ", rte);
-          else
+          } else {
             throw rte;
+          }
         } finally {
           if (in != null) {
             try {
@@ -277,8 +289,8 @@ public class BloomFilterLayer {
     }
 
     /**
-     * Prevent potential CRLF injection into logs from read in user data See
-     * https://find-sec-bugs.github.io/bugs.htm#CRLF_INJECTION_LOGS
+     * Prevent potential CRLF injection into logs from read in user data. See the
+     * <a href="https://find-sec-bugs.github.io/bugs.htm#CRLF_INJECTION_LOGS">bug description</a>
      */
     private String sanitize(String msg) {
       return msg.replaceAll("[\r\n]", "");
@@ -310,21 +322,22 @@ public class BloomFilterLayer {
      * Checks if this {@link RFile} contains keys from this range. The membership test is performed
      * using a Bloom filter, so the result has always non-zero probability of false positives.
      *
-     * @param range
-     *          range of keys to check
+     * @param range range of keys to check
      * @return false iff key doesn't exist, true if key probably exists.
      */
     boolean probablyHasKey(Range range) {
       if (bloomFilter == null) {
         initiateLoad(maxLoadThreads);
-        if (bloomFilter == null)
+        if (bloomFilter == null) {
           return true;
+        }
       }
 
       Key bloomKey = transformer.transform(range);
 
-      if (bloomKey == null || bloomKey.getBytes().length == 0)
+      if (bloomKey == null || bloomKey.getBytes().length == 0) {
         return true;
+      }
 
       return bloomFilter.membershipTest(bloomKey);
     }
@@ -336,8 +349,8 @@ public class BloomFilterLayer {
 
   public static class Reader implements FileSKVIterator {
 
-    private BloomFilterLoader bfl;
-    private FileSKVIterator reader;
+    private final BloomFilterLoader bfl;
+    private final FileSKVIterator reader;
 
     public Reader(FileSKVIterator reader, AccumuloConfiguration acuconf) {
       this.reader = reader;
@@ -375,13 +388,13 @@ public class BloomFilterLayer {
     }
 
     @Override
-    public org.apache.accumulo.core.data.Key getFirstKey() throws IOException {
-      return reader.getFirstKey();
+    public Text getFirstRow() throws IOException {
+      return reader.getFirstRow();
     }
 
     @Override
-    public org.apache.accumulo.core.data.Key getLastKey() throws IOException {
-      return reader.getLastKey();
+    public Text getLastRow() throws IOException {
+      return reader.getLastRow();
     }
 
     @Override
@@ -418,6 +431,11 @@ public class BloomFilterLayer {
     }
 
     @Override
+    public long estimateOverlappingEntries(KeyExtent extent) throws IOException {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
     public void closeDeepCopies() throws IOException {
       reader.closeDeepCopies();
     }
@@ -441,12 +459,10 @@ public class BloomFilterLayer {
   public static void main(String[] args) throws IOException {
     PrintStream out = System.out;
 
-    SecureRandom r = new SecureRandom();
-
     HashSet<Integer> valsSet = new HashSet<>();
 
     for (int i = 0; i < 100000; i++) {
-      valsSet.add(r.nextInt(Integer.MAX_VALUE));
+      valsSet.add(RANDOM.get().nextInt(Integer.MAX_VALUE));
     }
 
     ArrayList<Integer> vals = new ArrayList<>(valsSet);
@@ -466,7 +482,7 @@ public class BloomFilterLayer {
     String suffix = FileOperations.getNewFileExtension(acuconf);
     String fname = "/tmp/test." + suffix;
     FileSKVWriter bmfw = FileOperations.getInstance().newWriterBuilder()
-        .forFile(fname, fs, conf, CryptoServiceFactory.newDefaultInstance())
+        .forFile(new ReferencedTabletFile(new Path(fname)), fs, conf, NoCryptoServiceFactory.NONE)
         .withTableConfiguration(acuconf).build();
 
     long t1 = System.currentTimeMillis();
@@ -489,7 +505,7 @@ public class BloomFilterLayer {
 
     t1 = System.currentTimeMillis();
     FileSKVIterator bmfr = FileOperations.getInstance().newReaderBuilder()
-        .forFile(fname, fs, conf, CryptoServiceFactory.newDefaultInstance())
+        .forFile(new ReferencedTabletFile(new Path(fname)), fs, conf, NoCryptoServiceFactory.NONE)
         .withTableConfiguration(acuconf).build();
     t2 = System.currentTimeMillis();
     out.println("Opened " + fname + " in " + (t2 - t1));
@@ -498,7 +514,7 @@ public class BloomFilterLayer {
 
     int hits = 0;
     for (int i = 0; i < 5000; i++) {
-      int row = r.nextInt(Integer.MAX_VALUE);
+      int row = RANDOM.get().nextInt(Integer.MAX_VALUE);
       String fi = String.format("%010d", row);
       // bmfr.seek(new Range(new Text("r"+fi)));
       org.apache.accumulo.core.data.Key k1 =
@@ -544,7 +560,7 @@ public class BloomFilterLayer {
 
     t2 = System.currentTimeMillis();
 
-    out.printf("existant lookup rate %6.2f%n", 500 / ((t2 - t1) / 1000.0));
+    out.printf("existing lookup rate %6.2f%n", 500 / ((t2 - t1) / 1000.0));
     out.println("expected hits 500.  Receive hits: " + count);
     bmfr.close();
   }

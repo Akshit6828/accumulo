@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,13 +18,14 @@
  */
 package org.apache.accumulo.core.file.rfile;
 
-import static org.apache.accumulo.core.conf.Property.INSTANCE_CRYPTO_PREFIX;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -34,7 +35,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.security.SecureRandom;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -42,22 +42,19 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.Random;
 import java.util.Set;
 
 import org.apache.accumulo.core.client.sample.RowSampler;
 import org.apache.accumulo.core.client.sample.Sampler;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
-import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
 import org.apache.accumulo.core.conf.Property;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory.ClassloaderType;
+import org.apache.accumulo.core.crypto.CryptoFactoryLoader;
 import org.apache.accumulo.core.crypto.CryptoTest;
+import org.apache.accumulo.core.crypto.CryptoTest.ConfigMode;
 import org.apache.accumulo.core.data.ArrayByteSequence;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
@@ -67,16 +64,14 @@ import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.file.FileSKVIterator;
 import org.apache.accumulo.core.file.blockfile.cache.impl.BlockCacheConfiguration;
 import org.apache.accumulo.core.file.blockfile.cache.impl.BlockCacheManagerFactory;
-import org.apache.accumulo.core.file.blockfile.cache.lru.LruBlockCache;
-import org.apache.accumulo.core.file.blockfile.cache.lru.LruBlockCacheManager;
+import org.apache.accumulo.core.file.blockfile.cache.tinylfu.TinyLfuBlockCacheManager;
 import org.apache.accumulo.core.file.blockfile.impl.BasicCacheProvider;
 import org.apache.accumulo.core.file.blockfile.impl.CachableBlockFile.CachableBuilder;
 import org.apache.accumulo.core.file.rfile.RFile.Reader;
-import org.apache.accumulo.core.file.rfile.bcfile.BCFile;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.ColumnFamilySkippingIterator;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.ServerColumnFamily;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.TabletColumnFamily;
@@ -84,17 +79,16 @@ import org.apache.accumulo.core.sample.impl.SamplerConfigurationImpl;
 import org.apache.accumulo.core.sample.impl.SamplerFactory;
 import org.apache.accumulo.core.spi.cache.BlockCacheManager;
 import org.apache.accumulo.core.spi.cache.CacheType;
+import org.apache.accumulo.core.spi.crypto.CryptoEnvironment;
+import org.apache.accumulo.core.spi.crypto.CryptoService;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FSDataOutputStream;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.PositionedReadable;
 import org.apache.hadoop.fs.Seekable;
 import org.apache.hadoop.io.Text;
-import org.junit.BeforeClass;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import com.google.common.hash.HashCode;
 import com.google.common.hash.Hasher;
@@ -104,7 +98,7 @@ import com.google.common.primitives.Bytes;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 @SuppressFBWarnings(value = "PATH_TRAVERSAL_IN", justification = "paths not set by user input")
-public class RFileTest {
+public class RFileTest extends AbstractRFileTest {
 
   public static class SampleIE implements IteratorEnvironment {
 
@@ -125,16 +119,14 @@ public class RFileTest {
     }
   }
 
-  private static final Collection<ByteSequence> EMPTY_COL_FAMS = new ArrayList<>();
   private static final Configuration hadoopConf = new Configuration();
 
-  @Rule
-  public TemporaryFolder tempFolder =
-      new TemporaryFolder(new File(System.getProperty("user.dir") + "/target"));
+  @TempDir
+  private static File tempDir;
 
-  @BeforeClass
+  @BeforeAll
   public static void setupCryptoKeyFile() throws Exception {
-    CryptoTest.setupKeyFiles();
+    CryptoTest.setupKeyFiles(RFileTest.class);
   }
 
   static class SeekableByteArrayInputStream extends ByteArrayInputStream
@@ -151,14 +143,16 @@ public class RFileTest {
 
     @Override
     public void seek(long pos) throws IOException {
-      if (mark != 0)
+      if (mark != 0) {
         throw new IllegalStateException();
+      }
 
       reset();
       long skipped = skip(pos);
 
-      if (skipped != pos)
+      if (skipped != pos) {
         throw new IOException();
+      }
     }
 
     @Override
@@ -169,12 +163,15 @@ public class RFileTest {
     @Override
     public int read(long position, byte[] buffer, int offset, int length) {
 
-      if (position >= buf.length)
+      if (position >= buf.length) {
         throw new IllegalArgumentException();
-      if (position + length > buf.length)
+      }
+      if (position + length > buf.length) {
         throw new IllegalArgumentException();
-      if (length > buffer.length)
+      }
+      if (length > buffer.length) {
         throw new IllegalArgumentException();
+      }
 
       System.arraycopy(buf, (int) position, buffer, offset, length);
       return length;
@@ -193,147 +190,9 @@ public class RFileTest {
 
   }
 
-  private static void checkIndex(Reader reader) throws IOException {
-    FileSKVIterator indexIter = reader.getIndex();
-
-    if (indexIter.hasTop()) {
-      Key lastKey = new Key(indexIter.getTopKey());
-
-      if (reader.getFirstKey().compareTo(lastKey) > 0)
-        throw new RuntimeException(
-            "First key out of order " + reader.getFirstKey() + " " + lastKey);
-
-      indexIter.next();
-
-      while (indexIter.hasTop()) {
-        if (lastKey.compareTo(indexIter.getTopKey()) > 0)
-          throw new RuntimeException(
-              "Indext out of order " + lastKey + " " + indexIter.getTopKey());
-
-        lastKey = new Key(indexIter.getTopKey());
-        indexIter.next();
-
-      }
-
-      if (!reader.getLastKey().equals(lastKey)) {
-        throw new RuntimeException("Last key out of order " + reader.getLastKey() + " " + lastKey);
-      }
-    }
-  }
-
-  public static class TestRFile {
-
-    protected Configuration conf = new Configuration();
-    public RFile.Writer writer;
-    protected ByteArrayOutputStream baos;
-    protected FSDataOutputStream dos;
-    protected SeekableByteArrayInputStream bais;
-    protected FSDataInputStream in;
-    protected AccumuloConfiguration accumuloConfiguration;
-    public Reader reader;
-    public SortedKeyValueIterator<Key,Value> iter;
-    private BlockCacheManager manager;
-
-    public TestRFile(AccumuloConfiguration accumuloConfiguration) {
-      this.accumuloConfiguration = accumuloConfiguration;
-      if (this.accumuloConfiguration == null)
-        this.accumuloConfiguration = DefaultConfiguration.getInstance();
-    }
-
-    public void openWriter(boolean startDLG) throws IOException {
-      openWriter(startDLG, 1000);
-    }
-
-    public void openWriter(boolean startDLG, int blockSize) throws IOException {
-      baos = new ByteArrayOutputStream();
-      dos = new FSDataOutputStream(baos, new FileSystem.Statistics("a"));
-      BCFile.Writer _cbw = new BCFile.Writer(dos, null, "gz", conf,
-          CryptoServiceFactory.newInstance(accumuloConfiguration, ClassloaderType.JAVA));
-
-      SamplerConfigurationImpl samplerConfig =
-          SamplerConfigurationImpl.newSamplerConfig(accumuloConfiguration);
-      Sampler sampler = null;
-
-      if (samplerConfig != null) {
-        sampler = SamplerFactory.newSampler(samplerConfig, accumuloConfiguration);
-      }
-
-      writer = new RFile.Writer(_cbw, blockSize, 1000, samplerConfig, sampler);
-
-      if (startDLG)
-        writer.startDefaultLocalityGroup();
-    }
-
-    public void openWriter() throws IOException {
-      openWriter(1000);
-    }
-
-    public void openWriter(int blockSize) throws IOException {
-      openWriter(true, blockSize);
-    }
-
-    public void closeWriter() throws IOException {
-      dos.flush();
-      writer.close();
-      dos.close();
-      if (baos != null) {
-        baos.close();
-      }
-    }
-
-    public void openReader() throws IOException {
-      openReader(true);
-    }
-
-    public void openReader(boolean cfsi) throws IOException {
-      int fileLength = 0;
-      byte[] data = null;
-      data = baos.toByteArray();
-
-      bais = new SeekableByteArrayInputStream(data);
-      in = new FSDataInputStream(bais);
-      fileLength = data.length;
-
-      DefaultConfiguration dc = DefaultConfiguration.getInstance();
-      ConfigurationCopy cc = new ConfigurationCopy(dc);
-      cc.set(Property.TSERV_CACHE_MANAGER_IMPL, LruBlockCacheManager.class.getName());
-      try {
-        manager = BlockCacheManagerFactory.getInstance(cc);
-      } catch (Exception e) {
-        throw new RuntimeException("Error creating BlockCacheManager", e);
-      }
-      cc.set(Property.TSERV_DEFAULT_BLOCKSIZE, Long.toString(100000));
-      cc.set(Property.TSERV_DATACACHE_SIZE, Long.toString(100000000));
-      cc.set(Property.TSERV_INDEXCACHE_SIZE, Long.toString(100000000));
-      manager.start(new BlockCacheConfiguration(cc));
-      LruBlockCache indexCache = (LruBlockCache) manager.getBlockCache(CacheType.INDEX);
-      LruBlockCache dataCache = (LruBlockCache) manager.getBlockCache(CacheType.DATA);
-
-      CachableBuilder cb = new CachableBuilder().cacheId("source-1").input(in).length(fileLength)
-          .conf(conf).cacheProvider(new BasicCacheProvider(indexCache, dataCache)).cryptoService(
-              CryptoServiceFactory.newInstance(accumuloConfiguration, ClassloaderType.JAVA));
-      reader = new RFile.Reader(cb);
-      if (cfsi)
-        iter = new ColumnFamilySkippingIterator(reader);
-
-      checkIndex(reader);
-    }
-
-    public void closeReader() throws IOException {
-      reader.close();
-      in.close();
-      if (null != manager) {
-        manager.stop();
-      }
-    }
-
-    public void seek(Key nk) throws IOException {
-      iter.seek(new Range(nk, null), EMPTY_COL_FAMS, false);
-    }
-  }
-
   static Key newKey(String row, String cf, String cq, String cv, long ts) {
-    return new Key(row.getBytes(), cf.getBytes(), cq.getBytes(), cv.getBytes(), ts);
+    return new Key(row.getBytes(UTF_8), cf.getBytes(UTF_8), cq.getBytes(UTF_8), cv.getBytes(UTF_8),
+        ts);
   }
 
   static Value newValue(String val) {
@@ -344,13 +203,10 @@ public class RFileTest {
     return String.format(prefix + "%06d", i);
   }
 
-  public AccumuloConfiguration conf = null;
-
   @Test
   public void test1() throws IOException {
 
     // test an empty file
-
     TestRFile trf = new TestRFile(conf);
 
     trf.openWriter();
@@ -360,7 +216,7 @@ public class RFileTest {
     trf.iter.seek(new Range((Key) null, null), EMPTY_COL_FAMS, false);
     assertFalse(trf.iter.hasTop());
 
-    assertNull(trf.reader.getLastKey());
+    assertNull(trf.reader.getLastRow());
 
     trf.closeReader();
   }
@@ -397,7 +253,7 @@ public class RFileTest {
     trf.iter.next();
     assertFalse(trf.iter.hasTop());
 
-    assertEquals(newKey("r1", "cf1", "cq1", "L1", 55), trf.reader.getLastKey());
+    assertEquals(new Text("r1"), trf.reader.getLastRow());
 
     trf.closeReader();
   }
@@ -533,13 +389,12 @@ public class RFileTest {
       }
     }
 
-    assertEquals(expectedKeys.get(expectedKeys.size() - 1), trf.reader.getLastKey());
+    assertEquals(expectedKeys.get(expectedKeys.size() - 1).getRow(), trf.reader.getLastRow());
 
     // test seeking to random location and reading all data from that point
     // there was an off by one bug with this in the transient index
-    Random rand = new SecureRandom();
     for (int i = 0; i < 12; i++) {
-      index = rand.nextInt(expectedKeys.size());
+      index = RANDOM.get().nextInt(expectedKeys.size());
       trf.seek(expectedKeys.get(index));
       for (; index < expectedKeys.size(); index++) {
         assertTrue(trf.iter.hasTop());
@@ -561,63 +416,29 @@ public class RFileTest {
     trf.closeReader();
   }
 
-  private void verify(TestRFile trf, Iterator<Key> eki, Iterator<Value> evi) throws IOException {
-
-    while (trf.iter.hasTop()) {
-      Key ek = eki.next();
-      Value ev = evi.next();
-
-      assertEquals(ek, trf.iter.getTopKey());
-      assertEquals(ev, trf.iter.getTopValue());
-
-      trf.iter.next();
-    }
-
-    assertFalse(eki.hasNext());
-    assertFalse(evi.hasNext());
-  }
-
   @Test
   public void test4() throws IOException {
     TestRFile trf = new TestRFile(conf);
-
     trf.openWriter();
+    RFile.Writer writer = trf.writer;
 
-    trf.writer.append(newKey("r1", "cf1", "cq1", "L1", 55), newValue("foo1"));
-    try {
-      trf.writer.append(newKey("r0", "cf1", "cq1", "L1", 55), newValue("foo1"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
+    final Value foo1 = newValue("foo1");
+    final long ts = 55L;
 
-    }
+    writer.append(newKey("r1", "cf1", "cq1", "L1", ts), foo1);
 
-    try {
-      trf.writer.append(newKey("r1", "cf0", "cq1", "L1", 55), newValue("foo1"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
+    // @formatter:off
+    final List<Key> badKeys = List.of(
+            newKey("r0", "cf1", "cq1", "L1", ts),
+            newKey("r1", "cf0", "cq1", "L1", ts),
+            newKey("r1", "cf1", "cq0", "L1", ts),
+            newKey("r1", "cf1", "cq1", "L0", ts),
+            newKey("r1", "cf1", "cq1", "L1", ts + 1)
+    );
+    // @formatter:on
 
-    }
-
-    try {
-      trf.writer.append(newKey("r1", "cf1", "cq0", "L1", 55), newValue("foo1"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
-
-    }
-
-    try {
-      trf.writer.append(newKey("r1", "cf1", "cq1", "L0", 55), newValue("foo1"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
-
-    }
-
-    try {
-      trf.writer.append(newKey("r1", "cf1", "cq1", "L1", 56), newValue("foo1"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
-
-    }
+    badKeys.forEach(
+        key -> assertThrows(IllegalArgumentException.class, () -> writer.append(key, foo1)));
   }
 
   @Test
@@ -644,7 +465,7 @@ public class RFileTest {
     assertEquals(newKey("r1", "cf1", "cq1", "L1", 55), trf.iter.getTopKey());
     assertEquals(newValue("foo1"), trf.iter.getTopValue());
 
-    assertEquals(newKey("r1", "cf1", "cq4", "L1", 56), trf.reader.getLastKey());
+    assertEquals(new Text("r1"), trf.reader.getLastRow());
 
     trf.closeReader();
   }
@@ -677,7 +498,7 @@ public class RFileTest {
       assertFalse(trf.iter.hasTop());
     }
 
-    assertEquals(newKey(formatString("r_", 499), "cf1", "cq1", "L1", 55), trf.reader.getLastKey());
+    assertEquals(new Text(formatString("r_", 499)), trf.reader.getLastRow());
 
     trf.closeReader();
   }
@@ -743,7 +564,7 @@ public class RFileTest {
         newKey(formatString("r_", 2), "cf1", "cq1", "L1", 55), false), EMPTY_COL_FAMS, false);
     assertFalse(trf.iter.hasTop());
 
-    assertEquals(newKey(formatString("r_", 49), "cf1", "cq1", "L1", 55), trf.reader.getLastKey());
+    assertEquals(new Text(formatString("r_", 49)), trf.reader.getLastRow());
 
     trf.reader.close();
   }
@@ -1188,8 +1009,9 @@ public class RFileTest {
     for (int i = 0; i < 1024; i++) {
 
       int m10 = i % 10;
-      if (m10 == 3 || m10 == 5 || m10 == 7)
+      if (m10 == 3 || m10 == 5 || m10 == 7) {
         continue;
+      }
 
       trf.writer.append(newKey(formatString("i", i), m10 + "mod10", "", "", i + 2),
           newValue("" + i));
@@ -1227,14 +1049,16 @@ public class RFileTest {
       // test excluding an individual column family
       trf.iter.seek(new Range(new Key(), true, null, true), newColFamByteSequence(m + "mod10"),
           false);
-      if (m == 3)
+      if (m == 3) {
         assertEquals(2, trf.reader.getNumLocalityGroupsSeeked());
-      else
+      } else {
         assertEquals(3, trf.reader.getNumLocalityGroupsSeeked());
+      }
       for (int i = 0; i < 1024; i++) {
 
-        if (i % 10 == m)
+        if (i % 10 == m) {
           continue;
+        }
 
         assertTrue(trf.iter.hasTop());
         assertEquals(newKey(formatString("i", i), (i % 10) + "mod10", "", "", i + 2),
@@ -1290,12 +1114,8 @@ public class RFileTest {
 
     trf.writer.append(newKey("0007", "a", "cq1", "", 4), newValue("1"));
 
-    try {
-      trf.writer.append(newKey("0009", "c", "cq1", "", 4), newValue("1"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
-
-    }
+    assertThrows(IllegalArgumentException.class,
+        () -> trf.writer.append(newKey("0009", "c", "cq1", "", 4), newValue("1")));
 
     trf.closeWriter();
 
@@ -1321,23 +1141,17 @@ public class RFileTest {
 
     trf.writer.startNewLocalityGroup("lg1", newColFamByteSequence("a", "b"));
 
-    trf.writer.append(newKey("0007", "a", "cq1", "", 4), newValue("1"));
+    final Value valueOf1 = newValue("1");
+
+    trf.writer.append(newKey("0007", "a", "cq1", "", 4), valueOf1);
 
     trf.writer.startDefaultLocalityGroup();
 
-    try {
-      trf.writer.append(newKey("0008", "a", "cq1", "", 4), newValue("1"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
+    assertThrows(IllegalArgumentException.class,
+        () -> trf.writer.append(newKey("0008", "a", "cq1", "", 4), valueOf1));
 
-    }
-
-    try {
-      trf.writer.append(newKey("0009", "b", "cq1", "", 4), newValue("1"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
-
-    }
+    assertThrows(IllegalArgumentException.class,
+        () -> trf.writer.append(newKey("0009", "b", "cq1", "", 4), valueOf1));
 
     trf.closeWriter();
 
@@ -1346,7 +1160,7 @@ public class RFileTest {
     trf.iter.seek(new Range(), EMPTY_COL_FAMS, false);
     assertTrue(trf.iter.hasTop());
     assertEquals(newKey("0007", "a", "cq1", "", 4), trf.iter.getTopKey());
-    assertEquals(newValue("1"), trf.iter.getTopValue());
+    assertEquals(valueOf1, trf.iter.getTopValue());
     trf.iter.next();
     assertFalse(trf.iter.hasTop());
 
@@ -1360,19 +1174,12 @@ public class RFileTest {
     trf.openWriter(false);
 
     trf.writer.startDefaultLocalityGroup();
-    try {
-      trf.writer.startNewLocalityGroup("lg1", newColFamByteSequence("a", "b"));
-      fail();
-    } catch (IllegalStateException ioe) {
 
-    }
+    Set<ByteSequence> columnFamilies = newColFamByteSequence("a", "b");
+    assertThrows(IllegalStateException.class,
+        () -> trf.writer.startNewLocalityGroup("lg1", columnFamilies));
 
-    try {
-      trf.writer.startDefaultLocalityGroup();
-      fail();
-    } catch (IllegalStateException ioe) {
-
-    }
+    assertThrows(IllegalStateException.class, () -> trf.writer.startDefaultLocalityGroup());
 
     trf.writer.close();
   }
@@ -1386,12 +1193,10 @@ public class RFileTest {
     trf.writer.startNewLocalityGroup("lg1", newColFamByteSequence("a", "b"));
 
     trf.writer.append(newKey("0007", "a", "cq1", "", 4), newValue("1"));
-    try {
-      trf.writer.startNewLocalityGroup("lg1", newColFamByteSequence("b", "c"));
-      fail();
-    } catch (IllegalArgumentException ioe) {
 
-    }
+    Set<ByteSequence> columnFamilies = newColFamByteSequence("b", "c");
+    assertThrows(IllegalArgumentException.class,
+        () -> trf.writer.startNewLocalityGroup("lg1", columnFamilies));
 
     trf.closeWriter();
   }
@@ -1550,30 +1355,35 @@ public class RFileTest {
     HashSet<ByteSequence> allCf = new HashSet<>();
 
     trf.writer.startNewLocalityGroup("lg1", t18newColFamByteSequence(0));
-    for (int i = 0; i < 1; i++)
+    for (int i = 0; i < 1; i++) {
       t18Append(trf, allCf, i);
+    }
 
     trf.writer.startNewLocalityGroup("lg2", t18newColFamByteSequence(1, 2));
-    for (int i = 1; i < 3; i++)
+    for (int i = 1; i < 3; i++) {
       t18Append(trf, allCf, i);
+    }
 
     trf.writer.startNewLocalityGroup("lg3", t18newColFamByteSequence(3, 4, 5));
-    for (int i = 3; i < 6; i++)
+    for (int i = 3; i < 6; i++) {
       t18Append(trf, allCf, i);
+    }
 
     trf.writer.startDefaultLocalityGroup();
 
     int max = 6 + RFile.Writer.MAX_CF_IN_DLG + 100;
-    for (int i = 6; i < max; i++)
+    for (int i = 6; i < max; i++) {
       t18Append(trf, allCf, i);
+    }
 
     trf.closeWriter();
 
     trf.openReader();
 
     t18Verify(t18newColFamByteSequence(0), trf.iter, trf.reader, allCf, 1, 3);
-    for (int i = 1; i < 10; i++)
+    for (int i = 1; i < 10; i++) {
       t18Verify(t18newColFamByteSequence(i), trf.iter, trf.reader, allCf, 1, 4);
+    }
 
     t18Verify(t18newColFamByteSequence(max + 1), trf.iter, trf.reader, allCf, 1, 4);
 
@@ -1659,17 +1469,15 @@ public class RFileTest {
 
     Set<ByteSequence> cfs = Collections.emptySet();
 
-    Random rand = new SecureRandom();
-
     for (int count = 0; count < 100; count++) {
 
-      int start = rand.nextInt(2300);
+      int start = RANDOM.get().nextInt(2300);
       Range range = new Range(newKey(formatString("r_", start), "cf1", "cq1", "L1", 42),
           newKey(formatString("r_", start + 100), "cf1", "cq1", "L1", 42));
 
       trf.reader.seek(range, cfs, false);
 
-      int numToScan = rand.nextInt(100);
+      int numToScan = RANDOM.get().nextInt(100);
 
       for (int j = 0; j < numToScan; j++) {
         assertTrue(trf.reader.hasTop());
@@ -1685,8 +1493,8 @@ public class RFileTest {
       // seek a little forward from the last range and read a few keys within the unconsumed portion
       // of the last range
 
-      int start2 = start + numToScan + rand.nextInt(3);
-      int end2 = start2 + rand.nextInt(3);
+      int start2 = start + numToScan + RANDOM.get().nextInt(3);
+      int end2 = start2 + RANDOM.get().nextInt(3);
 
       range = new Range(newKey(formatString("r_", start2), "cf1", "cq1", "L1", 42),
           newKey(formatString("r_", end2), "cf1", "cq1", "L1", 42));
@@ -1705,14 +1513,48 @@ public class RFileTest {
     trf.closeReader();
   }
 
-  @Test(expected = NullPointerException.class)
-  public void testMissingUnreleasedVersions() throws Exception {
-    runVersionTest(5, getAccumuloConfig(CryptoTest.CRYPTO_OFF_CONF));
+  @Test
+  public void testEstimateOverlappingEntries() throws IOException {
+    TestRFile trf = new TestRFile(conf);
+    // lower block sizes so estimates are closer
+    trf.openWriter(true, 100, 100);
+
+    // generate 1024 entries
+    int count = 0;
+    for (int row = 0; row < 4; row++) {
+      String rowS = formatString("r_", row);
+      for (int cf = 0; cf < 4; cf++) {
+        String cfS = formatString("cf_", cf);
+        for (int cq = 0; cq < 4; cq++) {
+          String cqS = formatString("cq_", cq);
+          for (int cv = 'A'; cv < 'A' + 4; cv++) {
+            String cvS = "" + (char) cv;
+            for (int ts = 4; ts > 0; ts--) {
+              Key k = newKey(rowS, cfS, cqS, cvS, ts);
+              Value v = newValue("" + count);
+              trf.writer.append(k, v);
+              count++;
+            }
+          }
+        }
+      }
+    }
+    trf.closeWriter();
+
+    trf.openReader();
+    verifyEstimated(trf.reader);
+    trf.closeReader();
+  }
+
+  @Test
+  public void testMissingUnreleasedVersions() {
+    assertThrows(NullPointerException.class,
+        () -> runVersionTest(5, getAccumuloConfig(ConfigMode.CRYPTO_OFF)));
   }
 
   @Test
   public void testOldVersions() throws Exception {
-    ConfigurationCopy defaultConf = getAccumuloConfig(CryptoTest.CRYPTO_OFF_CONF);
+    ConfigurationCopy defaultConf = getAccumuloConfig(ConfigMode.CRYPTO_OFF);
     runVersionTest(3, defaultConf);
     runVersionTest(4, defaultConf);
     runVersionTest(6, defaultConf);
@@ -1721,7 +1563,7 @@ public class RFileTest {
 
   @Test
   public void testOldVersionsWithCrypto() throws Exception {
-    ConfigurationCopy cryptoOnConf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    ConfigurationCopy cryptoOnConf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     runVersionTest(3, cryptoOnConf);
     runVersionTest(4, cryptoOnConf);
     runVersionTest(6, cryptoOnConf);
@@ -1734,22 +1576,24 @@ public class RFileTest {
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
     byte[] buf = new byte[1024];
     int read;
-    while ((read = in.read(buf)) > 0)
+    while ((read = in.read(buf)) > 0) {
       baos.write(buf, 0, read);
+    }
 
     byte[] data = baos.toByteArray();
     SeekableByteArrayInputStream bais = new SeekableByteArrayInputStream(data);
     FSDataInputStream in2 = new FSDataInputStream(bais);
-    aconf.set(Property.TSERV_CACHE_MANAGER_IMPL, LruBlockCacheManager.class.getName());
+    aconf.set(Property.GENERAL_CACHE_MANAGER_IMPL, TinyLfuBlockCacheManager.class.getName());
     aconf.set(Property.TSERV_DEFAULT_BLOCKSIZE, Long.toString(100000));
     aconf.set(Property.TSERV_DATACACHE_SIZE, Long.toString(100000000));
     aconf.set(Property.TSERV_INDEXCACHE_SIZE, Long.toString(100000000));
     BlockCacheManager manager = BlockCacheManagerFactory.getInstance(aconf);
-    manager.start(new BlockCacheConfiguration(aconf));
-    CachableBuilder cb = new CachableBuilder().input(in2).length(data.length).conf(hadoopConf)
-        .cryptoService(CryptoServiceFactory.newInstance(aconf, ClassloaderType.JAVA))
-        .cacheProvider(new BasicCacheProvider(manager.getBlockCache(CacheType.INDEX),
-            manager.getBlockCache(CacheType.DATA)));
+    manager.start(BlockCacheConfiguration.forTabletServer(aconf));
+    CryptoService cs = CryptoFactoryLoader.getServiceForClient(CryptoEnvironment.Scope.TABLE,
+        aconf.getAllCryptoProperties());
+    CachableBuilder cb = new CachableBuilder().input(in2, "cache-1").length(data.length)
+        .conf(hadoopConf).cryptoService(cs).cacheProvider(new BasicCacheProvider(
+            manager.getBlockCache(CacheType.INDEX), manager.getBlockCache(CacheType.DATA)));
     Reader reader = new RFile.Reader(cb);
     checkIndex(reader);
 
@@ -1757,11 +1601,12 @@ public class RFileTest {
 
     for (int start : new int[] {0, 10, 100, 998}) {
       for (int cf = 1; cf <= 4; cf++) {
-        if (start == 0)
+        if (start == 0) {
           iter.seek(new Range(), newColFamByteSequence(formatString("cf_", cf)), true);
-        else
+        } else {
           iter.seek(new Range(formatString("r_", start), null),
               newColFamByteSequence(formatString("cf_", cf)), true);
+        }
 
         for (int i = start; i < 1000; i++) {
           assertTrue(iter.hasTop());
@@ -1774,10 +1619,11 @@ public class RFileTest {
         assertFalse(iter.hasTop());
       }
 
-      if (start == 0)
+      if (start == 0) {
         iter.seek(new Range(), newColFamByteSequence(), false);
-      else
+      } else {
         iter.seek(new Range(formatString("r_", start), null), newColFamByteSequence(), false);
+      }
 
       for (int i = start; i < 1000; i++) {
         for (int cf = 1; cf <= 4; cf++) {
@@ -1796,149 +1642,137 @@ public class RFileTest {
     reader.close();
   }
 
-  @SuppressWarnings("fallthrough")
-  public static ConfigurationCopy getAccumuloConfig(String cryptoOn) {
-    ConfigurationCopy cfg = new ConfigurationCopy(DefaultConfiguration.getInstance());
-    switch (cryptoOn) {
-      case CryptoTest.CRYPTO_ON_DISABLED_CONF:
-        cfg.set(INSTANCE_CRYPTO_PREFIX.getKey() + "enabled", "false");
-        // fall through to set remaining config
-      case CryptoTest.CRYPTO_ON_CONF:
-        cfg.set(Property.INSTANCE_CRYPTO_SERVICE,
-            "org.apache.accumulo.core.spi.crypto.AESCryptoService");
-        cfg.set(INSTANCE_CRYPTO_PREFIX.getKey() + "key.uri", CryptoTest.keyPath);
-        break;
-    }
-    return cfg;
+  private ConfigurationCopy getAccumuloConfig(ConfigMode configMode) {
+    return CryptoTest.getAccumuloConfig(configMode, getClass());
   }
 
   @Test
   public void testEncRFile1() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test1();
     conf = null;
   }
 
   @Test
   public void testEncRFile2() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test2();
     conf = null;
   }
 
   @Test
   public void testEncRFile3() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test3();
     conf = null;
   }
 
   @Test
   public void testEncRFile4() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test4();
     conf = null;
   }
 
   @Test
   public void testEncRFile5() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test5();
     conf = null;
   }
 
   @Test
   public void testEncRFile6() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test6();
     conf = null;
   }
 
   @Test
   public void testEncRFile7() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test7();
     conf = null;
   }
 
   @Test
   public void testEncRFile8() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test8();
     conf = null;
   }
 
   @Test
   public void testEncRFile9() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test9();
     conf = null;
   }
 
   @Test
   public void testEncRFile10() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test10();
     conf = null;
   }
 
   @Test
   public void testEncRFile11() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test11();
     conf = null;
   }
 
   @Test
   public void testEncRFile12() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test12();
     conf = null;
   }
 
   @Test
   public void testEncRFile13() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test13();
     conf = null;
   }
 
   @Test
   public void testEncRFile14() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test14();
     conf = null;
   }
 
   @Test
   public void testEncRFile16() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test16();
   }
 
   @Test
   public void testEncRFile17() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test17();
   }
 
   @Test
   public void testEncRFile18() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test18();
     conf = null;
   }
 
   @Test
   public void testEncRFile19() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test19();
     conf = null;
   }
 
   @Test
   public void testEncryptedRFiles() throws Exception {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     test1();
     test2();
     test3();
@@ -2019,10 +1853,6 @@ public class RFileTest {
     sample.seek(new Range(), columnFamilies, inclusive);
     assertEquals(sampleData, toList(sample));
 
-    Random rand = new SecureRandom();
-    long seed = rand.nextLong();
-    rand.setSeed(seed);
-
     // randomly seek sample iterator and verify
     for (int i = 0; i < 33; i++) {
       Key startKey = null;
@@ -2033,29 +1863,29 @@ public class RFileTest {
       boolean endInclusive = false;
       int endIndex = sampleData.size();
 
-      if (rand.nextBoolean()) {
-        startIndex = rand.nextInt(sampleData.size());
+      if (RANDOM.get().nextBoolean()) {
+        startIndex = RANDOM.get().nextInt(sampleData.size());
         startKey = sampleData.get(startIndex).getKey();
-        startInclusive = rand.nextBoolean();
+        startInclusive = RANDOM.get().nextBoolean();
         if (!startInclusive) {
           startIndex++;
         }
       }
 
-      if (startIndex < endIndex && rand.nextBoolean()) {
-        endIndex -= rand.nextInt(endIndex - startIndex);
+      if (startIndex < endIndex && RANDOM.get().nextBoolean()) {
+        endIndex -= RANDOM.get().nextInt(endIndex - startIndex);
         endKey = sampleData.get(endIndex - 1).getKey();
-        endInclusive = rand.nextBoolean();
+        endInclusive = RANDOM.get().nextBoolean();
         if (!endInclusive) {
           endIndex--;
         }
       } else if (startIndex == endIndex) {
-        endInclusive = rand.nextBoolean();
+        endInclusive = RANDOM.get().nextBoolean();
       }
 
       sample.seek(new Range(startKey, startInclusive, endKey, endInclusive), columnFamilies,
           inclusive);
-      assertEquals("seed: " + seed, sampleData.subList(startIndex, endIndex), toList(sample));
+      assertEquals(sampleData.subList(startIndex, endIndex), toList(sample));
     }
   }
 
@@ -2240,7 +2070,7 @@ public class RFileTest {
 
   @Test
   public void testEncSample() throws IOException {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     testSample();
     testSampleLG();
     conf = null;
@@ -2282,7 +2112,7 @@ public class RFileTest {
     FileSKVIterator iiter = trf.reader.getIndex();
     while (iiter.hasTop()) {
       Key k = iiter.getTopKey();
-      assertTrue(k + " " + k.getSize() + " >= 20", k.getSize() < 20);
+      assertTrue(k.getSize() < 20, k + " " + k.getSize() + " >= 20");
       iiter.next();
     }
 
@@ -2298,7 +2128,7 @@ public class RFileTest {
 
   @Test
   public void testCryptoDoesntLeakSensitive() throws IOException {
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
     // test an empty file
 
     TestRFile trf = new TestRFile(conf);
@@ -2311,7 +2141,7 @@ public class RFileTest {
     // If we get here, we have encrypted bytes
     for (Property prop : Property.values()) {
       if (prop.isSensitive()) {
-        byte[] toCheck = prop.getKey().getBytes();
+        byte[] toCheck = prop.getKey().getBytes(UTF_8);
         assertEquals(-1, Bytes.indexOf(rfBytes, toCheck));
       }
     }
@@ -2321,15 +2151,7 @@ public class RFileTest {
   public void testRootTabletEncryption() throws Exception {
 
     // This tests that the normal set of operations used to populate a root tablet
-    conf = getAccumuloConfig(CryptoTest.CRYPTO_ON_CONF);
-
-    // populate the root tablet with info about the default tablet
-    // the root tablet contains the key extent and locations of all the
-    // metadata tablets
-    // String initRootTabFile = ServerConstants.getMetadataTableDir() + "/root_tablet/00000_00000."
-    // + FileOperations.getNewFileExtension(AccumuloConfiguration.getDefaultConfiguration());
-    // FileSKVWriter mfw = FileOperations.getInstance().openWriter(initRootTabFile, fs, conf,
-    // AccumuloConfiguration.getDefaultConfiguration());
+    conf = getAccumuloConfig(ConfigMode.CRYPTO_TABLE_ON);
 
     TestRFile testRfile = new TestRFile(conf);
     testRfile.openWriter();
@@ -2340,8 +2162,8 @@ public class RFileTest {
 
     // mfw.startDefaultLocalityGroup();
 
-    Text tableExtent = new Text(
-        TabletsSection.encodeRow(MetadataTable.ID, TabletsSection.getRange().getEndKey().getRow()));
+    Text tableExtent = new Text(TabletsSection.encodeRow(AccumuloTable.METADATA.tableId(),
+        TabletsSection.getRange().getEndKey().getRow()));
 
     // table tablet's directory
     Key tableDirKey = new Key(tableExtent, ServerColumnFamily.DIRECTORY_COLUMN.getColumnFamily(),
@@ -2359,7 +2181,7 @@ public class RFileTest {
     mfw.append(tablePrevRowKey, TabletColumnFamily.encodePrevEndRow(null));
 
     // ----------] default tablet info
-    Text defaultExtent = new Text(TabletsSection.encodeRow(MetadataTable.ID, null));
+    Text defaultExtent = new Text(TabletsSection.encodeRow(AccumuloTable.METADATA.tableId(), null));
 
     // default's directory
     Key defaultDirKey =
@@ -2383,7 +2205,7 @@ public class RFileTest {
 
     if (true) {
       FileOutputStream fileOutputStream =
-          new FileOutputStream(tempFolder.newFile("testEncryptedRootFile.rf"));
+          new FileOutputStream(new File(tempDir, "testEncryptedRootFile.rf"));
       fileOutputStream.write(testRfile.baos.toByteArray());
       fileOutputStream.flush();
       fileOutputStream.close();
@@ -2393,7 +2215,7 @@ public class RFileTest {
     testRfile.iter.seek(new Range((Key) null, null), EMPTY_COL_FAMS, false);
     assertTrue(testRfile.iter.hasTop());
 
-    assertNotNull(testRfile.reader.getLastKey());
+    assertNotNull(testRfile.reader.getLastRow());
 
     testRfile.closeReader();
 

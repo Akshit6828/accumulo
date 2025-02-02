@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,10 +18,10 @@
  */
 package org.apache.accumulo.core.metadata.schema;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
+import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 import java.util.Iterator;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.apache.accumulo.core.data.Key;
@@ -51,8 +51,8 @@ public class LinkingIterator implements Iterator<TabletMetadata> {
 
   private static final Logger log = LoggerFactory.getLogger(LinkingIterator.class);
 
-  private Range range;
-  private Function<Range,Iterator<TabletMetadata>> iteratorFactory;
+  private final Range range;
+  private final Function<Range,Iterator<TabletMetadata>> iteratorFactory;
   private Iterator<TabletMetadata> source;
   private TabletMetadata prevTablet = null;
 
@@ -72,7 +72,7 @@ public class LinkingIterator implements Iterator<TabletMetadata> {
       Text defaultTabletRow = TabletsSection.encodeRow(prevTablet.getTableId(), null);
       if (range.contains(new Key(defaultTabletRow))) {
         throw new IllegalStateException(
-            "Scan range incudled default tablet, but did not see default tablet.  Last tablet seen : "
+            "Scan range included default tablet, but did not see default tablet.  Last tablet seen : "
                 + prevTablet.getExtent());
       }
     }
@@ -176,7 +176,7 @@ public class LinkingIterator implements Iterator<TabletMetadata> {
       }
 
       if (currTablet == null) {
-        sleepUninterruptibly(sleepTime, TimeUnit.MILLISECONDS);
+        sleepUninterruptibly(sleepTime, MILLISECONDS);
         resetSource();
         sleepTime = Math.min(2 * sleepTime, 5000);
       }

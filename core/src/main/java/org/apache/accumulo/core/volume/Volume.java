@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -44,8 +44,7 @@ public interface Volume {
    * path begins with a single slash, it will be preserved while prefixing this volume. If it does
    * not begin with a single slash, one will be inserted.
    *
-   * @param pathString
-   *          The suffix to use
+   * @param pathString The suffix to use
    * @return A Path for this Volume with the provided suffix
    */
   Path prefixChild(String pathString);

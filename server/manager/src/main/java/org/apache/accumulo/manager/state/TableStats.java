@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -63,18 +63,22 @@ public class TableStats {
 
   public synchronized TableCounts getLast(TableId tableId) {
     TableCounts result = last.get(tableId);
-    if (result == null)
+    if (result == null) {
       return new TableCounts();
+    }
     return result;
   }
 
   public synchronized long getScanTime() {
-    if (endScan <= startScan)
+    if (endScan <= startScan) {
       return System.currentTimeMillis() - startScan;
+    }
     return endScan - startScan;
   }
 
-  public synchronized long lastScanFinished() {
-    return endScan;
+  @Override
+  public String toString() {
+    return new StringBuilder().append("last: ").append(last.toString()).toString();
   }
+
 }

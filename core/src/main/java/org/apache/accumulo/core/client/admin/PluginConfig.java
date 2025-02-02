@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -34,9 +34,8 @@ public class PluginConfig {
   private final Map<String,String> options;
 
   /**
-   * @param className
-   *          The name of a class that implements a server side plugin. This class must exist on the
-   *          server side classpath.
+   * @param className The name of a class that implements a server side plugin. This class must
+   *        exist on the server side classpath.
    */
   public PluginConfig(String className) {
     this.className = requireNonNull(className);
@@ -45,12 +44,10 @@ public class PluginConfig {
 
   /**
    *
-   * @param className
-   *          The name of a class that implements a server side plugin. This class must exist on the
-   *          server side classpath.
-   * @param options
-   *          The options that will be passed to the init() method of the plugin when its
-   *          instantiated server side. This method will copy the map. The default is an empty map.
+   * @param className The name of a class that implements a server side plugin. This class must
+   *        exist on the server side classpath.
+   * @param options The options that will be passed to the init() method of the plugin when its
+   *        instantiated server side. This method will copy the map. The default is an empty map.
    */
   public PluginConfig(String className, Map<String,String> options) {
     this.className = requireNonNull(className);

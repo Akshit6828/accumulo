@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,8 +18,9 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -46,26 +47,26 @@ import org.apache.accumulo.core.security.TablePermission;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.security.UserGroupInformation;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class ScanIteratorIT extends AccumuloClusterHarness {
   private static final Logger log = LoggerFactory.getLogger(ScanIteratorIT.class);
 
-  @Override
-  protected int defaultTimeoutSeconds() {
-    return 60;
-  }
-
   private AccumuloClient accumuloClient;
   private String tableName;
   private String user;
   private boolean saslEnabled;
 
-  @Before
+  @Override
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(1);
+  }
+
+  @BeforeEach
   public void setup() throws Exception {
     accumuloClient = Accumulo.newClient().from(getClientProps()).build();
     tableName = getUniqueNames(1)[0];
@@ -92,7 +93,7 @@ public class ScanIteratorIT extends AccumuloClusterHarness {
     accumuloClient.securityOperations().changeUserAuthorizations(user, AuthsIterator.AUTHS);
   }
 
-  @After
+  @AfterEach
   public void tearDown() throws Exception {
     if (user != null) {
       if (saslEnabled) {
@@ -170,7 +171,7 @@ public class ScanIteratorIT extends AccumuloClusterHarness {
     int expected = start;
     for (Entry<Key,Value> entry : scanner) {
       if (Integer.parseInt(entry.getKey().getRow().toString()) != expected) {
-        throw new Exception("Saw unexpexted " + entry.getKey().getRow() + " " + expected);
+        throw new Exception("Saw unexpected " + entry.getKey().getRow() + " " + expected);
       }
 
       if (entry.getKey().getColumnQualifier().toString().equals("cq2")) {

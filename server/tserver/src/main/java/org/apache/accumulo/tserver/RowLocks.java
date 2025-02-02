@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -29,8 +29,8 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.apache.accumulo.core.data.ArrayByteSequence;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
+import org.apache.accumulo.server.data.ServerConditionalMutation;
 import org.apache.accumulo.tserver.ConditionalMutationSet.DeferFilter;
-import org.apache.accumulo.tserver.data.ServerConditionalMutation;
 
 import com.google.common.base.Preconditions;
 
@@ -43,9 +43,9 @@ class RowLocks {
   private final Map<ByteSequence,RowLock> rowLocks = new ConcurrentHashMap<>();
 
   static class RowLock {
-    ReentrantLock rlock;
+    final ReentrantLock rlock;
     int count;
-    ByteSequence rowSeq;
+    final ByteSequence rowSeq;
 
     RowLock(ReentrantLock rlock, ByteSequence rowSeq) {
       this.rlock = rlock;
@@ -102,8 +102,9 @@ class RowLocks {
       // possible, not blocking on rows that are already locked.
       for (RowLock rowLock : locks) {
         if (!rowLock.tryLock()) {
-          if (rowsNotLocked == null)
+          if (rowsNotLocked == null) {
             rowsNotLocked = new HashSet<>();
+          }
           rowsNotLocked.add(rowLock.rowSeq);
         }
       }
@@ -121,10 +122,11 @@ class RowLocks {
         public void defer(List<ServerConditionalMutation> scml,
             List<ServerConditionalMutation> okMutations, List<ServerConditionalMutation> deferred) {
           for (ServerConditionalMutation scm : scml) {
-            if (rnlf.contains(new ArrayByteSequence(scm.getRow())))
+            if (rnlf.contains(new ArrayByteSequence(scm.getRow()))) {
               deferred.add(scm);
-            else
+            } else {
               okMutations.add(scm);
+            }
 
           }
         }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,7 +27,7 @@ import java.io.OutputStream;
  * been buffered.
  */
 class SimpleBufferedOutputStream extends FilterOutputStream {
-  protected byte[] buf; // the borrowed buffer
+  protected final byte[] buf; // the borrowed buffer
   protected int count = 0; // bytes used in buffer.
 
   // Constructor

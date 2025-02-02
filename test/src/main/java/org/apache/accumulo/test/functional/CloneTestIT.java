@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,11 +18,14 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -36,6 +39,7 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 import org.apache.accumulo.cluster.AccumuloCluster;
+import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.AccumuloException;
@@ -46,7 +50,6 @@ import org.apache.accumulo.core.client.admin.CloneConfiguration;
 import org.apache.accumulo.core.client.admin.DiskUsage;
 import org.apache.accumulo.core.client.admin.NewTableConfiguration;
 import org.apache.accumulo.core.clientImpl.ClientContext;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
@@ -54,8 +57,8 @@ import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.manager.state.tables.TableState;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.RootTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
+import org.apache.accumulo.core.metadata.StoredTabletFile;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.DataFileColumnFamily;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.ServerColumnFamily;
 import org.apache.accumulo.core.security.Authorizations;
@@ -65,14 +68,13 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
-import org.junit.Assume;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class CloneTestIT extends AccumuloClusterHarness {
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 2 * 60;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(2);
   }
 
   @Test
@@ -111,7 +113,7 @@ public class CloneTestIT extends AccumuloClusterHarness {
 
   private void assertTableState(String tableName, AccumuloClient c, TableState expected) {
     String tableId = c.tableOperations().tableIdMap().get(tableName);
-    TableState tableState = Tables.getTableState((ClientContext) c, TableId.of(tableId));
+    TableState tableState = ((ClientContext) c).getTableState(TableId.of(tableId));
     assertEquals(expected, tableState);
   }
 
@@ -126,22 +128,24 @@ public class CloneTestIT extends AccumuloClusterHarness {
 
       HashMap<String,String> actual = new HashMap<>();
 
-      for (Entry<Key,Value> entry : scanner)
+      for (Entry<Key,Value> entry : scanner) {
         actual.put(entry.getKey().getRowData() + ":" + entry.getKey().getColumnQualifierData(),
             entry.getValue().toString());
+      }
 
       assertEquals(expected, actual);
     }
   }
 
   private void checkMetadata(String table, AccumuloClient client) throws Exception {
-    try (Scanner s = client.createScanner(MetadataTable.NAME, Authorizations.EMPTY)) {
+    try (Scanner s =
+        client.createScanner(AccumuloTable.METADATA.tableName(), Authorizations.EMPTY)) {
 
       s.fetchColumnFamily(DataFileColumnFamily.NAME);
       ServerColumnFamily.DIRECTORY_COLUMN.fetch(s);
       String tableId = client.tableOperations().tableIdMap().get(table);
 
-      assertNotNull("Could not get table id for " + table, tableId);
+      assertNotNull(tableId, "Could not get table id for " + table);
 
       s.setRange(Range.prefix(tableId));
 
@@ -156,22 +160,22 @@ public class CloneTestIT extends AccumuloClusterHarness {
         k.getColumnQualifier(cq);
 
         if (cf.equals(DataFileColumnFamily.NAME)) {
-          Path p = new Path(cq.toString());
+          Path p = StoredTabletFile.of(cq).getPath();
           FileSystem fs = cluster.getFileSystem();
-          assertTrue("File does not exist: " + p, fs.exists(p));
+          assertTrue(fs.exists(p), "File does not exist: " + p);
         } else if (cf.equals(ServerColumnFamily.DIRECTORY_COLUMN.getColumnFamily())) {
-          assertEquals("Saw unexpected cq",
-              ServerColumnFamily.DIRECTORY_COLUMN.getColumnQualifier(), cq);
+          assertEquals(ServerColumnFamily.DIRECTORY_COLUMN.getColumnQualifier(), cq,
+              "Saw unexpected cq");
 
           String dirName = entry.getValue().toString();
 
-          assertTrue("Bad dir name " + dirName, pattern.matcher(dirName).matches());
+          assertTrue(pattern.matcher(dirName).matches(), "Bad dir name " + dirName);
         } else {
           fail("Got unexpected key-value: " + entry);
           throw new RuntimeException();
         }
       }
-      assertTrue("Expected to find metadata entries", itemsInspected > 0);
+      assertTrue(itemsInspected > 0, "Expected to find metadata entries");
     }
   }
 
@@ -221,9 +225,8 @@ public class CloneTestIT extends AccumuloClusterHarness {
 
     try (AccumuloClient c = Accumulo.newClient().from(getClientProps()).build()) {
       AccumuloCluster cluster = getCluster();
-      Assume.assumeTrue(cluster instanceof MiniAccumuloClusterImpl);
+      assumeTrue(cluster instanceof MiniAccumuloClusterImpl);
       MiniAccumuloClusterImpl mac = (MiniAccumuloClusterImpl) cluster;
-      String rootPath = mac.getConfig().getDir().getAbsolutePath();
 
       // verify that deleting a new table removes the files
       c.tableOperations().create(table3);
@@ -231,8 +234,12 @@ public class CloneTestIT extends AccumuloClusterHarness {
       c.tableOperations().flush(table3, null, null, true);
       // check for files
       FileSystem fs = getCluster().getFileSystem();
-      String id = c.tableOperations().tableIdMap().get(table3);
-      FileStatus[] status = fs.listStatus(new Path(rootPath + "/accumulo/tables/" + id));
+      final String id = c.tableOperations().tableIdMap().get(table3);
+
+      // the following path expects mini to be configured with a single volume
+      final Path tablePath = new Path(mac.getSiteConfiguration().get(Property.INSTANCE_VOLUMES)
+          + "/" + Constants.TABLE_DIR + "/" + id);
+      FileStatus[] status = fs.listStatus(tablePath);
       assertTrue(status.length > 0);
       // verify disk usage
       List<DiskUsage> diskUsage = c.tableOperations().getDiskUsage(Collections.singleton(table3));
@@ -241,7 +248,6 @@ public class CloneTestIT extends AccumuloClusterHarness {
       // delete the table
       c.tableOperations().delete(table3);
       // verify its gone from the file system
-      Path tablePath = new Path(rootPath + "/accumulo/tables/" + id);
       if (fs.exists(tablePath)) {
         status = fs.listStatus(tablePath);
         assertTrue(status == null || status.length == 0);
@@ -272,7 +278,7 @@ public class CloneTestIT extends AccumuloClusterHarness {
 
     try (AccumuloClient c = Accumulo.newClient().from(getClientProps()).build()) {
       AccumuloCluster cluster = getCluster();
-      Assume.assumeTrue(cluster instanceof MiniAccumuloClusterImpl);
+      assumeTrue(cluster instanceof MiniAccumuloClusterImpl);
 
       c.tableOperations().create(table1);
 
@@ -317,7 +323,7 @@ public class CloneTestIT extends AccumuloClusterHarness {
         bw.addMutations(mutations);
       }
 
-      client.tableOperations().clone(tables[0], tables[1], true, null, null);
+      client.tableOperations().clone(tables[0], tables[1], CloneConfiguration.empty());
 
       client.tableOperations().deleteRows(tables[1], new Text("4"), new Text("8"));
 
@@ -333,17 +339,19 @@ public class CloneTestIT extends AccumuloClusterHarness {
     }
   }
 
-  @Test(expected = AccumuloException.class)
-  public void testCloneRootTable() throws Exception {
+  @Test
+  public void testCloneRootTable() {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
-      client.tableOperations().clone(RootTable.NAME, "rc1", true, null, null);
+      assertThrows(AccumuloException.class, () -> client.tableOperations()
+          .clone(AccumuloTable.ROOT.tableName(), "rc1", CloneConfiguration.empty()));
     }
   }
 
-  @Test(expected = AccumuloException.class)
-  public void testCloneMetadataTable() throws Exception {
+  @Test
+  public void testCloneMetadataTable() {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
-      client.tableOperations().clone(MetadataTable.NAME, "mc1", true, null, null);
+      assertThrows(AccumuloException.class, () -> client.tableOperations()
+          .clone(AccumuloTable.METADATA.tableName(), "mc1", CloneConfiguration.empty()));
     }
   }
 }

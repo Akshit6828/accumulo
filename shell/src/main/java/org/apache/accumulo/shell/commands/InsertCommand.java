@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -38,7 +38,7 @@ import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.TabletId;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.security.ColumnVisibility;
-import org.apache.accumulo.core.tabletserver.thrift.ConstraintViolationException;
+import org.apache.accumulo.core.tabletingest.thrift.ConstraintViolationException;
 import org.apache.accumulo.shell.Shell;
 import org.apache.accumulo.shell.Shell.Command;
 import org.apache.commons.cli.CommandLine;
@@ -75,14 +75,16 @@ public class InsertCommand extends Command {
       final ColumnVisibility le = new ColumnVisibility(cl.getOptionValue(insertOptAuths.getOpt()));
       Shell.log.debug("Authorization label will be set to: {}", le);
 
-      if (cl.hasOption(timestampOpt.getOpt()))
+      if (cl.hasOption(timestampOpt.getOpt())) {
         m.put(colf, colq, le, Long.parseLong(cl.getOptionValue(timestampOpt.getOpt())), val);
-      else
+      } else {
         m.put(colf, colq, le, val);
-    } else if (cl.hasOption(timestampOpt.getOpt()))
+      }
+    } else if (cl.hasOption(timestampOpt.getOpt())) {
       m.put(colf, colq, Long.parseLong(cl.getOptionValue(timestampOpt.getOpt())), val);
-    else
+    } else {
       m.put(colf, colq, val);
+    }
 
     final BatchWriterConfig cfg =
         new BatchWriterConfig().setMaxMemory(Math.max(m.estimatedMemoryUsed(), 1024))
@@ -128,9 +130,10 @@ public class InsertCommand extends Command {
       if (lines.isEmpty() || e.getUnknownExceptions() > 0) {
         // must always print something
         lines.add(" " + e.getClass().getName() + " : " + e.getMessage());
-        if (e.getCause() != null)
+        if (e.getCause() != null) {
           lines.add("   Caused by : " + e.getCause().getClass().getName() + " : "
               + e.getCause().getMessage());
+        }
       }
 
       shellState.printLines(lines.iterator(), false);
@@ -163,7 +166,7 @@ public class InsertCommand extends Command {
 
     timeoutOption = new Option(null, "timeout", true,
         "time before insert should fail if no data is written. If no unit is"
-            + " given assumes seconds. Units d,h,m,s,and ms are supported. e.g. 30s" + " or 100ms");
+            + " given assumes seconds. Units d,h,m,s,and ms are supported. e.g. 30s or 100ms");
     timeoutOption.setArgName("timeout");
     o.addOption(timeoutOption);
 

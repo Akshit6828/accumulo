@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,13 +19,14 @@
 package org.apache.accumulo.core.data;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 
+import org.apache.accumulo.core.client.IteratorSetting;
 import org.apache.hadoop.io.Text;
 
 /**
@@ -83,6 +84,50 @@ public class ConditionalMutation extends Mutation {
     return Collections.unmodifiableList(conditions);
   }
 
+  private String toString(ByteSequence bs) {
+    if (bs == null) {
+      return null;
+    }
+    return new String(bs.toArray(), UTF_8);
+  }
+
+  @Override
+  public String prettyPrint() {
+    StringBuilder sb = new StringBuilder(super.prettyPrint());
+    for (Condition c : conditions) {
+      sb.append(" condition: ");
+      sb.append(toString(c.getFamily()));
+      sb.append(":");
+      sb.append(toString(c.getQualifier()));
+      if (c.getValue() != null && !toString(c.getValue()).isBlank()) {
+        sb.append(" value: ");
+        sb.append(toString(c.getValue()));
+      }
+      if (c.getVisibility() != null && !toString(c.getVisibility()).isBlank()) {
+        sb.append(" visibility: '");
+        sb.append(toString(c.getVisibility()));
+        sb.append("'");
+      }
+      if (c.getTimestamp() != null) {
+        sb.append(" timestamp: ");
+        sb.append("'");
+        sb.append(c.getTimestamp());
+        sb.append("'");
+      }
+      if (c.getIterators().length != 0) {
+        sb.append(" iterator: ");
+        IteratorSetting[] iterators = c.getIterators();
+        for (IteratorSetting its : iterators) {
+          sb.append("'");
+          sb.append(its.toString());
+          sb.append("' ");
+        }
+      }
+      sb.append("\n");
+    }
+    return sb.toString();
+  }
+
   @Override
   public boolean equals(Object o) {
     if (o == this) {
@@ -105,9 +150,4 @@ public class ConditionalMutation extends Mutation {
     return result;
   }
 
-  @Override
-  public void setReplicationSources(Set<String> sources) {
-    throw new UnsupportedOperationException(
-        "Conditional Mutations are not supported for replication");
-  }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,6 +18,7 @@
  */
 package org.apache.accumulo.core.client;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -25,10 +26,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.accumulo.core.client.security.SecurityErrorCode;
 import org.apache.accumulo.core.clientImpl.ClientContext;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.data.ConstraintViolationSummary;
 import org.apache.accumulo.core.data.TabletId;
 
@@ -38,65 +39,35 @@ import org.apache.accumulo.core.data.TabletId;
 public class MutationsRejectedException extends AccumuloException {
   private static final long serialVersionUID = 1L;
 
-  private List<ConstraintViolationSummary> cvsl;
-  private Map<TabletId,Set<SecurityErrorCode>> af;
-  private Collection<String> es;
-  private int unknownErrors;
-
-  /**
-   *
-   * @param cvsList
-   *          list of constraint violations
-   * @param hashMap
-   *          authorization failures
-   * @param serverSideErrors
-   *          server side errors
-   * @param unknownErrors
-   *          number of unknown errors
-   *
-   * @since 1.7.0
-   * @deprecated since 2.0.0, replaced by
-   *             {@link #MutationsRejectedException(AccumuloClient, List, Map, Collection, int, Throwable)}
-   */
-  @Deprecated(since = "2.0.0")
-  public MutationsRejectedException(Instance instance, List<ConstraintViolationSummary> cvsList,
-      Map<TabletId,Set<SecurityErrorCode>> hashMap, Collection<String> serverSideErrors,
-      int unknownErrors, Throwable cause) {
-    super(
-        "# constraint violations : " + cvsList.size() + "  security codes: " + hashMap.toString()
-            + "  # server errors " + serverSideErrors.size() + " # exceptions " + unknownErrors,
-        cause);
-    this.cvsl = cvsList;
-    this.af = hashMap;
-    this.es = serverSideErrors;
-    this.unknownErrors = unknownErrors;
-  }
+  private final ArrayList<ConstraintViolationSummary> cvsl = new ArrayList<>();
+  private final HashMap<TabletId,Set<SecurityErrorCode>> af = new HashMap<>();
+  private final HashSet<String> es = new HashSet<>();
+  private final int unknownErrors;
 
   /**
    * Creates Mutations rejected exception
    *
-   * @param client
-   *          AccumuloClient
-   * @param cvsList
-   *          list of constraint violations
-   * @param hashMap
-   *          authorization failures
-   * @param serverSideErrors
-   *          server side errors
-   * @param unknownErrors
-   *          number of unknown errors
+   * @param client AccumuloClient
+   * @param cvsList list of constraint violations
+   * @param hashMap authorization failures
+   * @param serverSideErrors server side errors
+   * @param unknownErrors number of unknown errors
    *
    * @since 2.0.0
    */
   public MutationsRejectedException(AccumuloClient client, List<ConstraintViolationSummary> cvsList,
       Map<TabletId,Set<SecurityErrorCode>> hashMap, Collection<String> serverSideErrors,
       int unknownErrors, Throwable cause) {
-    super("# constraint violations : " + cvsList.size() + "  security codes: "
-        + format(hashMap, (ClientContext) client) + "  # server errors " + serverSideErrors.size()
-        + " # exceptions " + unknownErrors, cause);
-    this.cvsl = cvsList;
-    this.af = hashMap;
-    this.es = serverSideErrors;
+    super(
+        "constraint violation codes : "
+            + cvsList.stream().map(ConstraintViolationSummary::getViolationCode).collect(
+                Collectors.toSet())
+            + "  security codes: " + format(hashMap, (ClientContext) client) + "  # server errors "
+            + serverSideErrors.size() + " # exceptions " + unknownErrors,
+        cause);
+    this.cvsl.addAll(cvsList);
+    this.af.putAll(hashMap);
+    this.es.addAll(serverSideErrors);
     this.unknownErrors = unknownErrors;
   }
 
@@ -106,7 +77,7 @@ public class MutationsRejectedException extends AccumuloException {
 
     for (Entry<TabletId,Set<SecurityErrorCode>> entry : hashMap.entrySet()) {
       TabletId tabletId = entry.getKey();
-      String tableInfo = Tables.getPrintableTableInfoFromId(context, tabletId.getTable());
+      String tableInfo = context.getPrintableTableInfoFromId(tabletId.getTable());
 
       if (!result.containsKey(tableInfo)) {
         result.put(tableInfo, new HashSet<>());

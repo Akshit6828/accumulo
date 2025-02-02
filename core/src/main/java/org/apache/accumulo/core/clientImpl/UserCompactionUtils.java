@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -75,7 +75,7 @@ public class UserCompactionUtils {
     }
   }
 
-  public static interface Encoder<T> {
+  public interface Encoder<T> {
     public void encode(DataOutput dout, T p);
   }
 
@@ -217,8 +217,6 @@ public class UserCompactionUtils {
         is.write(dout);
       }
 
-      CompactionStrategyConfigUtil.encode(dout, cc);
-
       encodeConfigurer(dout, cc.getConfigurer());
       encodeSelector(dout, cc.getSelector());
       encode(dout, cc.getExecutionHints());
@@ -259,8 +257,6 @@ public class UserCompactionUtils {
       }
 
       cc.setIterators(iterators);
-
-      CompactionStrategyConfigUtil.decode(cc, din);
 
       var configurer = decodeConfigurer(din);
       if (!isDefault(configurer)) {

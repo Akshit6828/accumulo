@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,10 +27,11 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
 import org.apache.accumulo.core.manager.thrift.ManagerMonitorInfo;
-import org.apache.accumulo.core.master.thrift.TabletServerStatus;
-import org.apache.accumulo.core.util.HostAndPort;
+import org.apache.accumulo.core.manager.thrift.TabletServerStatus;
 import org.apache.accumulo.monitor.Monitor;
 import org.apache.accumulo.monitor.Monitor.ScanStats;
+
+import com.google.common.net.HostAndPort;
 
 /**
  * Generate a new Scan list JSON object
@@ -50,7 +51,7 @@ public class ScansResource {
    * @return Scan JSON object
    */
   @GET
-  public Scans getTables() {
+  public Scans getActiveScans() throws Exception {
     Scans scans = new Scans();
     ManagerMonitorInfo mmi = monitor.getMmi();
     if (mmi == null) {
@@ -59,13 +60,17 @@ public class ScansResource {
 
     Map<HostAndPort,ScanStats> entry = monitor.getScans();
 
-    // Adds new scans to the array
+    // Adds new scans to the array for tservers known to the Manager
     for (TabletServerStatus tserverInfo : mmi.getTServerInfo()) {
       ScanStats stats = entry.get(HostAndPort.fromString(tserverInfo.name));
       if (stats != null) {
-        scans.addScan(new ScanInformation(tserverInfo, stats.scanCount, stats.oldestScan));
+        scans.addScan(new ScanInformation(tserverInfo.name, stats));
       }
     }
+    // Add all ScanServer entries, the Manager is not aware of the ScanServers
+    monitor.getScanServerScans().forEach((k, v) -> {
+      scans.addScan(new ScanInformation(k.toString(), v));
+    });
     return scans;
   }
 }

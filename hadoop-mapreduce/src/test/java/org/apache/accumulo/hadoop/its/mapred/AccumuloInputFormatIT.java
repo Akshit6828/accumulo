@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,9 +18,10 @@
  */
 package org.apache.accumulo.hadoop.its.mapred;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.Collection;
@@ -53,12 +54,12 @@ import org.apache.hadoop.mapred.Reporter;
 import org.apache.hadoop.mapred.lib.NullOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 public class AccumuloInputFormatIT extends AccumuloClusterHarness {
 
-  @BeforeClass
+  @BeforeAll
   public static void setupClass() {
     System.setProperty("hadoop.tmp.dir", System.getProperty("user.dir") + "/target/hadoop-tmp");
   }
@@ -76,10 +77,11 @@ public class AccumuloInputFormatIT extends AccumuloClusterHarness {
       @Override
       public void map(Key k, Value v, OutputCollector<Key,Value> output, Reporter reporter) {
         try {
-          if (key != null)
-            assertEquals(key.getRow().toString(), new String(v.get()));
+          if (key != null) {
+            assertEquals(key.getRow().toString(), new String(v.get(), UTF_8));
+          }
           assertEquals(k.getRow(), new Text(String.format("%09x", count + 1)));
-          assertEquals(new String(v.get()), String.format("%09x", count));
+          assertEquals(new String(v.get(), UTF_8), String.format("%09x", count));
         } catch (AssertionError e) {
           e1 = e;
           e1Count++;
@@ -124,9 +126,8 @@ public class AccumuloInputFormatIT extends AccumuloClusterHarness {
 
       job.setInputFormat(AccumuloInputFormat.class);
 
-      InputFormatBuilder.InputFormatOptions<JobConf> opts =
-          AccumuloInputFormat.configure().clientProperties(getClientInfo().getProperties())
-              .table(table).auths(Authorizations.EMPTY);
+      InputFormatBuilder.InputFormatOptions<JobConf> opts = AccumuloInputFormat.configure()
+          .clientProperties(getClientProps()).table(table).auths(Authorizations.EMPTY);
 
       if (sample) {
         opts.samplerConfiguration(SAMPLER_CONFIG);
@@ -221,9 +222,8 @@ public class AccumuloInputFormatIT extends AccumuloClusterHarness {
     try (AccumuloClient accumuloClient = Accumulo.newClient().from(getClientProps()).build()) {
       accumuloClient.tableOperations().create(table);
 
-      AccumuloInputFormat.configure().clientProperties(getClientInfo().getProperties()).table(table)
-          .auths(auths).fetchColumns(fetchColumns).scanIsolation(true).localIterators(true)
-          .store(job);
+      AccumuloInputFormat.configure().clientProperties(getClientProps()).table(table).auths(auths)
+          .fetchColumns(fetchColumns).scanIsolation(true).localIterators(true).store(job);
 
       AccumuloInputFormat aif = new AccumuloInputFormat();
 

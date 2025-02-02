@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -50,8 +50,9 @@ public class RowFunctor implements KeyFunctor {
       return false;
     }
 
-    if (range.getStartKey().equals(range.getEndKey(), keyDepth))
+    if (range.getStartKey().equals(range.getEndKey(), keyDepth)) {
       return true;
+    }
 
     // include everything but the deleted flag in the comparison...
     return range.getStartKey().followingKey(keyDepth).equals(range.getEndKey(),

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,11 +18,12 @@
  */
 package org.apache.accumulo.test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.File;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -44,12 +45,12 @@ import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.Value;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.DataFileColumnFamily;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.LogColumnFamily;
 import org.apache.accumulo.core.security.Authorizations;
-import org.apache.accumulo.core.spi.fs.PerTableVolumeChooser;
+import org.apache.accumulo.core.spi.fs.DelegatingChooser;
 import org.apache.accumulo.core.spi.fs.PreferredVolumeChooser;
 import org.apache.accumulo.core.spi.fs.RandomVolumeChooser;
 import org.apache.accumulo.core.spi.fs.VolumeChooserEnvironment.Scope;
@@ -59,13 +60,13 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class VolumeChooserIT extends ConfigurableMacBase {
 
   private static final String TP = Property.TABLE_ARBITRARY_PROP_PREFIX.getKey();
   static final String PREFERRED_CHOOSER_PROP = TP + "volume.preferred";
-  static final String PERTABLE_CHOOSER_PROP = TP + "volume.chooser";
+  public static final String PERTABLE_CHOOSER_PROP = TP + "volume.chooser";
 
   private static final String GP = Property.GENERAL_ARBITRARY_PROP_PREFIX.getKey();
 
@@ -88,21 +89,21 @@ public class VolumeChooserIT extends ConfigurableMacBase {
   private String systemPreferredVolumes;
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 120;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(2);
   }
 
   @Override
   public void configure(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
     // Get 2 tablet servers
-    cfg.setNumTservers(2);
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(2);
     namespace1 = "ns_" + getUniqueNames(2)[0];
     namespace2 = "ns_" + getUniqueNames(2)[1];
 
-    // Set the general volume chooser to the PerTableVolumeChooser so that different choosers can be
+    // Set the general volume chooser to the DelegatingChooser so that different choosers can be
     // specified
     Map<String,String> siteConfig = new HashMap<>();
-    siteConfig.put(Property.GENERAL_VOLUME_CHOOSER.getKey(), PerTableVolumeChooser.class.getName());
+    siteConfig.put(Property.GENERAL_VOLUME_CHOOSER.getKey(), DelegatingChooser.class.getName());
     // if a table doesn't have a volume chooser, use the preferred volume chooser
     siteConfig.put(PERTABLE_CHOOSER_PROP, PreferredVolumeChooser.class.getName());
 
@@ -142,8 +143,9 @@ public class VolumeChooserIT extends ConfigurableMacBase {
       throws TableNotFoundException, AccumuloException, AccumuloSecurityException {
     // Add 10 splits to the table
     SortedSet<Text> partitions = new TreeSet<>();
-    for (String s : alpha_rows)
+    for (String s : alpha_rows) {
       partitions.add(new Text(s));
+    }
     accumuloClient.tableOperations().addSplits(tableName, partitions);
   }
 
@@ -156,8 +158,8 @@ public class VolumeChooserIT extends ConfigurableMacBase {
     try (Scanner scanner = accumuloClient.createScanner(tableName, Authorizations.EMPTY)) {
       int i = 0;
       for (Entry<Key,Value> entry : scanner) {
-        assertEquals("Data read is not data written", alpha_rows[i++],
-            entry.getKey().getRow().toString());
+        assertEquals(alpha_rows[i++], entry.getKey().getRow().toString(),
+            "Data read is not data written");
       }
     }
   }
@@ -182,7 +184,8 @@ public class VolumeChooserIT extends ConfigurableMacBase {
 
     TreeSet<String> volumesSeen = new TreeSet<>();
     int fileCount = 0;
-    try (Scanner scanner = accumuloClient.createScanner(MetadataTable.NAME, Authorizations.EMPTY)) {
+    try (Scanner scanner =
+        accumuloClient.createScanner(AccumuloTable.METADATA.tableName(), Authorizations.EMPTY)) {
       scanner.setRange(tableRange);
       scanner.fetchColumnFamily(DataFileColumnFamily.NAME);
       for (Entry<Key,Value> entry : scanner) {
@@ -193,21 +196,20 @@ public class VolumeChooserIT extends ConfigurableMacBase {
             inVolume = true;
           }
         }
-        assertTrue(
-            "Data not written to the correct volumes.  " + entry.getKey().getColumnQualifier(),
-            inVolume);
+        assertTrue(inVolume,
+            "Data not written to the correct volumes.  " + entry.getKey().getColumnQualifier());
         fileCount++;
       }
     }
-    assertEquals(
-        "Did not see all the volumes. volumes: " + volumes + " volumes seen: " + volumesSeen,
-        volumes.size(), volumesSeen.size());
-    assertEquals("Wrong number of files", 26, fileCount);
+    assertEquals(volumes.size(), volumesSeen.size(),
+        "Did not see all the volumes. volumes: " + volumes + " volumes seen: " + volumesSeen);
+    assertEquals(26, fileCount, "Wrong number of files");
   }
 
   public static void verifyNoVolumes(AccumuloClient accumuloClient, Range tableRange)
       throws Exception {
-    try (Scanner scanner = accumuloClient.createScanner(MetadataTable.NAME, Authorizations.EMPTY)) {
+    try (Scanner scanner =
+        accumuloClient.createScanner(AccumuloTable.METADATA.tableName(), Authorizations.EMPTY)) {
       scanner.setRange(tableRange);
       scanner.fetchColumnFamily(DataFileColumnFamily.NAME);
       for (Entry<Key,Value> entry : scanner) {
@@ -248,19 +250,20 @@ public class VolumeChooserIT extends ConfigurableMacBase {
     Collections.addAll(volumes, vol.split(","));
 
     TreeSet<String> volumesSeen = new TreeSet<>();
-    try (Scanner scanner = accumuloClient.createScanner(MetadataTable.NAME, Authorizations.EMPTY)) {
+    try (Scanner scanner =
+        accumuloClient.createScanner(AccumuloTable.METADATA.tableName(), Authorizations.EMPTY)) {
       scanner.setRange(tableRange);
       scanner.fetchColumnFamily(LogColumnFamily.NAME);
       for (Entry<Key,Value> entry : scanner) {
         boolean inVolume = false;
         for (String volume : volumes) {
-          if (entry.getKey().getColumnQualifier().toString().contains(volume))
+          if (entry.getKey().getColumnQualifier().toString().contains(volume)) {
             volumesSeen.add(volume);
+          }
           inVolume = true;
         }
-        assertTrue(
-            "Data not written to the correct volumes.  " + entry.getKey().getColumnQualifier(),
-            inVolume);
+        assertTrue(inVolume,
+            "Data not written to the correct volumes.  " + entry.getKey().getColumnQualifier());
       }
     }
   }

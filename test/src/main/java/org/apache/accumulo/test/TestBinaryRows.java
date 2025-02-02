@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,11 +19,10 @@
 package org.apache.accumulo.test;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
 
-import java.security.SecureRandom;
 import java.util.Iterator;
 import java.util.Map.Entry;
-import java.util.Random;
 import java.util.TreeSet;
 
 import org.apache.accumulo.core.client.Accumulo;
@@ -48,8 +47,9 @@ public class TestBinaryRows {
     // safely build Byte.SIZE number of 1s as a long; not that I think Byte.SIZE will ever be
     // anything but 8, but just for fun
     long b = 1;
-    for (int i = 0; i < Byte.SIZE; ++i)
+    for (int i = 0; i < Byte.SIZE; ++i) {
       b |= (1L << i);
+    }
     byteOnes = b;
   }
 
@@ -57,22 +57,25 @@ public class TestBinaryRows {
     byte[] ba = new byte[Long.SIZE / Byte.SIZE];
 
     // parse long into a sequence of bytes
-    for (int i = 0; i < ba.length; ++i)
+    for (int i = 0; i < ba.length; ++i) {
       ba[i] = (byte) (byteOnes & (l >>> (Byte.SIZE * (ba.length - i - 1))));
+    }
 
     return ba;
   }
 
   static long decodeLong(byte[] ba) {
     // validate byte array
-    if (ba.length > Long.SIZE / Byte.SIZE)
+    if (ba.length > Long.SIZE / Byte.SIZE) {
       throw new IllegalArgumentException(
           "Byte array of size " + ba.length + " is too big to hold a long");
+    }
 
     // build the long from the bytes
     long l = 0;
-    for (int i = 0; i < ba.length; ++i)
+    for (int i = 0; i < ba.length; ++i) {
       l |= (byteOnes & ba[i]) << (Byte.SIZE * (ba.length - i - 1));
+    }
 
     return l;
   }
@@ -160,12 +163,10 @@ public class TestBinaryRows {
     } else if (opts.mode.equals("randomLookups")) {
       int numLookups = 1000;
 
-      Random r = new SecureRandom();
-
       long t1 = System.currentTimeMillis();
 
       for (int i = 0; i < numLookups; i++) {
-        long row = ((r.nextLong() & 0x7fffffffffffffffL) % opts.num) + opts.start;
+        long row = ((RANDOM.get().nextLong() & 0x7fffffffffffffffL) % opts.num) + opts.start;
 
         try (Scanner s = accumuloClient.createScanner(opts.tableName, opts.auths)) {
           Key startKey = new Key(encodeLong(row), CF_BYTES, CQ_BYTES, new byte[0], Long.MAX_VALUE);

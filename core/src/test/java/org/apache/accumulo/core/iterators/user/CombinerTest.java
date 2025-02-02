@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,10 +18,10 @@
  */
 package org.apache.accumulo.core.iterators.user;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -48,12 +48,12 @@ import org.apache.accumulo.core.iterators.LongCombiner.FixedLenEncoder;
 import org.apache.accumulo.core.iterators.LongCombiner.StringEncoder;
 import org.apache.accumulo.core.iterators.LongCombiner.VarLenEncoder;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
-import org.apache.accumulo.core.iterators.SortedMapIterator;
 import org.apache.accumulo.core.iterators.TypedValueCombiner;
 import org.apache.accumulo.core.iterators.ValueFormatException;
 import org.apache.accumulo.core.iteratorsImpl.system.MultiIterator;
+import org.apache.accumulo.core.iteratorsImpl.system.SortedMapIterator;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class CombinerTest {
 
@@ -685,8 +685,9 @@ public class CombinerTest {
 
   public static void assertBytesEqual(byte[] a, byte[] b) {
     assertEquals(a.length, b.length);
-    for (int i = 0; i < a.length; i++)
+    for (int i = 0; i < a.length; i++) {
       assertEquals(a[i], b[i]);
+    }
   }
 
   public static void sumArray(Class<? extends Encoder<List<Long>>> encoderClass,
@@ -706,7 +707,8 @@ public class CombinerTest {
     SummingArrayCombiner.setEncodingType(is, type);
     Combiner.setColumns(is, Collections.singletonList(new IteratorSetting.Column("cf001")));
 
-    ai.init(new SortedMapIterator(tm1), is.getOptions(), SCAN_IE);
+    SortedMapIterator sortedMapIterator = new SortedMapIterator(tm1);
+    ai.init(sortedMapIterator, is.getOptions(), SCAN_IE);
     ai.seek(new Range(), EMPTY_COL_FAMS, false);
 
     assertTrue(ai.hasTop());
@@ -721,7 +723,7 @@ public class CombinerTest {
     SummingArrayCombiner.setEncodingType(is, encoderClass);
     Combiner.setColumns(is, Collections.singletonList(new IteratorSetting.Column("cf001")));
 
-    ai.init(new SortedMapIterator(tm1), is.getOptions(), SCAN_IE);
+    ai.init(sortedMapIterator, is.getOptions(), SCAN_IE);
     ai.seek(new Range(), EMPTY_COL_FAMS, false);
 
     assertTrue(ai.hasTop());
@@ -736,7 +738,7 @@ public class CombinerTest {
     SummingArrayCombiner.setEncodingType(is, encoderClass.getName());
     Combiner.setColumns(is, Collections.singletonList(new IteratorSetting.Column("cf001")));
 
-    ai.init(new SortedMapIterator(tm1), is.getOptions(), SCAN_IE);
+    ai.init(sortedMapIterator, is.getOptions(), SCAN_IE);
     ai.seek(new Range(), EMPTY_COL_FAMS, false);
 
     assertTrue(ai.hasTop());
@@ -751,19 +753,17 @@ public class CombinerTest {
     SummingArrayCombiner.setEncodingType(is, SummingCombiner.VAR_LEN_ENCODER.getClass().getName());
     Combiner.setColumns(is, Collections.singletonList(new IteratorSetting.Column("cf001")));
 
-    try {
-      ai.init(new SortedMapIterator(tm1), is.getOptions(), SCAN_IE);
-      fail();
-    } catch (IllegalArgumentException e) {}
+    final var isOptions = is.getOptions();
+    assertThrows(IllegalArgumentException.class,
+        () -> ai.init(sortedMapIterator, isOptions, SCAN_IE));
 
     is.clearOptions();
     SummingArrayCombiner.setEncodingType(is, BadEncoder.class.getName());
     Combiner.setColumns(is, Collections.singletonList(new IteratorSetting.Column("cf001")));
 
-    try {
-      ai.init(new SortedMapIterator(tm1), is.getOptions(), SCAN_IE);
-      fail();
-    } catch (IllegalArgumentException e) {}
+    final var isOptions1 = is.getOptions();
+    assertThrows(IllegalArgumentException.class,
+        () -> ai.init(sortedMapIterator, isOptions1, SCAN_IE));
   }
 
   public static class BadEncoder implements Encoder<List<Long>> {
@@ -865,15 +865,16 @@ public class CombinerTest {
 
     ai.init(new SortedMapIterator(input), is.getOptions(), env);
 
-    if (deepCopy)
+    if (deepCopy) {
       assertEquals(expected, readAll(ai.deepCopy(env)));
+    }
     assertEquals(expected, readAll(ai));
 
     long logSize = CombinerTestUtil.cacheSize();
     if (expectedLog) {
-      assertTrue("Expected >0 log messages, but got : " + logSize, logSize > 0);
+      assertTrue(logSize > 0, "Expected >0 log messages, but got : " + logSize);
     } else {
-      assertEquals("Expected 0 log messages, but got : " + logSize, 0, logSize);
+      assertEquals(0, logSize, "Expected 0 log messages, but got : " + logSize);
     }
   }
 
@@ -935,7 +936,8 @@ public class CombinerTest {
     assertTrue(summingArrayCombiner.validateOptions(iteratorSetting.getOptions()));
 
     summingArrayCombiner.init(new SortedMapIterator(tm1), iteratorSetting.getOptions(), SCAN_IE);
-    summingArrayCombiner.seek(new Range(), EMPTY_COL_FAMS, false);
+    final Range range = new Range();
+    summingArrayCombiner.seek(range, EMPTY_COL_FAMS, false);
 
     assertTrue(summingArrayCombiner.hasTop());
     assertEquals(newKey(1, 1, 1, 3), summingArrayCombiner.getTopKey());
@@ -950,9 +952,7 @@ public class CombinerTest {
     assertTrue(summingArrayCombiner.validateOptions(iteratorSetting.getOptions()));
 
     summingArrayCombiner.init(new SortedMapIterator(tm1), iteratorSetting.getOptions(), SCAN_IE);
-    try {
-      summingArrayCombiner.seek(new Range(), EMPTY_COL_FAMS, false);
-      fail("ValueFormatException should have been thrown");
-    } catch (ValueFormatException e) {}
+    assertThrows(ValueFormatException.class,
+        () -> summingArrayCombiner.seek(range, EMPTY_COL_FAMS, false));
   }
 }

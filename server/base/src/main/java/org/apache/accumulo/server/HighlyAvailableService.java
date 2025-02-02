@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -31,4 +31,21 @@ public interface HighlyAvailableService {
    */
   boolean isActiveService();
 
+  /**
+   * Is this service instance currently in the process of upgrading.
+   *
+   * @return True if the service is upgrading, false otherwise.
+   */
+  default boolean isUpgrading() {
+    return false;
+  }
+
+  /**
+   * Get the name of the service
+   *
+   * @return service name
+   */
+  default String getServiceName() {
+    return this.getClass().getSimpleName();
+  }
 }

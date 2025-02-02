@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,66 +18,37 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.BatchWriter;
 import org.apache.accumulo.core.client.Scanner;
-import org.apache.accumulo.core.conf.ConfigurationTypeHelper;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
+import org.apache.accumulo.test.util.Wait;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Iterators;
+import org.junit.jupiter.api.Test;
 
 public class DeleteEverythingIT extends AccumuloClusterHarness {
 
   @Override
-  public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
-    Map<String,String> siteConfig = cfg.getSiteConfig();
-    siteConfig.put(Property.TSERV_MAJC_DELAY.getKey(), "1s");
-    cfg.setSiteConfig(siteConfig);
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(1);
   }
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 60;
-  }
-
-  private String majcDelay;
-
-  @Before
-  public void updateMajcDelay() throws Exception {
-    try (AccumuloClient c = Accumulo.newClient().from(getClientProps()).build()) {
-      majcDelay =
-          c.instanceOperations().getSystemConfiguration().get(Property.TSERV_MAJC_DELAY.getKey());
-      c.instanceOperations().setProperty(Property.TSERV_MAJC_DELAY.getKey(), "1s");
-      if (getClusterType() == ClusterType.STANDALONE) {
-        // Gotta wait for the cluster to get out of the default sleep value
-        Thread.sleep(ConfigurationTypeHelper.getTimeInMillis(majcDelay));
-      }
-    }
-  }
-
-  @After
-  public void resetMajcDelay() throws Exception {
-    try (AccumuloClient c = Accumulo.newClient().from(getClientProps()).build()) {
-      c.instanceOperations().setProperty(Property.TSERV_MAJC_DELAY.getKey(), majcDelay);
-    }
+  public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
+    Map<String,String> siteConfig = cfg.getSiteConfig();
+    cfg.setSiteConfig(siteConfig);
   }
 
   @Test
@@ -102,22 +73,19 @@ public class DeleteEverythingIT extends AccumuloClusterHarness {
 
       try (Scanner scanner = c.createScanner(tableName, Authorizations.EMPTY)) {
         scanner.setRange(new Range());
-        int count = Iterators.size(scanner.iterator());
-        assertEquals("count == " + count, 0, count);
+
+        assertTrue(scanner.stream().findAny().isEmpty());
         c.tableOperations().flush(tableName, null, null, true);
 
         c.tableOperations().setProperty(tableName, Property.TABLE_MAJC_RATIO.getKey(), "1.0");
-        sleepUninterruptibly(4, TimeUnit.SECONDS);
+        Wait.waitFor(() -> FunctionalTestUtils.countRFiles(c, tableName) == 0);
 
         FunctionalTestUtils.checkRFiles(c, tableName, 1, 1, 0, 0);
 
         bw.close();
 
-        count = Iterables.size(scanner);
+        assertTrue(scanner.stream().findAny().isEmpty());
 
-        if (count != 0) {
-          throw new Exception("count == " + count);
-        }
       }
     }
   }

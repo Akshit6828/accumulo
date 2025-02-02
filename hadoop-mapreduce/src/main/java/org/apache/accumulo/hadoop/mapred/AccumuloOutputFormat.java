@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -53,8 +53,9 @@ public class AccumuloOutputFormat implements OutputFormat<Text,Mutation> {
     Properties clientProps = OutputConfigurator.getClientProperties(CLASS, job);
     AuthenticationToken token = ClientProperty.getAuthenticationToken(clientProps);
     try (AccumuloClient c = Accumulo.newClient().from(clientProps).build()) {
-      if (!c.securityOperations().authenticateUser(c.whoami(), token))
+      if (!c.securityOperations().authenticateUser(c.whoami(), token)) {
         throw new IOException("Unable to authenticate user");
+      }
     } catch (AccumuloException | AccumuloSecurityException e) {
       throw new IOException(e);
     }

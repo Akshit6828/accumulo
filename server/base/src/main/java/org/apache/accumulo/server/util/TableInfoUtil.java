@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -21,27 +21,23 @@ package org.apache.accumulo.server.util;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.accumulo.core.manager.thrift.Compacting;
 import org.apache.accumulo.core.manager.thrift.ManagerMonitorInfo;
-import org.apache.accumulo.core.master.thrift.Compacting;
-import org.apache.accumulo.core.master.thrift.TableInfo;
-import org.apache.accumulo.core.master.thrift.TabletServerStatus;
+import org.apache.accumulo.core.manager.thrift.TableInfo;
+import org.apache.accumulo.core.manager.thrift.TabletServerStatus;
 
 public class TableInfoUtil {
 
   public static void add(TableInfo total, TableInfo more) {
-    if (total.minors == null)
+    if (total.minors == null) {
       total.minors = new Compacting();
-    if (total.majors == null)
-      total.majors = new Compacting();
-    if (total.scans == null)
+    }
+    if (total.scans == null) {
       total.scans = new Compacting();
+    }
     if (more.minors != null) {
       total.minors.running += more.minors.running;
       total.minors.queued += more.minors.queued;
-    }
-    if (more.majors != null) {
-      total.majors.running += more.majors.running;
-      total.majors.queued += more.majors.queued;
     }
     if (more.scans != null) {
       total.scans.running += more.scans.running;
@@ -60,7 +56,6 @@ public class TableInfoUtil {
 
   public static TableInfo summarizeTableStats(TabletServerStatus status) {
     TableInfo summary = new TableInfo();
-    summary.majors = new Compacting();
     summary.minors = new Compacting();
     summary.scans = new Compacting();
     for (TableInfo rates : status.tableMap.values()) {

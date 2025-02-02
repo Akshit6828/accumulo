@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,10 +19,9 @@
 package org.apache.accumulo.shell.commands;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
 
-import java.security.SecureRandom;
 import java.util.Base64;
-import java.util.Random;
 
 import org.apache.accumulo.shell.Shell;
 import org.apache.accumulo.shell.Shell.Command;
@@ -32,7 +31,6 @@ import org.apache.commons.cli.CommandLine;
 import org.jline.utils.InfoCmp;
 
 public class HiddenCommand extends Command {
-  private static Random rand = new SecureRandom();
 
   @Override
   public String description() {
@@ -42,7 +40,7 @@ public class HiddenCommand extends Command {
   @Override
   public int execute(final String fullCommand, final CommandLine cl, final Shell shellState)
       throws Exception {
-    if (rand.nextInt(10) == 0) {
+    if (RANDOM.get().nextInt(10) == 0) {
       shellState.getTerminal().puts(InfoCmp.Capability.bell);
       shellState.getWriter().println();
       shellState.getWriter()

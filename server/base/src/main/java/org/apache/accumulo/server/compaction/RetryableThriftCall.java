@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,12 +18,10 @@
  */
 package org.apache.accumulo.server.compaction;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import java.time.Duration;
 
-import java.util.concurrent.TimeUnit;
-
-import org.apache.accumulo.fate.util.Retry;
-import org.apache.accumulo.fate.util.Retry.NeedsRetryDelay;
+import org.apache.accumulo.core.util.Retry;
+import org.apache.accumulo.core.util.Retry.NeedsRetryDelay;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,9 +32,7 @@ public class RetryableThriftCall<T> {
 
     private static final long serialVersionUID = 1L;
 
-    public RetriesExceededException() {
-      super();
-    }
+    public RetriesExceededException() {}
 
     public RetriesExceededException(String message, Throwable cause, boolean enableSuppression,
         boolean writableStackTrace) {
@@ -66,14 +62,10 @@ public class RetryableThriftCall<T> {
   /**
    * RetryableThriftCall constructor
    *
-   * @param start
-   *          initial wait time
-   * @param maxWaitTime
-   *          max wait time
-   * @param maxNumRetries
-   *          number of times to retry, 0 to retry forever
-   * @param function
-   *          function to execute
+   * @param start initial wait time
+   * @param maxWaitTime max wait time
+   * @param maxNumRetries number of times to retry, 0 to retry forever
+   * @param function function to execute
    */
   public RetryableThriftCall(long start, long maxWaitTime, int maxNumRetries,
       RetryableThriftFunction<T> function) {
@@ -84,8 +76,8 @@ public class RetryableThriftCall<T> {
     } else {
       builder = Retry.builder().maxRetries(maxNumRetries);
     }
-    this.retry = builder.retryAfter(start, MILLISECONDS).incrementBy(0, MILLISECONDS)
-        .maxWait(maxWaitTime, MILLISECONDS).backOffFactor(2).logInterval(1, TimeUnit.MINUTES)
+    this.retry = builder.retryAfter(Duration.ofMillis(start)).incrementBy(Duration.ZERO)
+        .maxWait(Duration.ofMillis(maxWaitTime)).backOffFactor(2).logInterval(Duration.ofMinutes(1))
         .createRetry();
   }
 
@@ -96,23 +88,29 @@ public class RetryableThriftCall<T> {
    * RuntimeException is thrown when it has exceeded he maxNumRetries parameter.
    *
    * @return T
-   * @throws RetriesExceededException
-   *           when maximum number of retries has been exceeded and the cause is set to the last
-   *           TException
+   * @throws RetriesExceededException when maximum number of retries has been exceeded and the cause
+   *         is set to the last TException
    */
   public T run() throws RetriesExceededException {
     T result = null;
+    var errorsSeen = 0;
     do {
       try {
         result = function.execute();
       } catch (TException e) {
-        LOG.error("Error in Thrift function, retrying ...", e);
+        errorsSeen++;
+        // Log higher levels of errors on every 5th error
+        if (errorsSeen >= 5 && errorsSeen % 5 == 0) {
+          LOG.warn("Error in Thrift function, retrying ...", e);
+        } else {
+          LOG.debug("Error in Thrift function, retrying ...", e);
+        }
       }
       if (result == null) {
         if (this.retry.canRetry()) {
           this.retry.useRetry();
           try {
-            this.retry.waitForNextAttempt();
+            this.retry.waitForNextAttempt(LOG, "making a thrift RPC");
           } catch (InterruptedException e) {
             LOG.error("Error waiting for next attempt: {}, retrying now.", e.getMessage(), e);
           }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -45,8 +45,9 @@ public class StopWatch<K extends Enum<K>> {
     }
 
     Long existingTime = totalTime.get(timer);
-    if (existingTime == null)
+    if (existingTime == null) {
       existingTime = 0L;
+    }
 
     totalTime.put(timer, existingTime + (System.currentTimeMillis() - st));
     startTime.remove(timer);
@@ -54,15 +55,17 @@ public class StopWatch<K extends Enum<K>> {
 
   public synchronized long get(K timer) {
     Long existingTime = totalTime.get(timer);
-    if (existingTime == null)
+    if (existingTime == null) {
       existingTime = 0L;
+    }
     return existingTime;
   }
 
   public synchronized double getSecs(K timer) {
     Long existingTime = totalTime.get(timer);
-    if (existingTime == null)
+    if (existingTime == null) {
       existingTime = 0L;
+    }
     return existingTime / 1000.0;
   }
 

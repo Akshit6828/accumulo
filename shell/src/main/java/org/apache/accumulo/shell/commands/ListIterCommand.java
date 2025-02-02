@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -71,8 +71,9 @@ public class ListIterCommand extends Command {
     final boolean allScopes = cl.hasOption(allScopesOpt.getOpt());
     Set<IteratorScope> desiredScopes = new HashSet<>();
     for (IteratorScope scope : IteratorScope.values()) {
-      if (allScopes || cl.hasOption(scopeOpts.get(scope).getOpt()))
+      if (allScopes || cl.hasOption(scopeOpts.get(scope).getOpt())) {
         desiredScopes.add(scope);
+      }
     }
     if (desiredScopes.isEmpty()) {
       throw new IllegalArgumentException("You must select at least one scope to configure");
@@ -107,7 +108,7 @@ public class ListIterCommand extends Command {
       }
     }
     sb.append("-");
-    shellState.getWriter().println(sb.toString());
+    shellState.getWriter().println(sb);
 
     return 0;
   }

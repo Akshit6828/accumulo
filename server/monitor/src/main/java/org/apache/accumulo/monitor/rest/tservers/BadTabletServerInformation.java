@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -39,10 +39,8 @@ public class BadTabletServerInformation {
   /**
    * Stores a bad tserver
    *
-   * @param id
-   *          ID of the tserver
-   * @param status
-   *          Status of the tserver
+   * @param id ID of the tserver
+   * @param status Status of the tserver
    */
   public BadTabletServerInformation(String id, String status) {
     this.id = id;

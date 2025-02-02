@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,12 +19,13 @@
 package org.apache.accumulo.core.clientImpl;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
+import java.time.Duration;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.Scanner;
@@ -51,8 +52,8 @@ public class ScannerImpl extends ScannerOptions implements Scanner {
   // and just query for the next highest row from the tablet server
 
   private final ClientContext context;
-  private Authorizations authorizations;
-  private TableId tableId;
+  private final Authorizations authorizations;
+  private final TableId tableId;
 
   private int size;
 
@@ -71,7 +72,7 @@ public class ScannerImpl extends ScannerOptions implements Scanner {
   // and does not read all of the data. For this case do not want iterator tracking to consume too
   // much memory. Also it would be best to avoid an RPC storm of close methods for thousands
   // sessions that may have timed out.
-  private Map<ScannerIterator,Long> iters = new LinkedHashMap<>(MAX_ENTRIES + 1, .75F, true) {
+  private final Map<ScannerIterator,Long> iters = new LinkedHashMap<>(MAX_ENTRIES + 1, .75F, true) {
     private static final long serialVersionUID = 1L;
 
     // This method is called just after a new entry has been added
@@ -103,8 +104,9 @@ public class ScannerImpl extends ScannerOptions implements Scanner {
   }
 
   private synchronized void ensureOpen() {
-    if (closed)
-      throw new IllegalArgumentException("Scanner is closed");
+    if (closed) {
+      throw new IllegalStateException("Scanner is closed");
+    }
   }
 
   public ScannerImpl(ClientContext context, TableId tableId, Authorizations authorizations) {
@@ -117,6 +119,16 @@ public class ScannerImpl extends ScannerOptions implements Scanner {
     this.authorizations = authorizations;
 
     this.size = Constants.SCAN_BATCH_SIZE;
+  }
+
+  public ClientContext getClientContext() {
+    ensureOpen();
+    return context;
+  }
+
+  public TableId getTableId() {
+    ensureOpen();
+    return tableId;
   }
 
   @Override
@@ -135,10 +147,11 @@ public class ScannerImpl extends ScannerOptions implements Scanner {
   @Override
   public synchronized void setBatchSize(int size) {
     ensureOpen();
-    if (size > 0)
+    if (size > 0) {
       this.size = size;
-    else
+    } else {
       throw new IllegalArgumentException("size must be greater than zero");
+    }
   }
 
   @Override
@@ -151,7 +164,8 @@ public class ScannerImpl extends ScannerOptions implements Scanner {
   public synchronized Iterator<Entry<Key,Value>> iterator() {
     ensureOpen();
     ScannerIterator iter = new ScannerIterator(context, tableId, authorizations, range, size,
-        getTimeout(TimeUnit.SECONDS), this, isolated, readaheadThreshold, new Reporter());
+        Duration.ofMillis(getTimeout(MILLISECONDS)), this, isolated, readaheadThreshold,
+        new Reporter());
 
     iters.put(iter, iterCount++);
 

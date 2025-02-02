@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,19 +18,19 @@
  */
 package org.apache.accumulo.test;
 
-import java.security.SecureRandom;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Random;
 
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.TabletId;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.spi.balancer.BalancerEnvironment;
 import org.apache.accumulo.core.spi.balancer.TabletBalancer;
 import org.apache.accumulo.core.spi.balancer.data.TServerStatus;
@@ -54,7 +54,6 @@ public class ChaoticLoadBalancer implements TabletBalancer {
   private static final Logger log = LoggerFactory.getLogger(ChaoticLoadBalancer.class);
 
   protected BalancerEnvironment environment;
-  Random r = new SecureRandom();
 
   public ChaoticLoadBalancer() {}
 
@@ -86,7 +85,7 @@ public class ChaoticLoadBalancer implements TabletBalancer {
     }
 
     for (TabletId tabletId : params.unassignedTablets().keySet()) {
-      int index = r.nextInt(tServerArray.size());
+      int index = RANDOM.get().nextInt(tServerArray.size());
       TabletServerId dest = tServerArray.get(index);
       params.addAssignment(tabletId, dest);
       long remaining = toAssign.get(dest) - 1;
@@ -116,7 +115,7 @@ public class ChaoticLoadBalancer implements TabletBalancer {
     }
     problemReporter.clearProblemReportTimes();
 
-    boolean moveMetadata = r.nextInt(4) == 0;
+    boolean moveMetadata = RANDOM.get().nextInt(4) == 0;
     long totalTablets = 0;
     for (Entry<TabletServerId,TServerStatus> e : params.currentStatus().entrySet()) {
       long tabletCount = 0;
@@ -134,25 +133,30 @@ public class ChaoticLoadBalancer implements TabletBalancer {
     for (Entry<TabletServerId,TServerStatus> e : params.currentStatus().entrySet()) {
       for (String tableId : e.getValue().getTableMap().keySet()) {
         TableId id = TableId.of(tableId);
-        if (!moveMetadata && MetadataTable.ID.equals(id))
+        if (!moveMetadata && AccumuloTable.METADATA.tableId().equals(id)) {
           continue;
+        }
         try {
           for (TabletStatistics ts : getOnlineTabletsForTable(e.getKey(), id)) {
-            int index = r.nextInt(underCapacityTServer.size());
+            int index = RANDOM.get().nextInt(underCapacityTServer.size());
             TabletServerId dest = underCapacityTServer.get(index);
-            if (dest.equals(e.getKey()))
+            if (dest.equals(e.getKey())) {
               continue;
+            }
             params.migrationsOut().add(new TabletMigration(ts.getTabletId(), e.getKey(), dest));
-            if (numTablets.put(dest, numTablets.get(dest) + 1) > avg)
+            if (numTablets.put(dest, numTablets.get(dest) + 1) > avg) {
               underCapacityTServer.remove(index);
+            }
             if (numTablets.put(e.getKey(), numTablets.get(e.getKey()) - 1) <= avg
-                && !underCapacityTServer.contains(e.getKey()))
+                && !underCapacityTServer.contains(e.getKey())) {
               underCapacityTServer.add(e.getKey());
+            }
 
             // We can get some craziness with only 1 tserver, so lets make sure there's always an
             // option!
-            if (underCapacityTServer.isEmpty())
+            if (underCapacityTServer.isEmpty()) {
               underCapacityTServer.addAll(numTablets.keySet());
+            }
           }
         } catch (AccumuloSecurityException e1) {
           // Shouldn't happen, but carry on if it does

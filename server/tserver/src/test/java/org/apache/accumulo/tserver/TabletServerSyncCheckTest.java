@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -17,6 +17,8 @@
  * under the License.
  */
 package org.apache.accumulo.tserver;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Collections;
 import java.util.Map;
@@ -34,20 +36,19 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class TabletServerSyncCheckTest {
   private static final String DFS_SUPPORT_APPEND = "dfs.support.append";
 
-  @Test(expected = RuntimeException.class)
+  @Test
   public void testFailureOnExplicitAppendFalseConf() {
     Configuration conf = new Configuration();
     conf.set(DFS_SUPPORT_APPEND, "false");
 
     FileSystem fs = new TestFileSystem(conf);
-    try (var vm = new TestVolumeManagerImpl(Map.of("foo", new VolumeImpl(fs, "/")))) {
-      vm.ensureSyncIsEnabled();
-    }
+    assertThrows(RuntimeException.class,
+        () -> new TestVolumeManagerImpl(Map.of("foo", new VolumeImpl(fs, "/"))));
   }
 
   private class TestFileSystem extends DistributedFileSystem {

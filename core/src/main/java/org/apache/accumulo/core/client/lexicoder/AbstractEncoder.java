@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,7 +23,7 @@ import static java.util.Objects.requireNonNull;
 
 /**
  * AbstractEncoder is an {@link Encoder} that implements all of Encoder's methods validating the
- * input, but has those methods defer logic to to a new method,
+ * input, but has those methods defer logic to a new method,
  * {@link #decodeUnchecked(byte[], int, int)}.
  *
  * @since 1.7.0
@@ -47,10 +47,9 @@ public abstract class AbstractEncoder<T> implements Encoder<T> {
    * Checks if the byte array is null, or if parameters exceed the bounds of the byte array, then
    * calls {@link #decodeUnchecked(byte[], int, int)}.
    *
-   * @throws java.lang.NullPointerException
-   *           if {@code b} is null
-   * @throws java.lang.IllegalArgumentException
-   *           if {@code offset + len} exceeds the length of {@code b}
+   * @throws java.lang.NullPointerException if {@code b} is null
+   * @throws java.lang.IllegalArgumentException if {@code offset + len} exceeds the length of
+   *         {@code b}
    */
   public T decode(byte[] b, int offset, int len) {
     requireNonNull(b, "cannot decode null byte array");

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -17,6 +17,8 @@
  * under the License.
  */
 package org.apache.accumulo.shell.commands;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,7 +53,7 @@ public class GetAuthsCommand extends Command {
   protected List<String> sortAuthorizations(Authorizations auths) {
     List<String> list = new ArrayList<>();
     for (byte[] auth : auths) {
-      list.add(new String(auth));
+      list.add(new String(auth, UTF_8));
     }
     list.sort(String.CASE_INSENSITIVE_ORDER);
     return list;

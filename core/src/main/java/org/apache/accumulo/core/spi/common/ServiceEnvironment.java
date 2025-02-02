@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -17,6 +17,8 @@
  * under the License.
  */
 package org.apache.accumulo.core.spi.common;
+
+import java.util.Map;
 
 import org.apache.accumulo.core.client.PluginEnvironment;
 import org.apache.accumulo.core.data.TableId;
@@ -39,6 +41,16 @@ public interface ServiceEnvironment extends PluginEnvironment {
    */
   interface Configuration extends PluginEnvironment.Configuration {
 
+    /**
+     * Creates a configuration object from a map of properties, this is useful for testing.
+     *
+     * @param includeDefaults If true will include accumulo's default properties and layer the
+     *        passed in map on top of these.
+     * @since 3.1.0
+     */
+    static Configuration from(Map<String,String> properties, boolean includeDefaults) {
+      return (Configuration) PluginEnvironment.Configuration.from(properties, includeDefaults);
+    }
   }
 
   /**

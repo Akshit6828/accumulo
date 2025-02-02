@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -21,38 +21,49 @@ package org.apache.accumulo.core.util.threads;
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.OptionalInt;
 
+import org.apache.accumulo.core.trace.TraceUtil;
+
 public class Threads {
+
+  public static final UncaughtExceptionHandler UEH = new AccumuloUncaughtExceptionHandler();
+
+  public static class AccumuloDaemonThread extends Thread {
+
+    public AccumuloDaemonThread(Runnable target, String name, UncaughtExceptionHandler ueh) {
+      super(target, name);
+      setDaemon(true);
+      setUncaughtExceptionHandler(ueh);
+    }
+
+    public AccumuloDaemonThread(String name) {
+      this(name, UEH);
+    }
+
+    private AccumuloDaemonThread(String name, UncaughtExceptionHandler ueh) {
+      super(name);
+      setDaemon(true);
+      setUncaughtExceptionHandler(ueh);
+    }
+
+  }
 
   public static Runnable createNamedRunnable(String name, Runnable r) {
     return new NamedRunnable(name, r);
   }
 
-  public static Runnable createNamedRunnable(String name, OptionalInt priority, Runnable r) {
-    return new NamedRunnable(name, priority, r);
-  }
-
-  private static final UncaughtExceptionHandler UEH = new AccumuloUncaughtExceptionHandler();
-
   public static Thread createThread(String name, Runnable r) {
-    return createThread(name, OptionalInt.empty(), r);
+    return createThread(name, OptionalInt.empty(), r, UEH);
   }
 
   public static Thread createThread(String name, OptionalInt priority, Runnable r) {
-    Thread thread = new Thread(r, name);
-    boolean prioritySet = false;
-    if (r instanceof NamedRunnable) {
-      NamedRunnable nr = (NamedRunnable) r;
-      if (nr.getPriority().isPresent()) {
-        thread.setPriority(nr.getPriority().getAsInt());
-        prioritySet = true;
-      }
-    }
-    // Don't override priority set in NamedRunnable, if set
-    if (priority.isPresent() && !prioritySet) {
-      thread.setPriority(priority.getAsInt());
-    }
-    thread.setDaemon(true);
-    thread.setUncaughtExceptionHandler(UEH);
+    return createThread(name, priority, r, UEH);
+  }
+
+  public static Thread createThread(String name, OptionalInt priority, Runnable r,
+      UncaughtExceptionHandler ueh) {
+    Thread thread = new AccumuloDaemonThread(TraceUtil.wrap(r), name, ueh);
+    priority.ifPresent(thread::setPriority);
     return thread;
   }
+
 }

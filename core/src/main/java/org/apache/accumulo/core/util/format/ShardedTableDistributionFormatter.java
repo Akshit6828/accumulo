@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -36,7 +36,7 @@ import org.apache.accumulo.core.data.Value;
  */
 public class ShardedTableDistributionFormatter extends AggregatingFormatter {
 
-  private Map<String,HashSet<String>> countsByDay = new HashMap<>();
+  private final Map<String,HashSet<String>> countsByDay = new HashMap<>();
 
   @Override
   protected void aggregateStats(Entry<Key,Value> entry) {
@@ -47,9 +47,9 @@ public class ShardedTableDistributionFormatter extends AggregatingFormatter {
       // Parse the day out of the row
       int semicolon = row.indexOf(";");
       String day = null;
-      if (semicolon == -1)
+      if (semicolon == -1) {
         day = "NULL    ";
-      else {
+      } else {
         semicolon++;
         day = row.substring(semicolon, semicolon + 8);
       }
@@ -63,8 +63,9 @@ public class ShardedTableDistributionFormatter extends AggregatingFormatter {
     StringBuilder buf = new StringBuilder();
     buf.append("DAY   \t\tSERVERS\n");
     buf.append("------\t\t-------\n");
-    for (String day : countsByDay.keySet())
+    for (String day : countsByDay.keySet()) {
       buf.append(day + "\t\t" + countsByDay.get(day).size() + "\n");
+    }
     return buf.toString();
   }
 

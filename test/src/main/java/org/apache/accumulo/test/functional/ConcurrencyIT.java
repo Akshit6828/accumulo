@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,11 +18,9 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
-
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
@@ -38,7 +36,7 @@ import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.Iterators;
 
@@ -71,15 +69,14 @@ public class ConcurrencyIT extends AccumuloClusterHarness {
   }
 
   @Override
-  public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
-    Map<String,String> siteConfig = cfg.getSiteConfig();
-    siteConfig.put(Property.TSERV_MAJC_DELAY.getKey(), "1");
-    cfg.setSiteConfig(siteConfig);
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(2);
   }
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 2 * 60;
+  public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
+    Map<String,String> siteConfig = cfg.getSiteConfig();
+    cfg.setSiteConfig(siteConfig);
   }
 
   // @formatter:off
@@ -122,7 +119,7 @@ public class ConcurrencyIT extends AccumuloClusterHarness {
     ScanTask st1 = new ScanTask(c, tableName, 100);
     st1.start();
 
-    sleepUninterruptibly(50, TimeUnit.MILLISECONDS);
+    Thread.sleep(50);
     c.tableOperations().flush(tableName, null, null, true);
 
     for (int i = 0; i < 50; i++) {
@@ -138,25 +135,29 @@ public class ConcurrencyIT extends AccumuloClusterHarness {
 
     st1.join();
     st2.join();
-    if (st1.count != 50)
+    if (st1.count != 50) {
       throw new Exception("Thread 1 did not see 50, saw " + st1.count);
+    }
 
-    if (st2.count != 50)
+    if (st2.count != 50) {
       throw new Exception("Thread 2 did not see 50, saw " + st2.count);
+    }
 
     ScanTask st3 = new ScanTask(c, tableName, 150);
     st3.start();
 
-    sleepUninterruptibly(50, TimeUnit.MILLISECONDS);
+    Thread.sleep(50);
     c.tableOperations().flush(tableName, null, null, false);
 
     st3.join();
-    if (st3.count != 50)
+    if (st3.count != 50) {
       throw new Exception("Thread 3 did not see 50, saw " + st3.count);
+    }
 
     st0.join();
-    if (st0.count != 50)
+    if (st0.count != 50) {
       throw new Exception("Thread 0 did not see 50, saw " + st0.count);
+    }
 
     bw.close();
   }

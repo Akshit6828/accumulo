@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -24,7 +24,9 @@ import java.util.Set;
 import org.apache.accumulo.core.clientImpl.thrift.TableOperation;
 import org.apache.accumulo.core.data.NamespaceId;
 import org.apache.accumulo.core.data.TableId;
-import org.apache.accumulo.fate.Repo;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.Repo;
+import org.apache.accumulo.core.fate.zookeeper.DistributedReadWriteLock.LockType;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tableOps.ManagerRepo;
 import org.apache.accumulo.manager.tableOps.Utils;
@@ -32,7 +34,7 @@ import org.apache.accumulo.manager.tableOps.Utils;
 public class CloneTable extends ManagerRepo {
 
   private static final long serialVersionUID = 1L;
-  private CloneInfo cloneInfo;
+  private final CloneInfo cloneInfo;
 
   public CloneTable(String user, NamespaceId namespaceId, TableId srcTableId, String tableName,
       Map<String,String> propertiesToSet, Set<String> propertiesToExclude, boolean keepOffline) {
@@ -47,16 +49,16 @@ public class CloneTable extends ManagerRepo {
   }
 
   @Override
-  public long isReady(long tid, Manager environment) throws Exception {
-    long val = Utils.reserveNamespace(environment, cloneInfo.srcNamespaceId, tid, false, true,
-        TableOperation.CLONE);
-    val += Utils.reserveTable(environment, cloneInfo.srcTableId, tid, false, true,
+  public long isReady(FateId fateId, Manager environment) throws Exception {
+    long val = Utils.reserveNamespace(environment, cloneInfo.srcNamespaceId, fateId, LockType.READ,
+        true, TableOperation.CLONE);
+    val += Utils.reserveTable(environment, cloneInfo.srcTableId, fateId, LockType.READ, true,
         TableOperation.CLONE);
     return val;
   }
 
   @Override
-  public Repo<Manager> call(long tid, Manager environment) throws Exception {
+  public Repo<Manager> call(FateId fateId, Manager environment) throws Exception {
 
     Utils.getIdLock().lock();
     try {
@@ -70,9 +72,9 @@ public class CloneTable extends ManagerRepo {
   }
 
   @Override
-  public void undo(long tid, Manager environment) {
-    Utils.unreserveNamespace(environment, cloneInfo.srcNamespaceId, tid, false);
-    Utils.unreserveTable(environment, cloneInfo.srcTableId, tid, false);
+  public void undo(FateId fateId, Manager environment) {
+    Utils.unreserveNamespace(environment, cloneInfo.srcNamespaceId, fateId, LockType.READ);
+    Utils.unreserveTable(environment, cloneInfo.srcTableId, fateId, LockType.READ);
   }
 
 }

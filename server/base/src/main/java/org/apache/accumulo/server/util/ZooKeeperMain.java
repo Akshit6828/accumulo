@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -69,7 +69,7 @@ public class ZooKeeperMain implements KeywordExecutable {
       }
       System.out.println("The accumulo instance id is " + context.getInstanceID());
       if (!opts.servers.contains("/")) {
-        opts.servers += "/accumulo/" + context.getInstanceID();
+        opts.servers += context.getZooKeeperRoot();
       }
       org.apache.zookeeper.ZooKeeperMain
           .main(new String[] {"-server", opts.servers, "-timeout", "" + (opts.timeout * 1000)});

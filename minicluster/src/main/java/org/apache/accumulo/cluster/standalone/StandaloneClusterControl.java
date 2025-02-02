@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -55,8 +55,7 @@ public class StandaloneClusterControl implements ClusterControl {
   private static final String ACCUMULO_SERVICE_SCRIPT = "accumulo-service",
       ACCUMULO_SCRIPT = "accumulo";
   private static final String MANAGER_HOSTS_FILE = "managers", GC_HOSTS_FILE = "gc",
-      TSERVER_HOSTS_FILE = "tservers", TRACER_HOSTS_FILE = "tracers",
-      MONITOR_HOSTS_FILE = "monitor";
+      TSERVER_HOSTS_FILE = "tservers", MONITOR_HOSTS_FILE = "monitor";
 
   String accumuloHome;
   String clientAccumuloConfDir;
@@ -121,8 +120,8 @@ public class StandaloneClusterControl implements ClusterControl {
   }
 
   /**
-   * Prevent potential CRLF injection into logs from read in user data See
-   * https://find-sec-bugs.github.io/bugs.htm#CRLF_INJECTION_LOGS
+   * Prevent potential CRLF injection into logs from read in user data. See the
+   * <a href="https://find-sec-bugs.github.io/bugs.htm#CRLF_INJECTION_LOGS">bug description</a>
    */
   private String sanitize(String msg) {
     return msg.replaceAll("[\r\n]", "");
@@ -143,14 +142,13 @@ public class StandaloneClusterControl implements ClusterControl {
   /**
    * Wrapper around SetGoalState
    *
-   * @param goalState
-   *          The goal state to set
-   * @throws IOException
-   *           If SetGoalState returns a non-zero result
+   * @param goalState The goal state to set
+   * @throws IOException If SetGoalState returns a non-zero result
    */
   public void setGoalState(String goalState) throws IOException {
     requireNonNull(goalState, "Goal state must not be null");
-    checkArgument(ManagerGoalState.valueOf(goalState) != null, "Unknown goal state: " + goalState);
+    checkArgument(ManagerGoalState.valueOf(goalState) != null,
+        "Unknown availability state: " + goalState);
     String manager = getHosts(MANAGER_HOSTS_FILE).get(0);
     String[] cmd = {serverCmdPrefix, accumuloPath, SetGoalState.class.getName(), goalState};
     Entry<Integer,String> pair = exec(manager, cmd);
@@ -161,7 +159,6 @@ public class StandaloneClusterControl implements ClusterControl {
   }
 
   @Override
-  @SuppressWarnings("removal")
   public void startAllServers(ServerType server) throws IOException {
     switch (server) {
       case TABLET_SERVER:
@@ -169,7 +166,6 @@ public class StandaloneClusterControl implements ClusterControl {
           start(server, tserver);
         }
         break;
-      case MASTER:
       case MANAGER:
         for (String manager : getHosts(MANAGER_HOSTS_FILE)) {
           start(server, manager);
@@ -186,11 +182,6 @@ public class StandaloneClusterControl implements ClusterControl {
         }
         for (String gc : hosts) {
           start(server, gc);
-        }
-        break;
-      case TRACER:
-        for (String tracer : getHosts(TRACER_HOSTS_FILE)) {
-          start(server, tracer);
         }
         break;
       case MONITOR:
@@ -215,7 +206,6 @@ public class StandaloneClusterControl implements ClusterControl {
   }
 
   @Override
-  @SuppressWarnings("removal")
   public void stopAllServers(ServerType server) throws IOException {
     switch (server) {
       case TABLET_SERVER:
@@ -223,7 +213,6 @@ public class StandaloneClusterControl implements ClusterControl {
           stop(server, tserver);
         }
         break;
-      case MASTER:
       case MANAGER:
         for (String manager : getHosts(MANAGER_HOSTS_FILE)) {
           stop(server, manager);
@@ -232,11 +221,6 @@ public class StandaloneClusterControl implements ClusterControl {
       case GARBAGE_COLLECTOR:
         for (String gc : getHosts(GC_HOSTS_FILE)) {
           stop(server, gc);
-        }
-        break;
-      case TRACER:
-        for (String tracer : getHosts(TRACER_HOSTS_FILE)) {
-          stop(server, tracer);
         }
         break;
       case MONITOR:
@@ -252,7 +236,7 @@ public class StandaloneClusterControl implements ClusterControl {
 
   @Override
   public void stop(ServerType server, String hostname) throws IOException {
-    // TODO Use `accumulo admin stop` for tservers, instrument clean stop for GC, monitor, tracer
+    // TODO Use `accumulo admin stop` for tservers, instrument clean stop for GC, monitor
     // instead kill
 
     kill(server, hostname);
@@ -322,18 +306,14 @@ public class StandaloneClusterControl implements ClusterControl {
         "'{print \\$2}'", "|", "head", "-1", "|", "tr", "-d", "'\\n'"};
   }
 
-  @SuppressWarnings("removal")
   protected String getProcessString(ServerType server) {
     switch (server) {
       case TABLET_SERVER:
         return "tserver";
       case GARBAGE_COLLECTOR:
         return "gc";
-      case MASTER:
       case MANAGER:
         return "manager";
-      case TRACER:
-        return "tracer";
       case MONITOR:
         return "monitor";
       default:
@@ -387,4 +367,5 @@ public class StandaloneClusterControl implements ClusterControl {
       return hosts;
     }
   }
+
 }

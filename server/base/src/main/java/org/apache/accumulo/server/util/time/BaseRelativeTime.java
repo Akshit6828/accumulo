@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,7 +28,7 @@ public class BaseRelativeTime implements ProvidesTime {
 
   private long diff = 0;
   private long lastReportedTime = 0;
-  ProvidesTime local;
+  final ProvidesTime local;
 
   BaseRelativeTime(ProvidesTime real, long lastReportedTime) {
     this.local = real;
@@ -43,8 +43,9 @@ public class BaseRelativeTime implements ProvidesTime {
   public synchronized long currentTime() {
     long localNow = local.currentTime();
     long result = localNow + diff;
-    if (result < lastReportedTime)
+    if (result < lastReportedTime) {
       return lastReportedTime;
+    }
     lastReportedTime = result;
     return result;
   }

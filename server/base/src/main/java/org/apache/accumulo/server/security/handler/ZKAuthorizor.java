@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -25,13 +25,13 @@ import java.util.List;
 
 import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.clientImpl.thrift.SecurityErrorCode;
+import org.apache.accumulo.core.fate.zookeeper.ZooCache;
+import org.apache.accumulo.core.fate.zookeeper.ZooReaderWriter;
+import org.apache.accumulo.core.fate.zookeeper.ZooUtil.NodeExistsPolicy;
+import org.apache.accumulo.core.fate.zookeeper.ZooUtil.NodeMissingPolicy;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.securityImpl.thrift.TCredentials;
 import org.apache.accumulo.core.util.ByteBufferUtil;
-import org.apache.accumulo.fate.zookeeper.ZooCache;
-import org.apache.accumulo.fate.zookeeper.ZooReaderWriter;
-import org.apache.accumulo.fate.zookeeper.ZooUtil.NodeExistsPolicy;
-import org.apache.accumulo.fate.zookeeper.ZooUtil.NodeMissingPolicy;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
@@ -43,21 +43,22 @@ public class ZKAuthorizor implements Authorizor {
   private final String ZKUserAuths = "/Authorizations";
 
   private ServerContext context;
-  private String ZKUserPath;
+  private String zkUserPath;
   private ZooCache zooCache;
 
   @Override
   public void initialize(ServerContext context) {
     this.context = context;
-    zooCache = new ZooCache(context.getZooReaderWriter(), null);
-    ZKUserPath = ZKSecurityTool.getInstancePath(context.getInstanceID()) + "/users";
+    zooCache = new ZooCache(context.getZooSession());
+    zkUserPath = context.zkUserPath();
   }
 
   @Override
   public Authorizations getCachedUserAuthorizations(String user) {
-    byte[] authsBytes = zooCache.get(ZKUserPath + "/" + user + ZKUserAuths);
-    if (authsBytes != null)
+    byte[] authsBytes = zooCache.get(zkUserPath + "/" + user + ZKUserAuths);
+    if (authsBytes != null) {
       return ZKSecurityTool.convertAuthorizations(authsBytes);
+    }
     return Authorizations.EMPTY;
   }
 
@@ -69,34 +70,35 @@ public class ZKAuthorizor implements Authorizor {
   @Override
   public void initializeSecurity(TCredentials itw, String rootuser)
       throws AccumuloSecurityException {
-    ZooReaderWriter zoo = context.getZooReaderWriter();
+    ZooReaderWriter zoo = context.getZooSession().asReaderWriter();
 
     // create the root user with no record-level authorizations
     try {
       // prep parent node of users with root username
-      if (!zoo.exists(ZKUserPath))
-        zoo.putPersistentData(ZKUserPath, rootuser.getBytes(UTF_8), NodeExistsPolicy.FAIL);
+      if (!zoo.exists(zkUserPath)) {
+        zoo.putPersistentData(zkUserPath, rootuser.getBytes(UTF_8), NodeExistsPolicy.FAIL);
+      }
 
       initUser(rootuser);
-      zoo.putPersistentData(ZKUserPath + "/" + rootuser + ZKUserAuths,
+      zoo.putPersistentData(zkUserPath + "/" + rootuser + ZKUserAuths,
           ZKSecurityTool.convertAuthorizations(Authorizations.EMPTY), NodeExistsPolicy.FAIL);
     } catch (KeeperException | InterruptedException e) {
       log.error("{}", e.getMessage(), e);
-      throw new RuntimeException(e);
+      throw new IllegalStateException(e);
     }
   }
 
   @Override
   public void initUser(String user) throws AccumuloSecurityException {
-    ZooReaderWriter zoo = context.getZooReaderWriter();
+    ZooReaderWriter zoo = context.getZooSession().asReaderWriter();
     try {
-      zoo.putPersistentData(ZKUserPath + "/" + user, new byte[0], NodeExistsPolicy.SKIP);
+      zoo.putPersistentData(zkUserPath + "/" + user, new byte[0], NodeExistsPolicy.SKIP);
     } catch (KeeperException e) {
       log.error("{}", e.getMessage(), e);
       throw new AccumuloSecurityException(user, SecurityErrorCode.CONNECTION_ERROR, e);
     } catch (InterruptedException e) {
       log.error("{}", e.getMessage(), e);
-      throw new RuntimeException(e);
+      throw new IllegalStateException(e);
     }
   }
 
@@ -104,17 +106,18 @@ public class ZKAuthorizor implements Authorizor {
   public void dropUser(String user) throws AccumuloSecurityException {
     try {
       synchronized (zooCache) {
-        ZooReaderWriter zoo = context.getZooReaderWriter();
-        zoo.recursiveDelete(ZKUserPath + "/" + user + ZKUserAuths, NodeMissingPolicy.SKIP);
-        zooCache.clear(ZKUserPath + "/" + user);
+        ZooReaderWriter zoo = context.getZooSession().asReaderWriter();
+        zoo.recursiveDelete(zkUserPath + "/" + user + ZKUserAuths, NodeMissingPolicy.SKIP);
+        zooCache.clear(zkUserPath + "/" + user);
       }
     } catch (InterruptedException e) {
       log.error("{}", e.getMessage(), e);
-      throw new RuntimeException(e);
+      throw new IllegalStateException(e);
     } catch (KeeperException e) {
       log.error("{}", e.getMessage(), e);
-      if (e.code().equals(KeeperException.Code.NONODE))
+      if (e.code().equals(KeeperException.Code.NONODE)) {
         throw new AccumuloSecurityException(user, SecurityErrorCode.USER_DOESNT_EXIST, e);
+      }
       throw new AccumuloSecurityException(user, SecurityErrorCode.CONNECTION_ERROR, e);
 
     }
@@ -126,7 +129,8 @@ public class ZKAuthorizor implements Authorizor {
     try {
       synchronized (zooCache) {
         zooCache.clear();
-        context.getZooReaderWriter().putPersistentData(ZKUserPath + "/" + user + ZKUserAuths,
+        context.getZooSession().asReaderWriter().putPersistentData(
+            zkUserPath + "/" + user + ZKUserAuths,
             ZKSecurityTool.convertAuthorizations(authorizations), NodeExistsPolicy.OVERWRITE);
       }
     } catch (KeeperException e) {
@@ -134,7 +138,7 @@ public class ZKAuthorizor implements Authorizor {
       throw new AccumuloSecurityException(user, SecurityErrorCode.CONNECTION_ERROR, e);
     } catch (InterruptedException e) {
       log.error("{}", e.getMessage(), e);
-      throw new RuntimeException(e);
+      throw new IllegalStateException(e);
     }
   }
 

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,6 @@
  */
 package org.apache.accumulo.start;
 
-import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -38,40 +37,10 @@ public class Main {
 
   private static final Logger log = LoggerFactory.getLogger(Main.class);
   private static ClassLoader classLoader;
-  private static Class<?> vfsClassLoader;
   private static Map<String,KeywordExecutable> servicesMap;
 
   public static void main(final String[] args) throws Exception {
-    // Preload classes that cause a deadlock between the ServiceLoader and the DFSClient when
-    // using the VFSClassLoader with jars in HDFS.
-    ClassLoader loader = getClassLoader();
-    Class<?> confClass = null;
-    try {
-      @SuppressWarnings("deprecation")
-      var deprecatedConfClass = org.apache.accumulo.start.classloader.AccumuloClassLoader
-          .getClassLoader().loadClass("org.apache.hadoop.conf.Configuration");
-      confClass = deprecatedConfClass;
-    } catch (ClassNotFoundException e) {
-      log.error("Unable to find Hadoop Configuration class on classpath, check configuration.", e);
-      throw e;
-    }
-    Object conf = null;
-    try {
-      conf = confClass.getDeclaredConstructor().newInstance();
-    } catch (Exception e) {
-      log.error("Error creating new instance of Hadoop Configuration", e);
-      throw e;
-    }
-    try {
-      Method getClassByNameOrNullMethod =
-          conf.getClass().getMethod("getClassByNameOrNull", String.class);
-      getClassByNameOrNullMethod.invoke(conf, "org.apache.hadoop.mapred.JobConf");
-      getClassByNameOrNullMethod.invoke(conf, "org.apache.hadoop.mapred.JobConfigurable");
-    } catch (Exception e) {
-      log.error("Error pre-loading JobConf and JobConfigurable classes, VFS classloader with "
-          + "system classes in HDFS may not work correctly", e);
-      throw e;
-    }
+    final ClassLoader loader = getClassLoader();
 
     if (args.length == 0) {
       printUsage();
@@ -97,27 +66,13 @@ public class Main {
   public static synchronized ClassLoader getClassLoader() {
     if (classLoader == null) {
       try {
-        classLoader = (ClassLoader) getVFSClassLoader().getMethod("getClassLoader").invoke(null);
+        classLoader = ClassLoader.getSystemClassLoader();
         Thread.currentThread().setContextClassLoader(classLoader);
-      } catch (IOException | IllegalArgumentException | ReflectiveOperationException
-          | SecurityException e) {
-        log.error("Problem initializing the class loader", e);
-        System.exit(1);
+      } catch (IllegalArgumentException | SecurityException e) {
+        die(e, "Problem initializing the class loader");
       }
     }
     return classLoader;
-  }
-
-  @Deprecated
-  private static synchronized Class<?> getVFSClassLoader()
-      throws IOException, ClassNotFoundException {
-    if (vfsClassLoader == null) {
-      Thread.currentThread().setContextClassLoader(
-          org.apache.accumulo.start.classloader.AccumuloClassLoader.getClassLoader());
-      vfsClassLoader = org.apache.accumulo.start.classloader.AccumuloClassLoader.getClassLoader()
-          .loadClass("org.apache.accumulo.start.classloader.vfs.AccumuloVFSClassLoader");
-    }
-    return vfsClassLoader;
   }
 
   private static void execKeyword(final KeywordExecutable keywordExec, final String[] args) {
@@ -125,7 +80,7 @@ public class Main {
       try {
         keywordExec.execute(args);
       } catch (Exception e) {
-        die(e);
+        die(e, null);
       }
     };
     startThread(r, keywordExec.keyword());
@@ -149,7 +104,7 @@ public class Main {
     try {
       main = classWithMain.getMethod("main", args.getClass());
     } catch (Exception t) {
-      log.error("Could not run main method on '" + classWithMain.getName() + "'.", t);
+      die(t, "Could not run main method on '" + classWithMain.getName() + "'.");
     }
     if (main == null || !Modifier.isPublic(main.getModifiers())
         || !Modifier.isStatic(main.getModifiers())) {
@@ -163,13 +118,13 @@ public class Main {
         finalMain.invoke(null, (Object) args);
       } catch (InvocationTargetException e) {
         if (e.getCause() != null) {
-          die(e.getCause());
+          die(e.getCause(), null);
         } else {
           // Should never happen, but check anyway.
-          die(e);
+          die(e, null);
         }
       } catch (Exception e) {
-        die(e);
+        die(e, null);
       }
     };
     startThread(r, classWithMain.getName());
@@ -191,11 +146,14 @@ public class Main {
   /**
    * Print a stack trace to stderr and exit with a non-zero status.
    *
-   * @param t
-   *          The {@link Throwable} containing a stack trace to print.
+   * @param t The {@link Throwable} containing a stack trace to print.
    */
-  private static void die(final Throwable t) {
-    log.error("Thread '" + Thread.currentThread().getName() + "' died.", t);
+  private static void die(final Throwable t, String msg) {
+    String message =
+        (msg == null) ? "Thread '" + Thread.currentThread().getName() + "' died." : msg;
+    System.err.println(message);
+    t.printStackTrace();
+    log.error(message, t);
     System.exit(1);
   }
 
@@ -214,7 +172,8 @@ public class Main {
     System.out.println("\nCore Commands:");
     printCommands(executables, UsageGroup.CORE);
 
-    System.out.println("  classpath                      Prints Accumulo classpath\n"
+    System.out.println("  jshell                         Runs JShell for Accumulo\n"
+        + "  classpath                      Prints Accumulo classpath\n"
         + "  <main class> args              Runs Java <main class> located on Accumulo classpath");
 
     System.out.println("\nProcess Commands:");

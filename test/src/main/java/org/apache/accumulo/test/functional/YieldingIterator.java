@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -60,7 +60,7 @@ public class YieldingIterator extends WrappingIterator {
 
   @Override
   public boolean hasTop() {
-    return (!(yield.isPresent() && yield.get().hasYielded()) && super.hasTop());
+    return (!(yield.isPresent() && yield.orElseThrow().hasYielded()) && super.hasTop());
   }
 
   @Override
@@ -75,7 +75,8 @@ public class YieldingIterator extends WrappingIterator {
       yieldNexts.incrementAndGet();
       // since we are not actually skipping keys underneath, simply use the key following the top
       // key as the yield key
-      yield.get().yield(getTopKey().followingKey(PartialKey.ROW_COLFAM_COLQUAL_COLVIS_TIME));
+      yield.orElseThrow()
+          .yield(getTopKey().followingKey(PartialKey.ROW_COLFAM_COLQUAL_COLVIS_TIME));
       log.info("end YieldingIterator.next: yielded at " + getTopKey());
     }
 
@@ -95,8 +96,7 @@ public class YieldingIterator extends WrappingIterator {
    */
   @Override
   public Value getTopValue() {
-    String value = Integer.toString(yieldNexts.get()) + ',' + Integer.toString(yieldSeeks.get())
-        + ',' + Integer.toString(rebuilds.get());
+    String value = yieldNexts.get() + "," + yieldSeeks.get() + "," + rebuilds.get();
     return new Value(value);
   }
 
@@ -108,11 +108,13 @@ public class YieldingIterator extends WrappingIterator {
 
     if (range.isStartKeyInclusive()) {
       // must be a new scan so re-initialize the counters
-      log.info("reseting counters");
+      log.info("resetting counters");
       resetCounters();
     } else {
       rebuilds.incrementAndGet();
+    }
 
+    if (range.getStartKey() != null) {
       // yield on every other seek call.
       yieldSeekKey.set(!yieldSeekKey.get());
       if (yield.isPresent() && yieldSeekKey.get()) {
@@ -120,8 +122,12 @@ public class YieldingIterator extends WrappingIterator {
         yieldSeeks.incrementAndGet();
         // since we are not actually skipping keys underneath, simply use the key following the
         // range start key
-        yield.get()
-            .yield(range.getStartKey().followingKey(PartialKey.ROW_COLFAM_COLQUAL_COLVIS_TIME));
+        if (range.isStartKeyInclusive()) {
+          yield.orElseThrow().yield(range.getStartKey());
+        } else {
+          yield.orElseThrow()
+              .yield(range.getStartKey().followingKey(PartialKey.ROW_COLFAM_COLQUAL_COLVIS_TIME));
+        }
         log.info("end YieldingIterator.next: yielded at " + range.getStartKey());
       }
     }

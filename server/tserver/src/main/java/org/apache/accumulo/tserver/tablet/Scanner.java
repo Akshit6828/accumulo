@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,25 +20,27 @@ package org.apache.accumulo.tserver.tablet;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
-import org.apache.accumulo.core.iterators.IterationInterruptedException;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
+import org.apache.accumulo.core.iteratorsImpl.system.IterationInterruptedException;
 import org.apache.accumulo.core.iteratorsImpl.system.SourceSwitchingIterator;
 import org.apache.accumulo.core.util.ShutdownUtil;
 import org.apache.accumulo.tserver.scan.ScanParameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Preconditions;
+
 public class Scanner {
   private static final Logger log = LoggerFactory.getLogger(Scanner.class);
 
-  private final Tablet tablet;
+  private final TabletBase tablet;
   private final ScanParameters scanParams;
   private Range range;
   private SortedKeyValueIterator<Key,Value> isolatedIter;
@@ -46,20 +48,22 @@ public class Scanner {
   private boolean sawException = false;
   private boolean scanClosed = false;
   /**
-   * A fair semaphore of one is used since explicitly know the access pattern will be one thread to
-   * read and another to call close if the session becomes idle. Since we're explicitly preventing
-   * re-entrance, we're currently using a Semaphore. If at any point we decide read needs to be
-   * re-entrant, we can switch to a Reentrant lock.
+   * An interruptible, re-entrant lock is used since we know the access pattern will be one thread
+   * to read and another to call close if the session becomes idle. This lock allows the closing
+   * thread to interrupt the reading thread if it can't obtain the lock immediately. This way, the
+   * reading thread can finish its current operation and release the lock promptly.
    */
-  private Semaphore scannerSemaphore;
+  private final InterruptibleLock lock;
 
-  private AtomicBoolean interruptFlag;
+  private final AtomicBoolean interruptFlag;
 
-  Scanner(Tablet tablet, Range range, ScanParameters scanParams, AtomicBoolean interruptFlag) {
+  private boolean readInProgress = false;
+
+  Scanner(TabletBase tablet, Range range, ScanParameters scanParams, AtomicBoolean interruptFlag) {
     this.tablet = tablet;
     this.range = range;
     this.scanParams = scanParams;
-    this.scannerSemaphore = new Semaphore(1, true);
+    this.lock = new InterruptibleLock();
     this.interruptFlag = interruptFlag;
   }
 
@@ -72,34 +76,42 @@ public class Scanner {
     try {
 
       try {
-        scannerSemaphore.acquire();
+        lock.lockInterruptibly();
+        Preconditions.checkState(!readInProgress);
+        // Simple check to ensure the same thread never calls this method recursively. This code
+        // would not handle that well.
+        readInProgress = true;
       } catch (InterruptedException e) {
         sawException = true;
       }
 
       // sawException may have occurred within close, so we cannot assume that an interrupted
       // exception was its cause
-      if (sawException)
+      if (sawException) {
         throw new IllegalStateException("Tried to use scanner after exception occurred.");
+      }
 
-      if (scanClosed)
+      if (scanClosed) {
         throw new IllegalStateException("Tried to use scanner after it was closed.");
+      }
 
       if (scanParams.isIsolated()) {
-        if (isolatedDataSource == null)
-          isolatedDataSource = new ScanDataSource(tablet, scanParams, true, interruptFlag);
+        if (isolatedDataSource == null) {
+          isolatedDataSource = tablet.createDataSource(scanParams, true, interruptFlag);
+        }
         dataSource = isolatedDataSource;
       } else {
-        dataSource = new ScanDataSource(tablet, scanParams, true, interruptFlag);
+        dataSource = tablet.createDataSource(scanParams, true, interruptFlag);
       }
 
       SortedKeyValueIterator<Key,Value> iter;
 
       if (scanParams.isIsolated()) {
-        if (isolatedIter == null)
+        if (isolatedIter == null) {
           isolatedIter = new SourceSwitchingIterator(dataSource, true);
-        else
+        } else {
           isolatedDataSource.reattachFileManager();
+        }
         iter = isolatedIter;
       } else {
         iter = new SourceSwitchingIterator(dataSource, false);
@@ -120,60 +132,90 @@ public class Scanner {
 
     } catch (IterationInterruptedException iie) {
       sawException = true;
-      if (tablet.isClosed())
+      if (tablet.isClosed()) {
         throw new TabletClosedException(iie);
-      else
+      } else {
         throw iie;
+      }
     } catch (IOException ioe) {
-      if (ShutdownUtil.isShutdownInProgress()) {
+      if (ShutdownUtil.wasCausedByHadoopShutdown(ioe)) {
         log.debug("IOException while shutdown in progress ", ioe);
-        throw new TabletClosedException(ioe); // assume IOException was caused by execution of HDFS
-                                              // shutdown hook
+        throw new TabletClosedException(ioe); // this was possibly caused by Hadoop shutdown hook,
+                                              // so make the client retry
       }
 
       sawException = true;
-      dataSource.close(true);
       throw ioe;
     } catch (RuntimeException re) {
+      if (ShutdownUtil.wasCausedByHadoopShutdown(re)) {
+        log.debug("RuntimeException while shutdown in progress ", re);
+        throw new TabletClosedException(re); // this was possibly caused by Hadoop shutdown hook, so
+                                             // make the client retry
+      }
       sawException = true;
       throw re;
     } finally {
-      // code in finally block because always want
-      // to return mapfiles, even when exception is thrown
-      if (dataSource != null && !scanParams.isIsolated()) {
-        dataSource.close(false);
-      } else if (dataSource != null) {
-        dataSource.detachFileManager();
+      try {
+        // code in finally block because always want
+        // to return datafiles, even when exception is thrown
+        if (dataSource != null) {
+          if (sawException || !scanParams.isIsolated()) {
+            dataSource.close(sawException);
+          } else {
+            dataSource.detachFileManager();
+          }
+        }
+
+        if (results != null && results.getResults() != null) {
+          tablet.updateQueryStats(results.getResults().size(), results.getNumBytes());
+        }
+      } finally {
+        readInProgress = false;
+        lock.unlock();
       }
-
-      if (results != null && results.getResults() != null)
-        tablet.updateQueryStats(results.getResults().size(), results.getNumBytes());
-
-      scannerSemaphore.release();
     }
   }
 
-  // close and read are synchronized because can not call close on the data source while it is in
-  // use
-  // this could lead to the case where file iterators that are in use by a thread are returned
-  // to the pool... this would be bad
+  private static class InterruptibleLock extends ReentrantLock {
+    private static final long serialVersionUID = 1L;
+
+    public Thread getLockOwner() {
+      return getOwner();
+    }
+  }
+
+  /*
+   * close and read are controlled by an InterruptibleLock because we cannot call close on the data
+   * source while it is in use. Without this lock, there could be a situation where file iterators
+   * that are in use by a thread are returned to the pool, which would be bad. With the lock, a
+   * thread can attempt to close the Scanner. If it can't immediately acquire the lock (because a
+   * read is in progress), it interrupts the reading thread. This ensures the reading thread can
+   * finish its current operation and release the lock, allowing close to finish.
+   */
   public boolean close() {
     interruptFlag.set(true);
 
     boolean obtainedLock = false;
     try {
-      obtainedLock = scannerSemaphore.tryAcquire(10, TimeUnit.MILLISECONDS);
-      if (!obtainedLock)
+      obtainedLock = lock.tryLock(10, TimeUnit.MILLISECONDS);
+      if (!obtainedLock) {
+        Thread ownerThread = lock.getLockOwner();
+        if (ownerThread != null) {
+          ownerThread.interrupt();
+        }
         return false;
+      }
 
       scanClosed = true;
-      if (isolatedDataSource != null)
+      if (isolatedDataSource != null) {
         isolatedDataSource.close(false);
+      }
     } catch (InterruptedException e) {
       return false;
     } finally {
-      if (obtainedLock)
-        scannerSemaphore.release();
+      if (obtainedLock) {
+        lock.unlock();
+      }
     }
     return true;
   }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,21 +18,21 @@
  */
 package org.apache.accumulo.core.util;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertThrows;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import org.apache.accumulo.core.clientImpl.Namespace;
 import org.apache.accumulo.core.data.TableId;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.RootTable;
-import org.apache.accumulo.core.replication.ReplicationTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.commons.lang3.StringUtils;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ValidatorsTest {
 
@@ -42,22 +42,22 @@ public class ValidatorsTest {
   }
 
   private static <T> void assertAllValidate(Validator<T> v, List<T> items) {
-    assertFalse("nothing to check", items.isEmpty());
+    assertFalse(items.isEmpty(), "nothing to check");
     items.forEach(item -> assertSame(item, v.validate(item)));
   }
 
   private static <T> void assertAllThrow(Validator<T> v, List<T> items) {
-    assertFalse("nothing to check", items.isEmpty());
-    items.forEach(item -> assertThrows(String.valueOf(item), IllegalArgumentException.class,
-        () -> v.validate(item)));
+    assertFalse(items.isEmpty(), "nothing to check");
+    items.forEach(item -> assertThrows(IllegalArgumentException.class, () -> v.validate(item),
+        String.valueOf(item)));
   }
 
   @Test
   public void test_CAN_CLONE_TABLE() {
     Validator<TableId> v = Validators.CAN_CLONE_TABLE;
     checkNull(v::validate);
-    assertAllValidate(v, List.of(ReplicationTable.ID, TableId.of("id1")));
-    assertAllThrow(v, List.of(RootTable.ID, MetadataTable.ID));
+    assertAllValidate(v, List.of(TableId.of("id1")));
+    assertAllThrow(v, List.of(AccumuloTable.ROOT.tableId(), AccumuloTable.METADATA.tableId()));
   }
 
   @Test
@@ -74,8 +74,8 @@ public class ValidatorsTest {
     Validator<String> v = Validators.EXISTING_TABLE_NAME;
     checkNull(v::validate);
     assertAllValidate(v,
-        List.of(RootTable.NAME, MetadataTable.NAME, "normalTable", "withNumber2", "has_underscore",
-            "_underscoreStart", StringUtils.repeat("a", 1025),
+        List.of(AccumuloTable.ROOT.tableName(), AccumuloTable.METADATA.tableName(), "normalTable",
+            "withNumber2", "has_underscore", "_underscoreStart", StringUtils.repeat("a", 1025),
             StringUtils.repeat("a", 1025) + "." + StringUtils.repeat("a", 1025)));
     assertAllThrow(v, List.of("has-dash", "has-dash.inNamespace", "has.dash-inTable", " hasSpace",
         ".", "has$dollar", "two.dots.here", ".startsDot"));
@@ -96,8 +96,8 @@ public class ValidatorsTest {
     Validator<String> v = Validators.NEW_TABLE_NAME;
     checkNull(v::validate);
     assertAllValidate(v,
-        List.of(RootTable.NAME, MetadataTable.NAME, "normalTable", "withNumber2", "has_underscore",
-            "_underscoreStart", StringUtils.repeat("a", 1024),
+        List.of(AccumuloTable.ROOT.tableName(), AccumuloTable.METADATA.tableName(), "normalTable",
+            "withNumber2", "has_underscore", "_underscoreStart", StringUtils.repeat("a", 1024),
             StringUtils.repeat("a", 1025) + "." + StringUtils.repeat("a", 1024)));
     assertAllThrow(v,
         List.of("has-dash", "has-dash.inNamespace", "has.dash-inTable", " hasSpace", ".",
@@ -118,15 +118,15 @@ public class ValidatorsTest {
     Validator<String> v = Validators.NOT_BUILTIN_TABLE;
     checkNull(v::validate);
     assertAllValidate(v, List.of("root", "metadata", "user", "ns1.table2"));
-    assertAllThrow(v, List.of(RootTable.NAME, MetadataTable.NAME, ReplicationTable.NAME));
+    assertAllThrow(v, List.of(AccumuloTable.ROOT.tableName(), AccumuloTable.METADATA.tableName()));
   }
 
   @Test
   public void test_NOT_METADATA_TABLE() {
     Validator<String> v = Validators.NOT_METADATA_TABLE;
     checkNull(v::validate);
-    assertAllValidate(v, List.of("root", "metadata", "user", "ns1.table2", ReplicationTable.NAME));
-    assertAllThrow(v, List.of(RootTable.NAME, MetadataTable.NAME));
+    assertAllValidate(v, List.of("root", "metadata", "user", "ns1.table2"));
+    assertAllThrow(v, List.of(AccumuloTable.ROOT.tableName(), AccumuloTable.METADATA.tableName()));
   }
 
   @Test
@@ -134,16 +134,26 @@ public class ValidatorsTest {
     Validator<TableId> v = Validators.NOT_ROOT_TABLE_ID;
     checkNull(v::validate);
     assertAllValidate(v,
-        List.of(TableId.of(""), MetadataTable.ID, ReplicationTable.ID, TableId.of(" #0(U!$. ")));
-    assertAllThrow(v, List.of(RootTable.ID));
+        List.of(TableId.of(""), AccumuloTable.METADATA.tableId(), TableId.of(" #0(U!$. ")));
+    assertAllThrow(v, List.of(AccumuloTable.ROOT.tableId()));
+  }
+
+  @Test
+  public void test_NOT_METADATA_TABLE_ID() {
+    Validator<TableId> v = Validators.NOT_METADATA_TABLE_ID;
+    checkNull(v::validate);
+    assertAllValidate(v,
+        List.of(TableId.of(""), AccumuloTable.ROOT.tableId(), TableId.of(" #0(U!$. ")));
+    assertAllThrow(v, List.of(AccumuloTable.METADATA.tableId()));
   }
 
   @Test
   public void test_VALID_TABLE_ID() {
     Validator<TableId> v = Validators.VALID_TABLE_ID;
     checkNull(v::validate);
-    assertAllValidate(v, List.of(RootTable.ID, MetadataTable.ID, ReplicationTable.ID,
-        TableId.of("111"), TableId.of("aaaa"), TableId.of("r2d2")));
+    assertAllValidate(v, Arrays.stream(AccumuloTable.values()).map(AccumuloTable::tableId)
+        .collect(Collectors.toList()));
+    assertAllValidate(v, List.of(TableId.of("111"), TableId.of("aaaa"), TableId.of("r2d2")));
     assertAllThrow(v, List.of(TableId.of(""), TableId.of("#0(U!$"), TableId.of(" #0(U!$. "),
         TableId.of("."), TableId.of(" "), TableId.of("C3P0")));
   }

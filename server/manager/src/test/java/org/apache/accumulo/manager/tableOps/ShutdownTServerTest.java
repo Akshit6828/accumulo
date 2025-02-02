@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,22 +18,28 @@
  */
 package org.apache.accumulo.manager.tableOps;
 
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.UUID;
 
-import org.apache.accumulo.core.master.thrift.TableInfo;
-import org.apache.accumulo.core.master.thrift.TabletServerStatus;
+import org.apache.accumulo.core.Constants;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.FateInstanceType;
+import org.apache.accumulo.core.fate.Repo;
+import org.apache.accumulo.core.manager.thrift.TableInfo;
+import org.apache.accumulo.core.manager.thrift.TabletServerStatus;
 import org.apache.accumulo.core.metadata.TServerInstance;
-import org.apache.accumulo.core.util.HostAndPort;
-import org.apache.accumulo.fate.Repo;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tserverOps.ShutdownTServer;
 import org.apache.accumulo.server.manager.LiveTServerSet.TServerConnection;
 import org.easymock.EasyMock;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+
+import com.google.common.net.HostAndPort;
 
 public class ShutdownTServerTest {
 
@@ -43,10 +49,11 @@ public class ShutdownTServerTest {
     final TServerInstance tserver = new TServerInstance(hap, "fake");
     final boolean force = false;
 
-    final ShutdownTServer op = new ShutdownTServer(tserver, force);
+    final ShutdownTServer op =
+        new ShutdownTServer(tserver, Constants.DEFAULT_RESOURCE_GROUP_NAME, force);
 
     final Manager manager = EasyMock.createMock(Manager.class);
-    final long tid = 1L;
+    final FateId fateId = FateId.from(FateInstanceType.USER, UUID.randomUUID());
 
     final TServerConnection tserverCnxn = EasyMock.createMock(TServerConnection.class);
     final TabletServerStatus status = new TabletServerStatus();
@@ -63,8 +70,8 @@ public class ShutdownTServerTest {
     EasyMock.replay(tserverCnxn, manager);
 
     // FATE op is not ready
-    long wait = op.isReady(tid, manager);
-    assertTrue("Expected wait to be greater than 0", wait > 0);
+    long wait = op.isReady(fateId, manager);
+    assertTrue(wait > 0, "Expected wait to be greater than 0");
 
     EasyMock.verify(tserverCnxn, manager);
 
@@ -85,11 +92,11 @@ public class ShutdownTServerTest {
     EasyMock.replay(tserverCnxn, manager);
 
     // FATE op is not ready
-    wait = op.isReady(tid, manager);
-    assertTrue("Expected wait to be 0", wait == 0);
+    wait = op.isReady(fateId, manager);
+    assertEquals(0, wait, "Expected wait to be 0");
 
-    Repo<Manager> op2 = op.call(tid, manager);
-    assertNull("Expected no follow on step", op2);
+    Repo<Manager> op2 = op.call(fateId, manager);
+    assertNull(op2, "Expected no follow on step");
 
     EasyMock.verify(tserverCnxn, manager);
   }

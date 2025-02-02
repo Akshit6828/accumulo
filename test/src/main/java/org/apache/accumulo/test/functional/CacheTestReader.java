@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,7 +19,6 @@
 package org.apache.accumulo.test.functional;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -28,9 +27,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
-import org.apache.accumulo.fate.zookeeper.ZooCache;
+import org.apache.accumulo.core.fate.zookeeper.ZooCache;
+import org.apache.accumulo.core.zookeeper.ZooSession;
 import org.slf4j.LoggerFactory;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -47,45 +46,49 @@ public class CacheTestReader {
     File myfile = new File(reportDir + "/" + UUID.randomUUID());
     myfile.deleteOnExit();
 
-    ZooCache zc = new ZooCache(keepers, 30000);
+    try (var zk = new ZooSession(CacheTestReader.class.getSimpleName(), keepers, 30_000, null)) {
+      ZooCache zc = new ZooCache(zk);
 
-    while (true) {
-      if (myfile.exists() && !myfile.delete()) {
-        LoggerFactory.getLogger(CacheTestReader.class).warn("Unable to delete {}", myfile);
-      }
-
-      if (zc.get(rootDir + "/die") != null) {
-        return;
-      }
-
-      Map<String,String> readData = new TreeMap<>();
-
-      for (int i = 0; i < numData; i++) {
-        byte[] v = zc.get(rootDir + "/data" + i);
-        if (v != null)
-          readData.put(rootDir + "/data" + i, new String(v, UTF_8));
-      }
-
-      byte[] v = zc.get(rootDir + "/dataS");
-      if (v != null)
-        readData.put(rootDir + "/dataS", new String(v, UTF_8));
-
-      List<String> children = zc.getChildren(rootDir + "/dir");
-      if (children != null)
-        for (String child : children) {
-          readData.put(rootDir + "/dir/" + child, "");
+      while (true) {
+        if (myfile.exists() && !myfile.delete()) {
+          LoggerFactory.getLogger(CacheTestReader.class).warn("Unable to delete {}", myfile);
         }
 
-      FileOutputStream fos = new FileOutputStream(myfile);
-      ObjectOutputStream oos = new ObjectOutputStream(fos);
+        if (zc.get(rootDir + "/die") != null) {
+          return;
+        }
 
-      oos.writeObject(readData);
+        Map<String,String> readData = new TreeMap<>();
 
-      fos.close();
-      oos.close();
+        for (int i = 0; i < numData; i++) {
+          byte[] v = zc.get(rootDir + "/data" + i);
+          if (v != null) {
+            readData.put(rootDir + "/data" + i, new String(v, UTF_8));
+          }
+        }
 
-      sleepUninterruptibly(20, TimeUnit.MILLISECONDS);
+        byte[] v = zc.get(rootDir + "/dataS");
+        if (v != null) {
+          readData.put(rootDir + "/dataS", new String(v, UTF_8));
+        }
+
+        List<String> children = zc.getChildren(rootDir + "/dir");
+        if (children != null) {
+          for (String child : children) {
+            readData.put(rootDir + "/dir/" + child, "");
+          }
+        }
+
+        FileOutputStream fos = new FileOutputStream(myfile);
+        ObjectOutputStream oos = new ObjectOutputStream(fos);
+
+        oos.writeObject(readData);
+
+        fos.close();
+        oos.close();
+
+        Thread.sleep(20);
+      }
     }
-
   }
 }

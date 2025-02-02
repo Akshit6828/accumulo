@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -21,7 +21,7 @@ package org.apache.accumulo.monitor.rest.tables;
 import jakarta.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
 
 import org.apache.accumulo.core.data.TableId;
-import org.apache.accumulo.core.master.thrift.TableInfo;
+import org.apache.accumulo.core.manager.thrift.TableInfo;
 import org.apache.accumulo.monitor.util.JaxbAbstractIdSerializer;
 
 /**
@@ -50,9 +50,6 @@ public class TableInformation {
   public double query;
   public double queryByteRate;
 
-  public CompactionsList majorCompactions;
-  // running compactions with queued in parenthesis
-  public String majorCombo;
   public CompactionsList minorCompactions;
   // running compactions with queued in parenthesis
   public String minorCombo;
@@ -60,12 +57,10 @@ public class TableInformation {
   // running scans with queued in parenthesis
   public String scansCombo;
 
-  private int queuedMajorCompactions;
-  private int runningMajorCompactions;
-  private int queuedMinorCompactions;
-  private int runningMinorCompactions;
-  private int queuedScans;
-  private int runningScans;
+  public int queuedMinorCompactions;
+  public int runningMinorCompactions;
+  public int queuedScans;
+  public int runningScans;
 
   public double entriesRead;
   public double entriesReturned;
@@ -79,12 +74,9 @@ public class TableInformation {
   /**
    * Generate a table with just the state
    *
-   * @param tableName
-   *          Table name to create
-   * @param tableId
-   *          Table ID to create
-   * @param tableState
-   *          State of the table
+   * @param tableName Table name to create
+   * @param tableId Table ID to create
+   * @param tableState State of the table
    */
   public TableInformation(String tableName, TableId tableId, String tableState) {
     this.tablename = tableName;
@@ -102,8 +94,6 @@ public class TableInformation {
     this.entriesRead = 0;
     this.entriesReturned = 0;
     this.holdTime = 0.0;
-    this.majorCompactions = new CompactionsList(0, 0);
-    this.majorCombo = ZERO_COMBO;
     this.minorCompactions = new CompactionsList(0, 0);
     this.minorCombo = ZERO_COMBO;
     this.scans = new CompactionsList(0, 0);
@@ -113,16 +103,11 @@ public class TableInformation {
   /**
    * Generate table based on the thrift table info
    *
-   * @param tableName
-   *          Name of the table to create
-   * @param tableId
-   *          ID of the table to create
-   * @param info
-   *          Thift table info
-   * @param holdTime
-   *          Hold time for the table
-   * @param tableState
-   *          State of the table
+   * @param tableName Name of the table to create
+   * @param tableId ID of the table to create
+   * @param info Thift table info
+   * @param holdTime Hold time for the table
+   * @param tableState State of the table
    */
   public TableInformation(String tableName, TableId tableId, TableInfo info, Double holdTime,
       String tableState) {
@@ -167,17 +152,6 @@ public class TableInformation {
       this.minorCombo = ZERO_COMBO;
     }
 
-    if (info.majors != null) {
-      this.queuedMajorCompactions = info.majors.queued;
-      this.runningMajorCompactions = info.majors.running;
-      this.majorCombo = info.majors.running + "(" + info.majors.queued + ")";
-    } else {
-      this.queuedMajorCompactions = 0;
-      this.runningMajorCompactions = 0;
-      this.majorCombo = ZERO_COMBO;
-    }
-
-    this.majorCompactions = new CompactionsList(runningMajorCompactions, queuedMajorCompactions);
     this.minorCompactions = new CompactionsList(runningMinorCompactions, queuedMinorCompactions);
     this.scans = new CompactionsList(runningScans, queuedScans);
 

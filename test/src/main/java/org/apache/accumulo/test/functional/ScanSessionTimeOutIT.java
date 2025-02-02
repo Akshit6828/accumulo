@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,12 +18,15 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.accumulo.minicluster.ServerType.TABLET_SERVER;
+import static org.apache.accumulo.test.functional.ScannerIT.countActiveScans;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.time.Duration;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
@@ -40,14 +43,19 @@ import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class ScanSessionTimeOutIT extends AccumuloClusterHarness {
   private static final Logger log = LoggerFactory.getLogger(ScanSessionTimeOutIT.class);
+
+  @Override
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(1);
+  }
 
   @Override
   public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
@@ -56,14 +64,9 @@ public class ScanSessionTimeOutIT extends AccumuloClusterHarness {
     cfg.setSiteConfig(siteConfig);
   }
 
-  @Override
-  protected int defaultTimeoutSeconds() {
-    return 60;
-  }
-
   private String sessionIdle = null;
 
-  @Before
+  @BeforeEach
   public void reduceSessionIdle() throws Exception {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
       InstanceOperations ops = client.instanceOperations();
@@ -84,7 +87,7 @@ public class ScanSessionTimeOutIT extends AccumuloClusterHarness {
     return "3";
   }
 
-  @After
+  @AfterEach
   public void resetSessionIdle() throws Exception {
     if (sessionIdle != null) {
       try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
@@ -103,8 +106,9 @@ public class ScanSessionTimeOutIT extends AccumuloClusterHarness {
       try (BatchWriter bw = c.createBatchWriter(tableName)) {
         for (int i = 0; i < 100000; i++) {
           Mutation m = new Mutation(new Text(String.format("%08d", i)));
-          for (int j = 0; j < 3; j++)
+          for (int j = 0; j < 3; j++) {
             m.put("cf1", "cq" + j, i + "_" + j);
+          }
 
           bw.addMutation(m);
         }
@@ -116,12 +120,25 @@ public class ScanSessionTimeOutIT extends AccumuloClusterHarness {
         Iterator<Entry<Key,Value>> iter = scanner.iterator();
 
         verify(iter, 0, 200);
+        // There should be a scan session open since not all data was read from the iterator
+        assertEquals(1L, countActiveScans(c, TABLET_SERVER, tableName));
 
         // sleep three times the session timeout
-        sleepUninterruptibly(9, TimeUnit.SECONDS);
+        Thread.sleep(SECONDS.toMillis(9));
+        // The scan session should have timed out and the next read should create a new one
+        assertEquals(0L, countActiveScans(c, TABLET_SERVER, tableName));
 
-        verify(iter, 200, 100000);
+        verify(iter, 200, 50000);
+        // Reading part of the data in the range should cause a new scan session to be created
+        assertEquals(1L, countActiveScans(c, TABLET_SERVER, tableName));
+        verify(iter, 50000, 100000);
+        // Once all of the data in the range was read the scanner should automatically close the
+        // scan session
+        assertEquals(0L, countActiveScans(c, TABLET_SERVER, tableName));
       }
+
+      // Nothing should have created any ew scan sessions for the table
+      assertEquals(0L, countActiveScans(c, TABLET_SERVER, tableName));
     }
   }
 

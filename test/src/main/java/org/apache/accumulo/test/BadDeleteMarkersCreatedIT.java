@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,40 +18,40 @@
  */
 package org.apache.accumulo.test;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.fail;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.SortedSet;
 import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
 
-import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.client.admin.InstanceOperations;
-import org.apache.accumulo.core.clientImpl.ClientInfo;
+import org.apache.accumulo.core.clientImpl.ClientContext;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Value;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.fate.zookeeper.ZooCache;
+import org.apache.accumulo.core.lock.ServiceLock;
+import org.apache.accumulo.core.lock.ServiceLockData;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.DeletesSection;
 import org.apache.accumulo.core.security.Authorizations;
-import org.apache.accumulo.fate.zookeeper.ServiceLock;
-import org.apache.accumulo.fate.zookeeper.ZooCache;
-import org.apache.accumulo.fate.zookeeper.ZooUtil;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.accumulo.minicluster.ServerType;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
+import org.apache.accumulo.test.util.Wait;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,33 +60,27 @@ public class BadDeleteMarkersCreatedIT extends AccumuloClusterHarness {
   private static final Logger log = LoggerFactory.getLogger(BadDeleteMarkersCreatedIT.class);
 
   @Override
-  public int defaultTimeoutSeconds() {
-    return 120;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(2);
   }
 
   @Override
   public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
-    cfg.setNumTservers(1);
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(1);
     cfg.setProperty(Property.GC_CYCLE_DELAY, "1s");
     cfg.setProperty(Property.GC_CYCLE_START, "0s");
   }
 
   private int timeoutFactor = 1;
 
-  @Before
+  @BeforeEach
   public void getTimeoutFactor() {
-    try {
-      timeoutFactor = Integer.parseInt(System.getProperty("timeout.factor"));
-    } catch (NumberFormatException e) {
-      log.warn("Could not parse integer from timeout.factor");
-    }
-
-    assertTrue("timeout.factor must be greater than or equal to 1", timeoutFactor >= 1);
+    timeoutFactor = Wait.getTimeoutFactor(e -> 1);
   }
 
   private String gcCycleDelay, gcCycleStart;
 
-  @Before
+  @BeforeEach
   public void alterConfig() throws Exception {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
       InstanceOperations iops = client.instanceOperations();
@@ -99,40 +93,38 @@ public class BadDeleteMarkersCreatedIT extends AccumuloClusterHarness {
     }
     getCluster().getClusterControl().stopAllServers(ServerType.GARBAGE_COLLECTOR);
 
-    try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
-      ClientInfo info = ClientInfo.from(client.properties());
-      ZooCache zcache = new ZooCache(info.getZooKeepers(), info.getZooKeepersSessionTimeOut());
+    try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build();
+        ClientContext context = (ClientContext) client) {
+      ZooCache zcache = context.getZooCache();
       zcache.clear();
-      var path = ServiceLock
-          .path(ZooUtil.getRoot(client.instanceOperations().getInstanceID()) + Constants.ZGC_LOCK);
-      byte[] gcLockData;
+      var path = context.getServerPaths().createGarbageCollectorPath();
+      Optional<ServiceLockData> gcLockData;
       do {
         gcLockData = ServiceLock.getLockData(zcache, path, null);
-        if (gcLockData != null) {
+        if (gcLockData.isPresent()) {
           log.info("Waiting for GC ZooKeeper lock to expire");
           Thread.sleep(2000);
         }
-      } while (gcLockData != null);
+      } while (gcLockData.isPresent());
 
       log.info("GC lock was lost");
 
       getCluster().getClusterControl().startAllServers(ServerType.GARBAGE_COLLECTOR);
       log.info("Garbage collector was restarted");
 
-      gcLockData = null;
       do {
         gcLockData = ServiceLock.getLockData(zcache, path, null);
-        if (gcLockData == null) {
+        if (gcLockData.isEmpty()) {
           log.info("Waiting for GC ZooKeeper lock to be acquired");
           Thread.sleep(2000);
         }
-      } while (gcLockData == null);
+      } while (gcLockData.isEmpty());
 
       log.info("GC lock was acquired");
     }
   }
 
-  @After
+  @AfterEach
   public void restoreConfig() throws Exception {
     try (AccumuloClient c = Accumulo.newClient().from(getClientProps()).build()) {
       InstanceOperations iops = c.instanceOperations();
@@ -157,7 +149,7 @@ public class BadDeleteMarkersCreatedIT extends AccumuloClusterHarness {
       log.info("Creating table to be deleted");
       c.tableOperations().create(tableName);
       final String tableId = c.tableOperations().tableIdMap().get(tableName);
-      assertNotNull("Expected to find a tableId", tableId);
+      assertNotNull(tableId, "Expected to find a tableId");
 
       // add some splits
       SortedSet<Text> splits = new TreeSet<>();
@@ -171,10 +163,11 @@ public class BadDeleteMarkersCreatedIT extends AccumuloClusterHarness {
       c.tableOperations().delete(tableName);
       log.info("Sleeping to let garbage collector run");
       // let gc run
-      sleepUninterruptibly(timeoutFactor * 15, TimeUnit.SECONDS);
+      Thread.sleep(SECONDS.toMillis(timeoutFactor * 15L));
       log.info("Verifying that delete markers were deleted");
       // look for delete markers
-      try (Scanner scanner = c.createScanner(MetadataTable.NAME, Authorizations.EMPTY)) {
+      try (Scanner scanner =
+          c.createScanner(AccumuloTable.METADATA.tableName(), Authorizations.EMPTY)) {
         scanner.setRange(DeletesSection.getRange());
         for (Entry<Key,Value> entry : scanner) {
           String row = entry.getKey().getRow().toString();

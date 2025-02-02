@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -46,22 +46,18 @@ import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.InterruptibleIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.SourceSwitchingIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.SourceSwitchingIterator.DataSource;
-import org.apache.accumulo.core.iteratorsImpl.system.TimeSettingIterator;
-import org.apache.accumulo.core.metadata.TabletFile;
+import org.apache.accumulo.core.logging.TabletLogger;
+import org.apache.accumulo.core.metadata.StoredTabletFile;
 import org.apache.accumulo.core.metadata.schema.DataFileValue;
 import org.apache.accumulo.core.sample.impl.SamplerConfigurationImpl;
 import org.apache.accumulo.core.util.threads.ThreadPools;
 import org.apache.accumulo.server.ServerContext;
-import org.apache.accumulo.server.problems.ProblemReport;
 import org.apache.accumulo.server.problems.ProblemReportingIterator;
-import org.apache.accumulo.server.problems.ProblemReports;
-import org.apache.accumulo.server.problems.ProblemType;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.cache.Cache;
+import com.github.benmanes.caffeine.cache.Cache;
 
 public class FileManager {
 
@@ -70,12 +66,12 @@ public class FileManager {
   private int maxOpen;
 
   private static class OpenReader implements Comparable<OpenReader> {
-    long releaseTime;
-    FileSKVIterator reader;
-    String fileName;
+    final long releaseTime;
+    final FileSKVIterator reader;
+    final StoredTabletFile file;
 
-    public OpenReader(String fileName, FileSKVIterator reader) {
-      this.fileName = fileName;
+    public OpenReader(StoredTabletFile file, FileSKVIterator reader) {
+      this.file = file;
       this.reader = reader;
       this.releaseTime = System.currentTimeMillis();
     }
@@ -95,12 +91,12 @@ public class FileManager {
 
     @Override
     public int hashCode() {
-      return fileName.hashCode();
+      return file.hashCode();
     }
   }
 
-  private Map<String,List<OpenReader>> openFiles;
-  private HashMap<FileSKVIterator,String> reservedReaders;
+  private Map<StoredTabletFile,List<OpenReader>> openFiles;
+  private HashMap<FileSKVIterator,StoredTabletFile> reservedReaders;
 
   private Semaphore filePermits;
 
@@ -123,9 +119,9 @@ public class FileManager {
       // determine which files to close in a sync block, and then close the
       // files outside of the sync block
       synchronized (FileManager.this) {
-        Iterator<Entry<String,List<OpenReader>>> iter = openFiles.entrySet().iterator();
+        Iterator<Entry<StoredTabletFile,List<OpenReader>>> iter = openFiles.entrySet().iterator();
         while (iter.hasNext()) {
-          Entry<String,List<OpenReader>> entry = iter.next();
+          Entry<StoredTabletFile,List<OpenReader>> entry = iter.next();
           List<OpenReader> ofl = entry.getValue();
 
           for (Iterator<OpenReader> oflIter = ofl.iterator(); oflIter.hasNext();) {
@@ -152,27 +148,29 @@ public class FileManager {
 
   public FileManager(ServerContext context, int maxOpen, Cache<String,Long> fileLenCache) {
 
-    if (maxOpen <= 0)
+    if (maxOpen <= 0) {
       throw new IllegalArgumentException("maxOpen <= 0");
+    }
     this.context = context;
     this.fileLenCache = fileLenCache;
 
-    this.filePermits = new Semaphore(maxOpen, false);
+    // Creates a fair semaphore to ensure thread starvation doesn't occur
+    this.filePermits = new Semaphore(maxOpen, true);
     this.maxOpen = maxOpen;
 
     this.openFiles = new HashMap<>();
     this.reservedReaders = new HashMap<>();
 
-    this.maxIdleTime = context.getConfiguration().getTimeInMillis(Property.TSERV_MAX_IDLE);
-    ThreadPools.createGeneralScheduledExecutorService(context.getConfiguration())
-        .scheduleWithFixedDelay(new IdleFileCloser(), maxIdleTime, maxIdleTime / 2,
-            TimeUnit.MILLISECONDS);
+    this.maxIdleTime = this.context.getConfiguration().getTimeInMillis(Property.TSERV_MAX_IDLE);
+    ThreadPools.watchCriticalScheduledTask(
+        this.context.getScheduledExecutor().scheduleWithFixedDelay(new IdleFileCloser(),
+            maxIdleTime, maxIdleTime / 2, TimeUnit.MILLISECONDS));
 
     this.slowFilePermitMillis =
-        context.getConfiguration().getTimeInMillis(Property.TSERV_SLOW_FILEPERMIT_MILLIS);
+        this.context.getConfiguration().getTimeInMillis(Property.TSERV_SLOW_FILEPERMIT_MILLIS);
   }
 
-  private static int countReaders(Map<String,List<OpenReader>> files) {
+  private static int countReaders(Map<StoredTabletFile,List<OpenReader>> files) {
     int count = 0;
 
     for (List<OpenReader> list : files.values()) {
@@ -186,7 +184,7 @@ public class FileManager {
 
     ArrayList<OpenReader> openReaders = new ArrayList<>();
 
-    for (Entry<String,List<OpenReader>> entry : openFiles.entrySet()) {
+    for (Entry<StoredTabletFile,List<OpenReader>> entry : openFiles.entrySet()) {
       openReaders.addAll(entry.getValue());
     }
 
@@ -197,13 +195,13 @@ public class FileManager {
     for (int i = 0; i < numToTake && i < openReaders.size(); i++) {
       OpenReader or = openReaders.get(i);
 
-      List<OpenReader> ofl = openFiles.get(or.fileName);
+      List<OpenReader> ofl = openFiles.get(or.file);
       if (!ofl.remove(or)) {
-        throw new RuntimeException("Failed to remove open reader that should have been there");
+        throw new IllegalStateException("Failed to remove open reader that should have been there");
       }
 
       if (ofl.isEmpty()) {
-        openFiles.remove(or.fileName);
+        openFiles.remove(or.file);
       }
 
       ret.add(or.reader);
@@ -222,10 +220,10 @@ public class FileManager {
     }
   }
 
-  private List<String> takeOpenFiles(Collection<String> files,
-      Map<FileSKVIterator,String> readersReserved) {
-    List<String> filesToOpen = Collections.emptyList();
-    for (String file : files) {
+  private List<StoredTabletFile> takeOpenFiles(Collection<StoredTabletFile> files,
+      Map<FileSKVIterator,StoredTabletFile> readersReserved) {
+    List<StoredTabletFile> filesToOpen = Collections.emptyList();
+    for (StoredTabletFile file : files) {
       List<OpenReader> ofl = openFiles.get(file);
       if (ofl != null && !ofl.isEmpty()) {
         OpenReader openReader = ofl.remove(ofl.size() - 1);
@@ -243,8 +241,9 @@ public class FileManager {
     return filesToOpen;
   }
 
-  private Map<FileSKVIterator,String> reserveReaders(KeyExtent tablet, Collection<String> files,
-      boolean continueOnFailure, CacheProvider cacheProvider) throws IOException {
+  private Map<FileSKVIterator,StoredTabletFile> reserveReaders(KeyExtent tablet,
+      Collection<StoredTabletFile> files, boolean continueOnFailure, CacheProvider cacheProvider)
+      throws IOException {
 
     if (!tablet.isMeta() && files.size() >= maxOpen) {
       throw new IllegalArgumentException("requested files exceeds max open");
@@ -254,9 +253,9 @@ public class FileManager {
       return Collections.emptyMap();
     }
 
-    List<String> filesToOpen = null;
+    List<StoredTabletFile> filesToOpen = null;
     List<FileSKVIterator> filesToClose = Collections.emptyList();
-    Map<FileSKVIterator,String> readersReserved = new HashMap<>();
+    Map<FileSKVIterator,StoredTabletFile> readersReserved = new HashMap<>();
 
     if (!tablet.isMeta()) {
       long start = System.currentTimeMillis();
@@ -264,17 +263,17 @@ public class FileManager {
       long waitTime = System.currentTimeMillis() - start;
 
       if (waitTime >= slowFilePermitMillis) {
-        log.info("Slow file permits request: {} ms, files requested: {}, tablet: {}", waitTime,
-            files.size(), tablet);
+        log.warn("Slow file permits request: {} ms, files requested: {}, "
+            + "max open files: {}, tablet: {}", waitTime, files.size(), maxOpen, tablet);
       }
     }
 
-    // now that the we are past the semaphore, we have the authority
+    // now that we are past the semaphore, we have the authority
     // to open files.size() files
 
     // determine what work needs to be done in sync block
     // but do the work of opening and closing files outside
-    // a synch block
+    // the block
     synchronized (this) {
 
       filesToOpen = takeOpenFiles(files, readersReserved);
@@ -296,29 +295,23 @@ public class FileManager {
     closeReaders(filesToClose);
 
     // open any files that need to be opened
-    for (String file : filesToOpen) {
+    for (StoredTabletFile file : filesToOpen) {
       try {
-        if (!file.contains(":"))
-          throw new IllegalArgumentException("Expected uri, got : " + file);
-        Path path = new Path(file);
-        FileSystem ns = context.getVolumeManager().getFileSystemByPath(path);
+        FileSystem ns = context.getVolumeManager().getFileSystemByPath(file.getPath());
         // log.debug("Opening "+file + " path " + path);
+        var tableConf = context.getTableConfiguration(tablet.tableId());
         FileSKVIterator reader = FileOperations.getInstance().newReaderBuilder()
-            .forFile(path.toString(), ns, ns.getConf(), context.getCryptoService())
-            .withTableConfiguration(context.getTableConfiguration(tablet.tableId()))
-            .withCacheProvider(cacheProvider).withFileLenCache(fileLenCache).build();
+            .forFile(file, ns, ns.getConf(), tableConf.getCryptoService())
+            .withTableConfiguration(tableConf).withCacheProvider(cacheProvider)
+            .withFileLenCache(fileLenCache).build();
         readersReserved.put(reader, file);
       } catch (Exception e) {
-
-        ProblemReports.getInstance(context)
-            .report(new ProblemReport(tablet.tableId(), ProblemType.FILE_READ, file, e));
-
+        TabletLogger.fileReadFailed(file.toString(), tablet, e);
         if (continueOnFailure) {
           // release the permit for the file that failed to open
           if (!tablet.isMeta()) {
             filePermits.release(1);
           }
-          log.warn("Failed to open file {} {} continuing...", file, e.getMessage(), e);
         } else {
           // close whatever files were opened
           closeReaders(readersReserved.keySet());
@@ -327,7 +320,6 @@ public class FileManager {
             filePermits.release(files.size());
           }
 
-          log.error("Failed to open file {} {}", file, e.getMessage());
           throw new IOException("Failed to open " + file, e);
         }
       }
@@ -345,6 +337,15 @@ public class FileManager {
       boolean sawIOException) {
     // put files in openFiles
 
+    for (FileSKVIterator reader : readers) {
+      try {
+        reader.closeDeepCopies();
+      } catch (IOException e) {
+        log.warn("{}", e.getMessage(), e);
+        sawIOException = true;
+      }
+    }
+
     synchronized (this) {
 
       // check that readers were actually reserved ... want to make sure a thread does
@@ -354,24 +355,16 @@ public class FileManager {
       }
 
       for (FileSKVIterator reader : readers) {
-        try {
-          reader.closeDeepCopies();
-        } catch (IOException e) {
-          log.warn("{}", e.getMessage(), e);
-          sawIOException = true;
+        StoredTabletFile file = reservedReaders.remove(reader);
+        if (!sawIOException) {
+          openFiles.computeIfAbsent(file, k -> new ArrayList<>()).add(new OpenReader(file, reader));
         }
-      }
-
-      for (FileSKVIterator reader : readers) {
-        String fileName = reservedReaders.remove(reader);
-        if (!sawIOException)
-          openFiles.computeIfAbsent(fileName, k -> new ArrayList<>())
-              .add(new OpenReader(fileName, reader));
       }
     }
 
-    if (sawIOException)
+    if (sawIOException) {
       closeReaders(readers);
+    }
 
     // decrement the semaphore
     if (!tablet.isMeta()) {
@@ -383,13 +376,13 @@ public class FileManager {
   static class FileDataSource implements DataSource {
 
     private SortedKeyValueIterator<Key,Value> iter;
-    private ArrayList<FileDataSource> deepCopies;
+    private final ArrayList<FileDataSource> deepCopies;
     private boolean current = true;
     private IteratorEnvironment env;
-    private String file;
+    private StoredTabletFile file;
     private AtomicBoolean iflag;
 
-    FileDataSource(String file, SortedKeyValueIterator<Key,Value> iter) {
+    FileDataSource(StoredTabletFile file, SortedKeyValueIterator<Key,Value> iter) {
       this.file = file;
       this.iter = iter;
       this.deepCopies = new ArrayList<>();
@@ -456,11 +449,11 @@ public class FileManager {
 
   public class ScanFileManager {
 
-    private ArrayList<FileDataSource> dataSources;
-    private ArrayList<FileSKVIterator> tabletReservedReaders;
-    private KeyExtent tablet;
+    private final ArrayList<FileDataSource> dataSources;
+    private final ArrayList<FileSKVIterator> tabletReservedReaders;
+    private final KeyExtent tablet;
     private boolean continueOnFailure;
-    private CacheProvider cacheProvider;
+    private final CacheProvider cacheProvider;
 
     ScanFileManager(KeyExtent tablet, CacheProvider cacheProvider) {
       tabletReservedReaders = new ArrayList<>();
@@ -476,7 +469,7 @@ public class FileManager {
       }
     }
 
-    private Map<FileSKVIterator,String> openFiles(List<String> files)
+    private Map<FileSKVIterator,StoredTabletFile> openFiles(List<StoredTabletFile> files)
         throws TooManyFilesException, IOException {
       // one tablet can not open more than maxOpen files, otherwise it could get stuck
       // forever waiting on itself to release files
@@ -488,35 +481,30 @@ public class FileManager {
                 + maxOpen + " tablet = " + tablet);
       }
 
-      Map<FileSKVIterator,String> newlyReservedReaders =
+      Map<FileSKVIterator,StoredTabletFile> newlyReservedReaders =
           reserveReaders(tablet, files, continueOnFailure, cacheProvider);
 
       tabletReservedReaders.addAll(newlyReservedReaders.keySet());
       return newlyReservedReaders;
     }
 
-    public synchronized List<InterruptibleIterator> openFiles(Map<TabletFile,DataFileValue> files,
-        boolean detachable, SamplerConfigurationImpl samplerConfig) throws IOException {
+    public synchronized List<InterruptibleIterator> openFiles(
+        Map<StoredTabletFile,DataFileValue> files, boolean detachable,
+        SamplerConfigurationImpl samplerConfig) throws IOException {
 
-      Map<FileSKVIterator,String> newlyReservedReaders = openFiles(
-          files.keySet().stream().map(TabletFile::getPathStr).collect(Collectors.toList()));
+      Map<FileSKVIterator,StoredTabletFile> newlyReservedReaders =
+          openFiles(new ArrayList<>(files.keySet()));
 
       ArrayList<InterruptibleIterator> iters = new ArrayList<>();
 
-      boolean sawTimeSet = false;
-      for (DataFileValue dfv : files.values()) {
-        if (dfv.isTimeSet()) {
-          sawTimeSet = true;
-          break;
-        }
-      }
+      boolean someIteratorsWillWrap =
+          files.values().stream().anyMatch(DataFileValue::willWrapIterator);
 
-      for (Entry<FileSKVIterator,String> entry : newlyReservedReaders.entrySet()) {
-        FileSKVIterator reader = entry.getKey();
-        String filename = entry.getValue();
+      for (Entry<FileSKVIterator,StoredTabletFile> entry : newlyReservedReaders.entrySet()) {
+        FileSKVIterator source = entry.getKey();
+        StoredTabletFile file = entry.getValue();
         InterruptibleIterator iter;
 
-        FileSKVIterator source = reader;
         if (samplerConfig != null) {
           source = source.getSample(samplerConfig);
           if (source == null) {
@@ -524,23 +512,13 @@ public class FileManager {
           }
         }
 
-        if (detachable) {
-          FileDataSource fds = new FileDataSource(filename, source);
-          dataSources.add(fds);
-          SourceSwitchingIterator ssi = new SourceSwitchingIterator(fds);
-          iter = new ProblemReportingIterator(context, tablet.tableId(), filename,
-              continueOnFailure, ssi);
-        } else {
-          iter = new ProblemReportingIterator(context, tablet.tableId(), filename,
-              continueOnFailure, source);
-        }
+        iter = new ProblemReportingIterator(tablet.tableId(), file.toString(), continueOnFailure,
+            detachable ? getSsi(file, source) : source);
 
-        if (sawTimeSet) {
+        if (someIteratorsWillWrap) {
           // constructing FileRef is expensive so avoid if not needed
-          DataFileValue value = files.get(new TabletFile(new Path(filename)));
-          if (value.isTimeSet()) {
-            iter = new TimeSettingIterator(iter, value.getTime());
-          }
+          DataFileValue value = files.get(file);
+          iter = value.wrapFileIterator(iter);
         }
 
         iters.add(iter);
@@ -549,24 +527,33 @@ public class FileManager {
       return iters;
     }
 
+    private SourceSwitchingIterator getSsi(StoredTabletFile file, FileSKVIterator source) {
+      FileDataSource fds = new FileDataSource(file, source);
+      dataSources.add(fds);
+      return new SourceSwitchingIterator(fds);
+    }
+
     public synchronized void detach() {
 
       releaseReaders(tablet, tabletReservedReaders, false);
       tabletReservedReaders.clear();
 
-      for (FileDataSource fds : dataSources)
+      for (FileDataSource fds : dataSources) {
         fds.unsetIterator();
+      }
     }
 
     public synchronized void reattach(SamplerConfigurationImpl samplerConfig) throws IOException {
-      if (!tabletReservedReaders.isEmpty())
+      if (!tabletReservedReaders.isEmpty()) {
         throw new IllegalStateException();
+      }
 
-      List<String> files = dataSources.stream().map(x -> x.file).collect(Collectors.toList());
-      Map<FileSKVIterator,String> newlyReservedReaders = openFiles(files);
-      Map<String,List<FileSKVIterator>> map = new HashMap<>();
+      List<StoredTabletFile> files =
+          dataSources.stream().map(x -> x.file).collect(Collectors.toList());
+      Map<FileSKVIterator,StoredTabletFile> newlyReservedReaders = openFiles(files);
+      Map<StoredTabletFile,List<FileSKVIterator>> map = new HashMap<>();
       newlyReservedReaders.forEach(
-          (reader, fileName) -> map.computeIfAbsent(fileName, k -> new LinkedList<>()).add(reader));
+          (reader, file) -> map.computeIfAbsent(file, k -> new LinkedList<>()).add(reader));
 
       for (FileDataSource fds : dataSources) {
         FileSKVIterator source = map.get(fds.file).remove(0);
@@ -593,5 +580,9 @@ public class FileManager {
 
   public ScanFileManager newScanFileManager(KeyExtent tablet, CacheProvider cacheProvider) {
     return new ScanFileManager(tablet, cacheProvider);
+  }
+
+  public int getOpenFiles() {
+    return maxOpen - filePermits.availablePermits();
   }
 }

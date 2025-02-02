@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,46 +18,55 @@
  */
 package org.apache.accumulo.test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.IteratorSetting;
+import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.client.TableExistsException;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.admin.NewTableConfiguration;
+import org.apache.accumulo.core.client.admin.TabletAvailability;
 import org.apache.accumulo.core.conf.Property;
+import org.apache.accumulo.core.data.Key;
+import org.apache.accumulo.core.data.Range;
+import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
+import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.TabletColumnFamily;
 import org.apache.accumulo.harness.SharedMiniClusterBase;
 import org.apache.hadoop.io.Text;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 public class NewTableConfigurationIT extends SharedMiniClusterBase {
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 30;
+  protected Duration defaultTimeout() {
+    return Duration.ofSeconds(60);
   }
 
-  @BeforeClass
+  @BeforeAll
   public static void setup() throws Exception {
     SharedMiniClusterBase.startMiniCluster();
   }
 
-  @AfterClass
+  @AfterAll
   public static void teardown() {
     SharedMiniClusterBase.stopMiniCluster();
   }
@@ -92,19 +101,83 @@ public class NewTableConfigurationIT extends SharedMiniClusterBase {
     }
   }
 
-  /**
-   * Verify that you cannot have overlapping locality groups.
-   *
-   * Attempt to set a locality group with overlapping groups. This test should throw an
-   * IllegalArgumentException indicating that groups overlap.
-   */
-  @Test(expected = IllegalArgumentException.class)
-  public void testOverlappingGroupsFail() {
+  @Test
+  public void testCreateTableWithInitialTabletAvailability() throws AccumuloException,
+      AccumuloSecurityException, TableNotFoundException, TableExistsException {
+    try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
+
+      String[] tableNames = getUniqueNames(8);
+
+      // use a default NewTableConfiguration
+      verifyNtcWithTabletAvailability(client, tableNames[0], null, null);
+      // set initial goals for tables upon creation, without splits
+      verifyNtcWithTabletAvailability(client, tableNames[1], TabletAvailability.ONDEMAND, null);
+      verifyNtcWithTabletAvailability(client, tableNames[2], TabletAvailability.HOSTED, null);
+      verifyNtcWithTabletAvailability(client, tableNames[3], TabletAvailability.UNHOSTED, null);
+
+      SortedSet<Text> splits = new TreeSet<>();
+      splits.add(new Text("d"));
+      splits.add(new Text("h"));
+      splits.add(new Text("m"));
+      splits.add(new Text("r"));
+      splits.add(new Text("w"));
+
+      // Use NTC to set initial splits. Verify each tablet has tablet availability set.
+      // Should work with no availability explicitly supplied as well as each of the accepted goals
+      verifyNtcWithTabletAvailability(client, tableNames[4], null, splits);
+      verifyNtcWithTabletAvailability(client, tableNames[5], TabletAvailability.ONDEMAND, splits);
+      verifyNtcWithTabletAvailability(client, tableNames[6], TabletAvailability.HOSTED, splits);
+      verifyNtcWithTabletAvailability(client, tableNames[7], TabletAvailability.UNHOSTED, splits);
+    }
+  }
+
+  // Verify that NewTableConfiguration correctly sets the initial tablet availability on a table,
+  // both with and without initial splits being set.
+  private void verifyNtcWithTabletAvailability(AccumuloClient client, String tableName,
+      TabletAvailability tabletAvailability, SortedSet<Text> splits) throws TableNotFoundException,
+      AccumuloException, AccumuloSecurityException, TableExistsException {
+
     NewTableConfiguration ntc = new NewTableConfiguration();
-    Map<String,Set<Text>> lgroups = new HashMap<>();
-    lgroups.put("lg1", Set.of(new Text("colFamA"), new Text("colFamB")));
-    lgroups.put("lg2", Set.of(new Text("colFamC"), new Text("colFamB")));
-    ntc.setLocalityGroups(lgroups);
+
+    // If availability not supplied via NewTableConfiguration, expect ONDEMAND as default
+    String expectedTabletAvailability = TabletAvailability.ONDEMAND.toString();
+    if (tabletAvailability != null) {
+      expectedTabletAvailability = tabletAvailability.toString();
+      ntc.withInitialTabletAvailability(tabletAvailability);
+    }
+
+    // Set expected number of tablets if no splits are provided
+    int expectedTabletCount = 1;
+    if (splits != null) {
+      expectedTabletCount = splits.size() + 1;
+      ntc.withSplits(splits);
+    }
+    client.tableOperations().create(tableName, ntc);
+
+    String tableId = getTableId(tableName);
+    Text beginRow;
+    Text endRow = new Text(tableId + "<");
+    if (expectedTabletCount == 1) {
+      beginRow = endRow;
+    } else {
+      beginRow = new Text(tableId + ";" + splits.first());
+    }
+    Range range = new Range(beginRow, endRow);
+    try (Scanner scanner = client.createScanner("accumulo.metadata")) {
+      TabletColumnFamily.AVAILABILITY_COLUMN.fetch(scanner);
+      scanner.setRange(range);
+      for (Map.Entry<Key,Value> entry : scanner) {
+        assertEquals(expectedTabletAvailability, entry.getValue().toString());
+      }
+      assertEquals(expectedTabletCount, scanner.stream().count());
+    }
+  }
+
+  private String getTableId(String tableName) {
+    try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
+      Map<String,String> idMap = client.tableOperations().tableIdMap();
+      return idMap.get(tableName);
+    }
   }
 
   /**
@@ -206,25 +279,6 @@ public class NewTableConfigurationIT extends SharedMiniClusterBase {
   }
 
   /**
-   * Verify that properties set using NewTableConfiguration must be table properties.
-   */
-  @Test(expected = IllegalArgumentException.class)
-  public void testInvalidTablePropertiesSet() {
-    NewTableConfiguration ntc = new NewTableConfiguration();
-    Map<String,String> props = new HashMap<>();
-
-    // These properties should work just with no issue
-    props.put(Property.TABLE_ARBITRARY_PROP_PREFIX.getKey() + "prop1", "val1");
-    props.put(Property.TABLE_ARBITRARY_PROP_PREFIX.getKey() + "prop2", "val2");
-    ntc.setProperties(props);
-
-    // These properties should result in an illegalArgumentException
-    props.put("invalidProp1", "value1");
-    props.put("invalidProp2", "value2");
-    ntc.setProperties(props);
-  }
-
-  /**
    * Create table with initial locality groups but no default iterators
    */
   @Test
@@ -300,7 +354,7 @@ public class NewTableConfigurationIT extends SharedMiniClusterBase {
       verifyIterators(client, tableName, new String[] {"table.iterator.scan.someName=10,foo.bar"},
           true);
       client.tableOperations().removeIterator(tableName, "someName",
-          EnumSet.allOf((IteratorScope.class)));
+          EnumSet.allOf(IteratorScope.class));
       verifyIterators(client, tableName, new String[] {}, true);
       Map<String,EnumSet<IteratorScope>> iteratorList2 =
           client.tableOperations().listIterators(tableName);
@@ -429,54 +483,6 @@ public class NewTableConfigurationIT extends SharedMiniClusterBase {
   }
 
   /**
-   * Verify iterator conflicts are discovered
-   */
-  @Test(expected = IllegalArgumentException.class)
-  public void testIteratorConflictFound1()
-      throws AccumuloException, AccumuloSecurityException, TableExistsException {
-    try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
-      String tableName = getUniqueNames(2)[0];
-
-      NewTableConfiguration ntc = new NewTableConfiguration();
-      IteratorSetting setting = new IteratorSetting(10, "someName", "foo.bar");
-      ntc.attachIterator(setting, EnumSet.of(IteratorScope.scan));
-      setting = new IteratorSetting(12, "someName", "foo2.bar");
-      ntc.attachIterator(setting, EnumSet.of(IteratorScope.scan));
-      client.tableOperations().create(tableName, ntc);
-    }
-  }
-
-  @Test(expected = IllegalArgumentException.class)
-  public void testIteratorConflictFound2()
-      throws AccumuloException, AccumuloSecurityException, TableExistsException {
-    try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
-      String tableName = getUniqueNames(2)[0];
-
-      NewTableConfiguration ntc = new NewTableConfiguration();
-      IteratorSetting setting = new IteratorSetting(10, "someName", "foo.bar");
-      ntc.attachIterator(setting, EnumSet.of(IteratorScope.scan));
-      setting = new IteratorSetting(10, "anotherName", "foo2.bar");
-      ntc.attachIterator(setting, EnumSet.of(IteratorScope.scan));
-      client.tableOperations().create(tableName, ntc);
-    }
-  }
-
-  @Test(expected = IllegalArgumentException.class)
-  public void testIteratorConflictFound3()
-      throws AccumuloException, AccumuloSecurityException, TableExistsException {
-    try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
-      String tableName = getUniqueNames(2)[0];
-
-      NewTableConfiguration ntc = new NewTableConfiguration();
-      IteratorSetting setting = new IteratorSetting(10, "someName", "foo.bar");
-      ntc.attachIterator(setting, EnumSet.of(IteratorScope.scan));
-      setting = new IteratorSetting(12, "someName", "foo.bar");
-      ntc.attachIterator(setting, EnumSet.of(IteratorScope.scan));
-      client.tableOperations().create(tableName, ntc);
-    }
-  }
-
-  /**
    * Verify that multiple calls to attachIterator keep adding to iterators, i.e., do not overwrite
    * existing iterators.
    */
@@ -599,58 +605,11 @@ public class NewTableConfigurationIT extends SharedMiniClusterBase {
   }
 
   /**
-   * Verify that disjoint check works as expected with setProperties
-   */
-  @Test(expected = IllegalArgumentException.class)
-  public void testSetPropertiesDisjointCheck() {
-    NewTableConfiguration ntc = new NewTableConfiguration();
-
-    Map<String,Set<Text>> lgroups = new HashMap<>();
-    lgroups.put("lg1", Set.of(new Text("dog")));
-    ntc.setLocalityGroups(lgroups);
-
-    Map<String,String> props = new HashMap<>();
-    props.put("table.key1", "val1");
-    props.put("table.group.lg1", "cat");
-    ntc.setProperties(props);
-  }
-
-  /**
-   * Verify checkDisjoint works with locality groups.
-   */
-  @Test(expected = IllegalArgumentException.class)
-  public void testSetLocalityGroupsDisjointCheck() {
-    NewTableConfiguration ntc = new NewTableConfiguration();
-
-    Map<String,String> props = new HashMap<>();
-    props.put("table.group.lg1", "cat");
-    ntc.setProperties(props);
-
-    Map<String,Set<Text>> lgroups = new HashMap<>();
-    lgroups.put("lg1", Set.of(new Text("dog")));
-    ntc.setLocalityGroups(lgroups);
-  }
-
-  /**
-   * Verify checkDisjoint works with iterators groups.
-   */
-  @Test(expected = IllegalArgumentException.class)
-  public void testAttachIteratorDisjointCheck() {
-    NewTableConfiguration ntc = new NewTableConfiguration();
-
-    Map<String,String> props = new HashMap<>();
-    props.put("table.iterator.scan.someName", "10");
-    ntc.setProperties(props);
-
-    IteratorSetting setting = new IteratorSetting(10, "someName", "foo.bar");
-    ntc.attachIterator(setting, EnumSet.of(IteratorScope.scan));
-  }
-
-  /**
    * Verify the expected iterator properties exist.
    */
   private void verifyIterators(AccumuloClient client, String tablename, String[] values,
-      boolean withDefaultIts) throws AccumuloException, TableNotFoundException {
+      boolean withDefaultIts)
+      throws AccumuloSecurityException, AccumuloException, TableNotFoundException {
     Map<String,String> expected = new TreeMap<>();
     if (withDefaultIts) {
       expected.put("table.iterator.scan.vers",

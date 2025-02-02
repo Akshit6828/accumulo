@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -24,12 +24,12 @@ import static org.apache.accumulo.core.metadata.schema.TabletMetadata.ColumnType
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.apache.accumulo.core.classloader.ClassLoaderUtil;
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.AccumuloSecurityException;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.clientImpl.thrift.ThriftSecurityException;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.TabletId;
@@ -37,14 +37,15 @@ import org.apache.accumulo.core.dataImpl.TabletIdImpl;
 import org.apache.accumulo.core.manager.balancer.TabletServerIdImpl;
 import org.apache.accumulo.core.manager.balancer.TabletStatisticsImpl;
 import org.apache.accumulo.core.manager.state.tables.TableState;
+import org.apache.accumulo.core.metadata.schema.TabletMetadata;
 import org.apache.accumulo.core.metadata.schema.TabletsMetadata;
 import org.apache.accumulo.core.rpc.ThriftUtil;
+import org.apache.accumulo.core.rpc.clients.ThriftClientTypes;
 import org.apache.accumulo.core.spi.balancer.BalancerEnvironment;
 import org.apache.accumulo.core.spi.balancer.data.TabletServerId;
 import org.apache.accumulo.core.spi.balancer.data.TabletStatistics;
-import org.apache.accumulo.core.tabletserver.thrift.TabletClientService;
+import org.apache.accumulo.core.tabletserver.thrift.TabletServerClientService;
 import org.apache.accumulo.core.trace.TraceUtil;
-import org.apache.accumulo.core.util.HostAndPort;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.accumulo.server.ServiceEnvironmentImpl;
 import org.apache.thrift.TException;
@@ -52,30 +53,35 @@ import org.apache.thrift.transport.TTransportException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.net.HostAndPort;
+
 public class BalancerEnvironmentImpl extends ServiceEnvironmentImpl implements BalancerEnvironment {
   private static final Logger log = LoggerFactory.getLogger(BalancerEnvironmentImpl.class);
 
-  public BalancerEnvironmentImpl(ServerContext ctx) {
-    super(ctx);
+  public BalancerEnvironmentImpl(ServerContext context) {
+    super(context);
   }
 
   @Override
   public Map<String,TableId> getTableIdMap() {
-    return Tables.getNameToIdMap(getContext());
+    return getContext().getTableNameToIdMap();
   }
 
   @Override
   public boolean isTableOnline(TableId tableId) {
-    return TableState.ONLINE.equals(Tables.getTableState(getContext(), tableId));
+    return TableState.ONLINE.equals(getContext().getTableState(tableId));
   }
 
   @Override
   public Map<TabletId,TabletServerId> listTabletLocations(TableId tableId) {
     Map<TabletId,TabletServerId> tablets = new LinkedHashMap<>();
-    for (var tm : TabletsMetadata.builder(getContext()).forTable(tableId).fetch(LOCATION, PREV_ROW)
-        .build()) {
-      tablets.put(new TabletIdImpl(tm.getExtent()),
-          TabletServerIdImpl.fromThrift(tm.getLocation()));
+    try (TabletsMetadata tabletsMetadata =
+        TabletsMetadata.builder(getContext()).forTable(tableId).fetch(LOCATION, PREV_ROW).build()) {
+      for (var tm : tabletsMetadata) {
+        tablets.put(new TabletIdImpl(tm.getExtent()),
+            TabletServerIdImpl.fromThrift(Optional.ofNullable(tm.getLocation())
+                .map(TabletMetadata.Location::getServerInstance).orElse(null)));
+      }
     }
     return tablets;
   }
@@ -85,8 +91,8 @@ public class BalancerEnvironmentImpl extends ServiceEnvironmentImpl implements B
       TableId tableId) throws AccumuloException, AccumuloSecurityException {
     log.debug("Scanning tablet server {} for table {}", tabletServerId, tableId);
     try {
-      TabletClientService.Client client = ThriftUtil.getClient(
-          new TabletClientService.Client.Factory(),
+      TabletServerClientService.Client client = ThriftUtil.getClient(
+          ThriftClientTypes.TABLET_SERVER,
           HostAndPort.fromParts(tabletServerId.getHost(), tabletServerId.getPort()), getContext());
       try {
         return client
@@ -95,7 +101,7 @@ public class BalancerEnvironmentImpl extends ServiceEnvironmentImpl implements B
       } catch (TTransportException e) {
         log.error("Unable to connect to {}: ", tabletServerId, e);
       } finally {
-        ThriftUtil.returnClient(client);
+        ThriftUtil.returnClient(client, getContext());
       }
     } catch (ThriftSecurityException e) {
       throw new AccumuloSecurityException(e);

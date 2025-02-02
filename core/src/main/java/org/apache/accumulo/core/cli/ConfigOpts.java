@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -47,26 +47,6 @@ public class ConfigOpts extends Help {
     return propsPath;
   }
 
-  // catch all for string based dropped options, including those specific to subclassed extensions
-  // uncomment below if needed
-  // @Parameter(names = {}, hidden=true)
-  private String legacyOpts = null;
-
-  // catch all for boolean dropped options, including those specific to subclassed extensions
-  @Parameter(names = {"-s", "--safemode"}, hidden = true)
-  private boolean legacyOptsBoolean = false;
-
-  // holds information on dealing with dropped options
-  // option -> Message describing replacement option or property
-  private static Map<String,String> LEGACY_OPTION_MSG = new HashMap<>();
-  static {
-    // garbage collector legacy options
-    LEGACY_OPTION_MSG.put("-s", "Replaced by configuration property " + Property.GC_SAFEMODE);
-    LEGACY_OPTION_MSG.put("--safemode",
-        "Replaced by configuration property " + Property.GC_SAFEMODE);
-
-  }
-
   public static class NullSplitter implements IParameterSplitter {
     @Override
     public List<String> split(String value) {
@@ -104,7 +84,7 @@ public class ConfigOpts extends Help {
       String value;
       if (propArgs.length == 2) {
         value = propArgs[1].trim();
-      } else { // if a boolean property then it's mere existence assumes true
+      } else { // if property is boolean then its mere existence assumes true
         value = Property.isValidBooleanPropertyKey(key) ? "true" : "";
       }
       if (key.isEmpty() || value.isEmpty()) {
@@ -118,20 +98,6 @@ public class ConfigOpts extends Help {
   @Override
   public void parseArgs(String programName, String[] args, Object... others) {
     super.parseArgs(programName, args, others);
-    if (legacyOpts != null || legacyOptsBoolean) {
-      String errMsg = "";
-      for (String option : args) {
-        if (LEGACY_OPTION_MSG.containsKey(option)) {
-          errMsg +=
-              "Option " + option + " has been dropped - " + LEGACY_OPTION_MSG.get(option) + "\n";
-        }
-      }
-      errMsg += "See '-o' property override option";
-      // prints error to console if ran from the command line otherwise there is no way to know that
-      // an error occurred
-      System.err.println(errMsg);
-      throw new IllegalArgumentException(errMsg);
-    }
     if (!getOverrides().isEmpty()) {
       log.info("The following configuration was set on the command line:");
       for (Map.Entry<String,String> entry : getOverrides().entrySet()) {

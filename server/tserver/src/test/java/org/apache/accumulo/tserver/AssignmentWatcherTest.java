@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,43 +18,43 @@
  */
 package org.apache.accumulo.tserver;
 
-import java.util.HashMap;
-import java.util.Map;
+import static org.easymock.EasyMock.createMock;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+import static org.easymock.EasyMock.verify;
 
-import org.apache.accumulo.core.conf.AccumuloConfiguration;
+import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+
+import org.apache.accumulo.core.conf.ConfigurationCopy;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
+import org.apache.accumulo.server.ServerContext;
 import org.apache.accumulo.tserver.TabletServerResourceManager.AssignmentWatcher;
-import org.easymock.EasyMock;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class AssignmentWatcherTest {
 
-  private Map<KeyExtent,RunnableStartedAt> assignments;
-  private AccumuloConfiguration conf;
-  private AssignmentWatcher watcher;
-
-  @Before
-  public void setup() {
-    assignments = new HashMap<>();
-    conf = EasyMock.createMock(AccumuloConfiguration.class);
-    watcher = new AssignmentWatcher(conf, assignments);
-  }
-
   @Test
   public void testAssignmentWarning() {
-    ActiveAssignmentRunnable task = EasyMock.createMock(ActiveAssignmentRunnable.class);
-    RunnableStartedAt run = new RunnableStartedAt(task, System.currentTimeMillis());
-    EasyMock.expect(conf.getTimeInMillis(Property.TSERV_ASSIGNMENT_DURATION_WARNING)).andReturn(0L);
-    EasyMock.expect(conf.getCount(Property.GENERAL_SIMPLETIMER_THREADPOOL_SIZE)).andReturn(1);
-    assignments.put(new KeyExtent(TableId.of("1"), null, null), run);
+    var e = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(1);
+    var c = new ConfigurationCopy(Map.of(Property.TSERV_ASSIGNMENT_DURATION_WARNING.getKey(), "0"));
+    ServerContext context = createMock(ServerContext.class);
+    expect(context.getScheduledExecutor()).andReturn(e);
+    expect(context.getConfiguration()).andReturn(c);
 
-    EasyMock.expect(task.getException()).andReturn(new Exception("Assignment warning happened"));
-    EasyMock.replay(conf, task);
+    ActiveAssignmentRunnable task = createMock(ActiveAssignmentRunnable.class);
+    expect(task.getException()).andReturn(new Exception("Assignment warning happened"));
+
+    var assignments = Map.of(new KeyExtent(TableId.of("1"), null, null),
+        new RunnableStartedAt(task, System.currentTimeMillis()));
+    var watcher = new AssignmentWatcher(context, assignments);
+
+    replay(context, task);
     watcher.run();
-    EasyMock.verify(conf, task);
+    verify(context, task);
   }
 
 }

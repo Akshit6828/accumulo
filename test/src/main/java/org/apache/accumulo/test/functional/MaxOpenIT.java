@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,12 +18,12 @@
  */
 package org.apache.accumulo.test.functional;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Random;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
@@ -40,58 +40,45 @@ import org.apache.accumulo.test.TestIngest;
 import org.apache.accumulo.test.TestIngest.IngestParams;
 import org.apache.accumulo.test.VerifyIngest;
 import org.apache.hadoop.conf.Configuration;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * A functional test that exercises hitting the max open file limit on a tablet server. This test
  * assumes there are one or two tablet servers.
  */
-@SuppressWarnings("removal")
 public class MaxOpenIT extends AccumuloClusterHarness {
+
+  @Override
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(3);
+  }
 
   @Override
   public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
     Map<String,String> conf = cfg.getSiteConfig();
     conf.put(Property.TSERV_SCAN_MAX_OPENFILES.getKey(), "4");
-    conf.put(Property.TSERV_MAJC_MAXCONCURRENT.getKey(), "1");
-    conf.put(Property.TSERV_MAJC_THREAD_MAXOPEN.getKey(), "2");
     cfg.setSiteConfig(conf);
   }
 
-  @Override
-  protected int defaultTimeoutSeconds() {
-    return 3 * 60;
-  }
+  private String scanMaxOpenFiles;
 
-  private String scanMaxOpenFiles, majcConcurrent, majcThreadMaxOpen;
-
-  @Before
+  @BeforeEach
   public void alterConfig() throws Exception {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
       InstanceOperations iops = client.instanceOperations();
       Map<String,String> sysConfig = iops.getSystemConfiguration();
       scanMaxOpenFiles = sysConfig.get(Property.TSERV_SCAN_MAX_OPENFILES.getKey());
-      majcConcurrent = sysConfig.get(Property.TSERV_MAJC_MAXCONCURRENT.getKey());
-      majcThreadMaxOpen = sysConfig.get(Property.TSERV_MAJC_THREAD_MAXOPEN.getKey());
     }
   }
 
-  @After
+  @AfterEach
   public void restoreConfig() throws Exception {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
       InstanceOperations iops = client.instanceOperations();
       if (scanMaxOpenFiles != null) {
         iops.setProperty(Property.TSERV_SCAN_MAX_OPENFILES.getKey(), scanMaxOpenFiles);
-      }
-      if (majcConcurrent != null) {
-        iops.setProperty(Property.TSERV_MAJC_MAXCONCURRENT.getKey(), majcConcurrent);
-      }
-      if (majcThreadMaxOpen != null) {
-        iops.setProperty(Property.TSERV_MAJC_THREAD_MAXOPEN.getKey(), majcThreadMaxOpen);
       }
     }
   }
@@ -109,7 +96,7 @@ public class MaxOpenIT extends AccumuloClusterHarness {
           .withSplits(TestIngest.getSplitPoints(0, NUM_TO_INGEST, NUM_TABLETS));
       c.tableOperations().create(tableName, ntc);
 
-      // the following loop should create three tablets in each map file
+      // the following loop should create three tablets in each data file
       for (int i = 0; i < 3; i++) {
         IngestParams params = new IngestParams(getClientProps(), tableName, NUM_TO_INGEST);
         params.timestamp = i;
@@ -139,8 +126,6 @@ public class MaxOpenIT extends AccumuloClusterHarness {
     }
   }
 
-  @SuppressFBWarnings(value = "PREDICTABLE_RANDOM",
-      justification = "predictable random is okay for testing")
   private long batchScan(AccumuloClient c, String tableName, List<Range> ranges, int threads)
       throws Exception {
     try (BatchScanner bs = c.createBatchScanner(tableName, TestIngest.AUTHS, threads)) {
@@ -152,7 +137,6 @@ public class MaxOpenIT extends AccumuloClusterHarness {
       long t1 = System.currentTimeMillis();
 
       byte[] rval = new byte[50];
-      Random random = new Random();
 
       for (Entry<Key,Value> entry : bs) {
         count++;
@@ -160,13 +144,13 @@ public class MaxOpenIT extends AccumuloClusterHarness {
         int col = VerifyIngest.getCol(entry.getKey());
 
         if (row < 0 || row >= NUM_TO_INGEST) {
-          throw new Exception("unexcepted row " + row);
+          throw new Exception("unexpected row " + row);
         }
 
-        rval = TestIngest.genRandomValue(random, rval, 2, row, col);
+        rval = TestIngest.genRandomValue(rval, 2, row, col);
 
         if (entry.getValue().compareTo(rval) != 0) {
-          throw new Exception("unexcepted value row=" + row + " col=" + col);
+          throw new Exception("unexpected value row=" + row + " col=" + col);
         }
       }
 

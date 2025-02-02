@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,13 +27,13 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
+import java.util.function.Supplier;
 
 import org.apache.accumulo.cluster.AccumuloCluster;
 import org.apache.accumulo.cluster.ClusterUser;
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.security.tokens.AuthenticationToken;
-import org.apache.accumulo.core.clientImpl.ClientConfConverter;
 import org.apache.accumulo.core.clientImpl.ClientInfo;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
@@ -45,6 +45,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
+import com.google.common.base.Suppliers;
+
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 /**
@@ -54,16 +56,16 @@ public class StandaloneAccumuloCluster implements AccumuloCluster {
 
   static final List<ServerType> ALL_SERVER_TYPES =
       Collections.unmodifiableList(Arrays.asList(ServerType.MANAGER, ServerType.TABLET_SERVER,
-          ServerType.TRACER, ServerType.GARBAGE_COLLECTOR, ServerType.MONITOR));
+          ServerType.GARBAGE_COLLECTOR, ServerType.MONITOR));
 
-  private ClientInfo info;
+  private final ClientInfo info;
   private String accumuloHome, clientAccumuloConfDir, serverAccumuloConfDir, hadoopConfDir;
-  private Path tmp;
-  private List<ClusterUser> users;
+  private final Path tmp;
+  private final List<ClusterUser> users;
   private String clientCmdPrefix;
   private String serverCmdPrefix;
-  private SiteConfiguration siteConfig;
-  private ServerContext context;
+  private final SiteConfiguration siteConfig;
+  private final Supplier<ServerContext> contextSupplier;
 
   @SuppressFBWarnings(value = "PATH_TRAVERSAL_IN",
       justification = "code runs in same security context as user who provided input file name")
@@ -75,6 +77,7 @@ public class StandaloneAccumuloCluster implements AccumuloCluster {
     this.serverAccumuloConfDir = serverAccumuloConfDir;
     siteConfig =
         SiteConfiguration.fromFile(new File(serverAccumuloConfDir, "accumulo.properties")).build();
+    this.contextSupplier = Suppliers.memoize(() -> ServerContext.withClientInfo(siteConfig, info));
   }
 
   public String getAccumuloHome() {
@@ -130,12 +133,8 @@ public class StandaloneAccumuloCluster implements AccumuloCluster {
   }
 
   @Override
-  public synchronized ServerContext getServerContext() {
-    if (context == null) {
-      context = ServerContext.override(siteConfig, info.getInstanceName(), info.getZooKeepers(),
-          info.getZooKeepersSessionTimeOut());
-    }
-    return context;
+  public ServerContext getServerContext() {
+    return contextSupplier.get();
   }
 
   @Override
@@ -144,14 +143,8 @@ public class StandaloneAccumuloCluster implements AccumuloCluster {
   }
 
   @Override
-  @Deprecated(since = "2.0.0")
-  public org.apache.accumulo.core.client.ClientConfiguration getClientConfig() {
-    return ClientConfConverter.toClientConf(info.getProperties());
-  }
-
-  @Override
   public Properties getClientProperties() {
-    return info.getProperties();
+    return info.getClientProperties();
   }
 
   @Override

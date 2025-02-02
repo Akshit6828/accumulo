@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -53,13 +53,12 @@ public class MergeCommand extends Command {
       size = ConfigurationTypeHelper.getFixedMemoryAsBytes(cl.getOptionValue(sizeOpt.getOpt()));
     }
     if (startRow == null && endRow == null && size < 0 && !all) {
-      shellState.getWriter().flush();
-      String line = shellState.getReader()
-          .readLine("Merge the entire table { " + tableName + " } into one tablet (yes|no)? ");
-      if (line == null)
+      if (!shellState
+          .confirm(" Warning!!! Are you REALLY sure you want to merge the entire table { "
+              + tableName + " } into one tablet?!?!?!")
+          .orElse(false)) {
         return 0;
-      if (!line.equalsIgnoreCase("y") && !line.equalsIgnoreCase("yes"))
-        return 0;
+      }
     }
     if (size < 0) {
       shellState.getAccumuloClient().tableOperations().merge(tableName, startRow, endRow);

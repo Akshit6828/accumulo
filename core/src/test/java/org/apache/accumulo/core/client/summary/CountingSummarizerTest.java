@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,7 +27,7 @@ import static org.apache.accumulo.core.client.summary.CountingSummarizer.MAX_COU
 import static org.apache.accumulo.core.client.summary.CountingSummarizer.SEEN_STAT;
 import static org.apache.accumulo.core.client.summary.CountingSummarizer.TOO_LONG_STAT;
 import static org.apache.accumulo.core.client.summary.CountingSummarizer.TOO_MANY_STAT;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -37,7 +37,7 @@ import org.apache.accumulo.core.client.summary.summarizers.FamilySummarizer;
 import org.apache.accumulo.core.client.summary.summarizers.VisibilitySummarizer;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Value;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class CountingSummarizerTest {
 
@@ -278,13 +278,14 @@ public class CountingSummarizerTest {
 
     for (String row : new String[] {"ask", "asleep", "some", "soul"}) {
       for (String fam : new String[] {"hop", "hope", "nope", "noop"}) {
-        for (String qual : new String[] {"mad", "lad", "lab", "map"})
+        for (String qual : new String[] {"mad", "lad", "lab", "map"}) {
           for (Value value : new Value[] {new Value("ask"), new Value("asleep"), new Value("some"),
               new Value("soul")}) {
             collector.accept(new Key(row, fam, qual), value);
             expected.merge("vp:" + value.toString().substring(0, 2), 1L, Long::sum);
 
           }
+        }
       }
     }
 

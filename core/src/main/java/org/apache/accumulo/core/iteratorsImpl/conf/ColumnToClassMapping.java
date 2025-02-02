@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -32,11 +32,11 @@ import org.apache.hadoop.io.Text;
 
 public class ColumnToClassMapping<K> {
 
-  private HashMap<ColFamHashKey,K> objectsCF;
-  private HashMap<ColHashKey,K> objectsCol;
+  private final HashMap<ColFamHashKey,K> objectsCF;
+  private final HashMap<ColHashKey,K> objectsCol;
 
-  private ColHashKey lookupCol = new ColHashKey();
-  private ColFamHashKey lookupCF = new ColFamHashKey();
+  private final ColHashKey lookupCol = new ColHashKey();
+  private final ColFamHashKey lookupCF = new ColFamHashKey();
 
   public ColumnToClassMapping() {
     objectsCF = new HashMap<>();
@@ -58,10 +58,9 @@ public class ColumnToClassMapping<K> {
 
       Pair<Text,Text> pcic = ColumnSet.decodeColumns(column);
 
-      Class<?> clazz = ClassLoaderUtil.loadClass(context, className, c);
+      Class<? extends K> clazz = ClassLoaderUtil.loadClass(context, className, c);
 
-      @SuppressWarnings("unchecked")
-      K inst = (K) clazz.getDeclaredConstructor().newInstance();
+      K inst = clazz.getDeclaredConstructor().newInstance();
       if (pcic.getSecond() == null) {
         addObject(pcic.getFirst(), inst);
       } else {

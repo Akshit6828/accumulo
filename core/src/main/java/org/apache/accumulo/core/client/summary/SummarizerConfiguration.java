@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -56,7 +56,7 @@ public class SummarizerConfiguration {
     if (configId == null) {
       ArrayList<String> keys = new ArrayList<>(this.options.keySet());
       Collections.sort(keys);
-      Hasher hasher = Hashing.murmur3_32().newHasher();
+      Hasher hasher = Hashing.murmur3_32_fixed().newHasher();
       hasher.putString(className, UTF_8);
       for (String key : keys) {
         hasher.putString(key, UTF_8);
@@ -84,7 +84,7 @@ public class SummarizerConfiguration {
   }
 
   /**
-   * The propertyId is used to when creating table properties for a summarizer. Its not used for
+   * The propertyId is used when creating table properties for a summarizer. It's not used for
    * equality or hashCode for this class.
    */
   public String getPropertyId() {
@@ -145,8 +145,7 @@ public class SummarizerConfiguration {
   /**
    * Encodes each configuration in the same way as {@link #toTableProperties()}.
    *
-   * @throws IllegalArgumentException
-   *           when there are duplicate values for {@link #getPropertyId()}
+   * @throws IllegalArgumentException when there are duplicate values for {@link #getPropertyId()}
    */
   public static Map<String,String> toTableProperties(SummarizerConfiguration... configurations) {
     return SummarizerConfigurationUtil.toTablePropertiesMap(Arrays.asList(configurations));
@@ -155,8 +154,7 @@ public class SummarizerConfiguration {
   /**
    * Encodes each configuration in the same way as {@link #toTableProperties()}.
    *
-   * @throws IllegalArgumentException
-   *           when there are duplicate values for {@link #getPropertyId()}
+   * @throws IllegalArgumentException when there are duplicate values for {@link #getPropertyId()}
    */
   public static Map<String,String>
       toTableProperties(Collection<SummarizerConfiguration> configurations) {
@@ -197,9 +195,8 @@ public class SummarizerConfiguration {
      * Sets the id used when generating table properties. Setting this is optional. If not set, an
      * id is generated using hashing that will likely be unique.
      *
-     * @param propId
-     *          This id is used when converting a {@link SummarizerConfiguration} to table
-     *          properties. Since tables can have multiple summarizers, make sure its unique.
+     * @param propId This id is used when converting a {@link SummarizerConfiguration} to table
+     *        properties. Since tables can have multiple summarizers, make sure its unique.
      *
      * @see SummarizerConfiguration#toTableProperties()
      */
@@ -237,7 +234,9 @@ public class SummarizerConfiguration {
      * Convenience method for adding multiple options. The following
      *
      * <pre>
-     * {@code builder.addOptions("opt1","val1","opt2","val2","opt3","val3")}
+     * {@code
+     * builder.addOptions("opt1", "val1", "opt2", "val2", "opt3", "val3")
+     * }
      * </pre>
      *
      * <p>
@@ -245,14 +244,13 @@ public class SummarizerConfiguration {
      *
      * <pre>
      * {@code
-     *   builder.addOption("opt1","val1");
-     *   builder.addOption("opt2","val2");
-     *   builder.addOption("opt3","val3");
+     * builder.addOption("opt1", "val1");
+     * builder.addOption("opt2", "val2");
+     * builder.addOption("opt3", "val3");
      * }
      * </pre>
      *
-     * @param keyValuePairs
-     *          This array must have an even and positive number of elements.
+     * @param keyValuePairs This array must have an even and positive number of elements.
      * @return this
      * @see SummarizerConfiguration#getOptions()
      */
@@ -266,8 +264,7 @@ public class SummarizerConfiguration {
     }
 
     /**
-     * @param options
-     *          Each entry in the map is passed to {@link #addOption(String, String)}
+     * @param options Each entry in the map is passed to {@link #addOption(String, String)}
      * @return this
      *
      * @see SummarizerConfiguration#getOptions()
@@ -286,8 +283,7 @@ public class SummarizerConfiguration {
    * Call this method to initiate a chain of fluent method calls to a create an immutable
    * {@link SummarizerConfiguration}
    *
-   * @param className
-   *          The fully qualified name of a class that implements {@link Summarizer}.
+   * @param className The fully qualified name of a class that implements {@link Summarizer}.
    */
   public static Builder builder(String className) {
     return new Builder(className);

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -26,7 +26,7 @@ public class ExternalCompactionId extends AbstractId<ExternalCompactionId> {
 
   // A common prefix is nice when grepping logs for external compaction ids. The prefix also serves
   // as a nice sanity check on data coming in over the network and from persistent storage.
-  private static final String PREFIX = "ECID:";
+  public static final String PREFIX = "ECID-";
 
   private ExternalCompactionId(UUID uuid) {
     super(PREFIX + uuid);
@@ -56,4 +56,14 @@ public class ExternalCompactionId extends AbstractId<ExternalCompactionId> {
     return new ExternalCompactionId(id);
   }
 
+  /**
+   * Sanitize user input for the ECID string with proper "ECID:" prefix.
+   */
+  public static ExternalCompactionId from(String ecid) {
+    ecid = ecid.replace(PREFIX.toLowerCase(), PREFIX);
+    if (!ecid.startsWith(PREFIX)) {
+      ecid = PREFIX + ecid;
+    }
+    return of(ecid);
+  }
 }

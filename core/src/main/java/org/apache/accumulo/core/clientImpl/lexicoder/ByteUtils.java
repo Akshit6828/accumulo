@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -33,8 +33,9 @@ public class ByteUtils {
       }
     }
 
-    if (escapeCount == 0)
+    if (escapeCount == 0) {
       return in;
+    }
 
     byte[] ret = new byte[escapeCount + in.length];
     int index = 0;
@@ -69,8 +70,9 @@ public class ByteUtils {
       }
     }
 
-    if (escapeCount == 0)
+    if (escapeCount == 0) {
       return in;
+    }
 
     byte[] ret = new byte[in.length - escapeCount];
 
@@ -140,8 +142,9 @@ public class ByteUtils {
     for (byte[] field : fields) {
       System.arraycopy(field, 0, ret, index, field.length);
       index += field.length;
-      if (index < ret.length)
+      if (index < ret.length) {
         ret[index++] = 0x00;
+      }
     }
 
     return ret;

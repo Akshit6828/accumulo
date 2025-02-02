@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,6 +18,7 @@
  */
 package org.apache.accumulo.core.file.blockfile.cache.lru;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.accumulo.core.file.blockfile.cache.impl.ClassSize.CONCURRENT_HASHMAP;
 import static org.apache.accumulo.core.file.blockfile.cache.impl.ClassSize.CONCURRENT_HASHMAP_ENTRY;
 import static org.apache.accumulo.core.file.blockfile.cache.impl.ClassSize.CONCURRENT_HASHMAP_SEGMENT;
@@ -27,7 +28,7 @@ import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
@@ -37,6 +38,7 @@ import org.apache.accumulo.core.file.blockfile.cache.impl.SizeConstants;
 import org.apache.accumulo.core.spi.cache.BlockCache;
 import org.apache.accumulo.core.spi.cache.CacheEntry;
 import org.apache.accumulo.core.util.threads.ThreadPools;
+import org.apache.accumulo.core.util.threads.Threads.AccumuloDaemonThread;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -101,7 +103,7 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
 
   /** Statistics thread schedule pool (for heavy debugging, could remove) */
   private final ScheduledExecutorService scheduleThreadPool =
-      ThreadPools.createScheduledExecutorService(1, "LRUBlockCacheStats", false);
+      ThreadPools.getServerThreadPools().createScheduledExecutorService(1, "LRUBlockCacheStats");
 
   /** Current size of cache */
   private final AtomicLong size;
@@ -127,13 +129,11 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
    * <p>
    * All other factors will be calculated based on defaults specified in this class.
    *
-   * @param conf
-   *          block cache configuration
+   * @param conf block cache configuration
    */
   @SuppressFBWarnings(value = "SC_START_IN_CTOR",
       justification = "bad practice to start threads in constructor; probably needs rewrite")
   public LruBlockCache(final LruBlockCacheConfiguration conf) {
-    super();
     this.conf = conf;
 
     int mapInitialSize = (int) Math.ceil(1.2 * conf.getMaxSize() / conf.getBlockSize());
@@ -154,14 +154,15 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
         try {
           Thread.sleep(10);
         } catch (InterruptedException ex) {
-          throw new RuntimeException(ex);
+          throw new IllegalStateException(ex);
         }
       }
     } else {
       this.evictionThread = null;
     }
-    this.scheduleThreadPool.scheduleAtFixedRate(new StatisticsThread(this), statThreadPeriod,
-        statThreadPeriod, TimeUnit.SECONDS);
+    ScheduledFuture<?> future = this.scheduleThreadPool.scheduleAtFixedRate(
+        new StatisticsThread(this), statThreadPeriod, statThreadPeriod, SECONDS);
+    ThreadPools.watchNonCriticalScheduledTask(future);
   }
 
   public long getOverhead() {
@@ -214,12 +215,9 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
    * assumed that you are reinserting the same exact block due to a race condition and will update
    * the buffer but not modify the size of the cache.
    *
-   * @param blockName
-   *          block name
-   * @param buf
-   *          block buffer
-   * @param inMemory
-   *          if block is in-memory
+   * @param blockName block name
+   * @param buf block buffer
+   * @param inMemory if block is in-memory
    */
   public CacheEntry cacheBlock(String blockName, byte[] buf, boolean inMemory) {
     CachedBlock cb = map.get(blockName);
@@ -253,10 +251,8 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
    * assumed that you are reinserting the same exact block due to a race condition and will update
    * the buffer but not modify the size of the cache.
    *
-   * @param blockName
-   *          block name
-   * @param buf
-   *          block buffer
+   * @param blockName block name
+   * @param buf block buffer
    */
   @Override
   public CacheEntry cacheBlock(String blockName, byte[] buf) {
@@ -266,8 +262,7 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
   /**
    * Get the buffer of the block with the specified name.
    *
-   * @param blockName
-   *          block name
+   * @param blockName block name
    * @return buffer of specified block name, or null if not in cache
    */
   @Override
@@ -317,8 +312,9 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
   void evict() {
 
     // Ensure only one eviction at a time
-    if (!evictionLock.tryLock())
+    if (!evictionLock.tryLock()) {
       return;
+    }
 
     try {
       evictionInProgress = true;
@@ -327,8 +323,9 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
 
       log.trace("Block cache LRU eviction started.  Attempting to free {} bytes", bytesToFree);
 
-      if (bytesToFree <= 0)
+      if (bytesToFree <= 0) {
         return;
+      }
 
       // Instantiate priority buckets
       BlockBucket bucketSingle = new BlockBucket(bytesToFree, conf.getBlockSize(), singleSize());
@@ -394,9 +391,9 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
    */
   private class BlockBucket implements Comparable<BlockBucket> {
 
-    private CachedBlockQueue queue;
-    private long totalSize = 0;
-    private long bucketSize;
+    private final CachedBlockQueue queue;
+    private long totalSize;
+    private final long bucketSize;
 
     public BlockBucket(long bytesToFree, long blockSize, long bucketSize) {
       this.bucketSize = bucketSize;
@@ -431,8 +428,9 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
 
     @Override
     public int compareTo(BlockBucket that) {
-      if (this.overflow() == that.overflow())
+      if (this.overflow() == that.overflow()) {
         return 0;
+      }
       return this.overflow() > that.overflow() ? 1 : -1;
     }
 
@@ -443,8 +441,9 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
 
     @Override
     public boolean equals(Object that) {
-      if (that instanceof BlockBucket)
+      if (that instanceof BlockBucket) {
         return compareTo((BlockBucket) that) == 0;
+      }
       return false;
     }
   }
@@ -512,13 +511,12 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
    * <p>
    * Thread is triggered into action by {@link LruBlockCache#runEviction()}
    */
-  private static class EvictionThread extends Thread {
-    private WeakReference<LruBlockCache> cache;
+  private static class EvictionThread extends AccumuloDaemonThread {
+    private final WeakReference<LruBlockCache> cache;
     private boolean running = false;
 
     public EvictionThread(LruBlockCache cache) {
       super("LruBlockCache.EvictionThread");
-      setDaemon(true);
       this.cache = new WeakReference<>(cache);
     }
 
@@ -534,11 +532,14 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
           running = true;
           try {
             this.wait();
-          } catch (InterruptedException e) {}
+          } catch (InterruptedException e) {
+            // empty
+          }
         }
         LruBlockCache cache = this.cache.get();
-        if (cache == null)
+        if (cache == null) {
           break;
+        }
         cache.evict();
       }
     }
@@ -554,12 +555,11 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
   /*
    * Statistics thread. Periodically prints the cache statistics to the log.
    */
-  private static class StatisticsThread extends Thread {
-    LruBlockCache lru;
+  private static class StatisticsThread extends AccumuloDaemonThread {
+    final LruBlockCache lru;
 
     public StatisticsThread(LruBlockCache lru) {
       super("LruBlockCache.StatisticsThread");
-      setDaemon(true);
       this.lru = lru;
     }
 
@@ -577,14 +577,14 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
     float freeMB = ((float) freeSize) / ((float) (1024 * 1024));
     float maxMB = ((float) this.conf.getMaxSize()) / ((float) (1024 * 1024));
     log.debug(
-        "Cache Stats: Sizes: Total={}MB ({}), Free={}MB ({}), Max={}MB"
+        "Cache Stats: {} Sizes: Total={}MB ({}), Free={}MB ({}), Max={}MB"
             + " ({}), Counts: Blocks={}, Access={}, Hit={}, Miss={}, Evictions={},"
             + " Evicted={},Ratios: Hit Ratio={}%, Miss Ratio={}%, Evicted/Run={},"
             + " Duplicate Reads={}",
-        sizeMB, totalSize, freeMB, freeSize, maxMB, this.conf.getMaxSize(), size(),
-        stats.requestCount(), stats.hitCount(), stats.getMissCount(), stats.getEvictionCount(),
-        stats.getEvictedCount(), stats.getHitRatio() * 100, stats.getMissRatio() * 100,
-        stats.evictedPerEviction(), stats.getDuplicateReads());
+        conf.getCacheType(), sizeMB, totalSize, freeMB, freeSize, maxMB, this.conf.getMaxSize(),
+        size(), stats.requestCount(), stats.hitCount(), stats.getMissCount(),
+        stats.getEvictionCount(), stats.getEvictedCount(), stats.getHitRatio() * 100,
+        stats.getMissRatio() * 100, stats.evictedPerEviction(), stats.getDuplicateReads());
   }
 
   /**
@@ -631,6 +631,11 @@ public class LruBlockCache extends SynchronousLoadingBlockCache implements Block
     @Override
     public long requestCount() {
       return accessCount.get();
+    }
+
+    @Override
+    public long evictionCount() {
+      return getEvictedCount();
     }
 
     public long getMissCount() {

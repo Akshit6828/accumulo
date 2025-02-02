@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -32,7 +32,9 @@ import org.apache.accumulo.core.conf.ClientProperty;
 import org.apache.hadoop.security.UserGroupInformation;
 
 import com.beust.jcommander.DynamicParameter;
+import com.beust.jcommander.IParameterValidator;
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.converters.FileConverter;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -48,7 +50,7 @@ public class ShellOptionsJC {
           + " 'file:<local file containing the password>', 'env:<variable containing"
           + " the pass>', or stdin)",
       converter = ClientOpts.PasswordConverter.class)
-  private String password;
+  private String authenticationString;
 
   @DynamicParameter(names = {"-l"},
       description = "command line properties in the format key=value. Reuse -l for each property")
@@ -57,10 +59,6 @@ public class ShellOptionsJC {
   @Parameter(names = "--disable-tab-completion",
       description = "disables tab completion (for less overhead when scripting)")
   private boolean tabCompletionDisabled;
-
-  @Parameter(names = "--debug", description = "enables client debugging"
-      + "; deprecated, configure debugging through your logging configuration file")
-  private boolean debugEnabled;
 
   @Parameter(names = {"-?", "--help"}, help = true, description = "display this help")
   private boolean helpEnabled;
@@ -110,8 +108,9 @@ public class ShellOptionsJC {
   private String zooKeeperHosts;
 
   @Parameter(names = "--auth-timeout",
-      description = "minutes the shell can be idle without re-entering a password")
-  private int authTimeout = 60; // TODO Add validator for positive number
+      description = "minutes the shell can be idle without re-entering a password",
+      validateWith = PositiveInteger.class)
+  private int authTimeout = 60;
 
   @Parameter(names = "--disable-auth-timeout",
       description = "disables requiring the user to re-type a password after being idle")
@@ -127,7 +126,7 @@ public class ShellOptionsJC {
         if (ClientProperty.SASL_ENABLED.getBoolean(getClientProperties())) {
           if (!UserGroupInformation.isSecurityEnabled()) {
             throw new IllegalArgumentException(
-                "Kerberos security is not" + " enabled. Run with --sasl or set 'sasl.enabled' in"
+                "Kerberos security is not enabled. Run with --sasl or set 'sasl.enabled' in"
                     + " accumulo-client.properties");
           }
           UserGroupInformation ugi = UserGroupInformation.getCurrentUser();
@@ -142,15 +141,11 @@ public class ShellOptionsJC {
   }
 
   public String getPassword() {
-    return password;
+    return authenticationString;
   }
 
   public boolean isTabCompletionDisabled() {
     return tabCompletionDisabled;
-  }
-
-  public boolean isDebugEnabled() {
-    return debugEnabled;
   }
 
   public boolean isHelpEnabled() {
@@ -198,7 +193,7 @@ public class ShellOptionsJC {
         File file = new File(path);
         if (file.isFile() && file.canRead()) {
           clientConfigFile = file.getAbsolutePath();
-          System.out.println("Loading configuration from " + clientConfigFile);
+          Shell.log.info("Loading configuration from {}", clientConfigFile);
           break;
         }
       }
@@ -234,6 +229,22 @@ public class ShellOptionsJC {
       props.setProperty(ClientProperty.INSTANCE_NAME.getKey(), zooKeeperInstanceName);
     }
     return props;
+  }
+
+  public static class PositiveInteger implements IParameterValidator {
+    @Override
+    public void validate(String name, String value) throws ParameterException {
+      int n = -1;
+      try {
+        n = Integer.parseInt(value);
+      } catch (NumberFormatException e) {
+        // ignore, will be handled below
+      }
+      if (n < 0) {
+        throw new ParameterException(
+            "Parameter " + name + " should be a positive integer (was " + value + ")");
+      }
+    }
   }
 
 }

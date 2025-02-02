@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -61,16 +61,19 @@ public class StatisticsDisplayFormatter extends AggregatingFormatter {
     StringBuilder buf = new StringBuilder();
     buf.append("CLASSIFICATIONS:\n");
     buf.append("----------------\n");
-    for (String key : classifications.keySet())
+    for (String key : classifications.keySet()) {
       buf.append("\t").append(key).append(": ").append(classifications.get(key)).append("\n");
+    }
     buf.append("COLUMN FAMILIES:\n");
     buf.append("----------------\n");
-    for (String key : columnFamilies.keySet())
+    for (String key : columnFamilies.keySet()) {
       buf.append("\t").append(key).append(": ").append(columnFamilies.get(key)).append("\n");
+    }
     buf.append("COLUMN QUALIFIERS:\n");
     buf.append("------------------\n");
-    for (String key : columnQualifiers.keySet())
+    for (String key : columnQualifiers.keySet()) {
       buf.append("\t").append(key).append(": ").append(columnQualifiers.get(key)).append("\n");
+    }
 
     buf.append(total).append(" entries matched.");
     total = 0;

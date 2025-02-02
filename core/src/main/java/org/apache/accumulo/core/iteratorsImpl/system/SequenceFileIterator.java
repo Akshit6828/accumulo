@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -28,6 +28,7 @@ import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
+import org.apache.accumulo.core.dataImpl.KeyExtent;
 import org.apache.accumulo.core.file.FileSKVIterator;
 import org.apache.accumulo.core.file.blockfile.impl.CacheProvider;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
@@ -35,13 +36,14 @@ import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.sample.impl.SamplerConfigurationImpl;
 import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.SequenceFile.Reader;
+import org.apache.hadoop.io.Text;
 
 public class SequenceFileIterator implements FileSKVIterator {
 
-  private Reader reader;
+  private final Reader reader;
   private Value top_value;
   private Key top_key;
-  private boolean readValue;
+  private final boolean readValue;
 
   @Override
   public SequenceFileIterator deepCopy(IteratorEnvironment env) {
@@ -59,8 +61,9 @@ public class SequenceFileIterator implements FileSKVIterator {
 
     top_key = new Key();
 
-    if (readValue)
+    if (readValue) {
       top_value = new Value();
+    }
 
     next();
   }
@@ -83,10 +86,11 @@ public class SequenceFileIterator implements FileSKVIterator {
   @Override
   public void next() throws IOException {
     boolean valid;
-    if (readValue)
+    if (readValue) {
       valid = reader.next(top_key, top_value);
-    else
+    } else {
       valid = reader.next(top_key);
+    }
 
     if (!valid) {
       top_key = null;
@@ -114,17 +118,22 @@ public class SequenceFileIterator implements FileSKVIterator {
   }
 
   @Override
-  public Key getFirstKey() throws IOException {
+  public Text getFirstRow() throws IOException {
     throw new UnsupportedOperationException("getFirstKey() not supported");
   }
 
   @Override
-  public Key getLastKey() throws IOException {
+  public Text getLastRow() throws IOException {
     throw new UnsupportedOperationException("getLastKey() not supported");
   }
 
   @Override
   public DataInputStream getMetaStore(String name) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public long estimateOverlappingEntries(KeyExtent extent) throws IOException {
     throw new UnsupportedOperationException();
   }
 

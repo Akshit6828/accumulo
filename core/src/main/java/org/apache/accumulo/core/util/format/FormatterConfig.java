@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -42,7 +42,7 @@ public class FormatterConfig {
 
     @Override
     public StringBuffer format(Date date, StringBuffer toAppendTo, FieldPosition fieldPosition) {
-      toAppendTo.append(Long.toString(date.getTime()));
+      toAppendTo.append(date.getTime());
       return toAppendTo;
     }
 
@@ -87,8 +87,7 @@ public class FormatterConfig {
   /**
    * If given a negative number, throws an {@link IllegalArgumentException}
    *
-   * @param shownLength
-   *          maximum length of formatted output
+   * @param shownLength maximum length of formatted output
    * @return {@code this} to allow chaining of set methods
    */
   public FormatterConfig setShownLength(int shownLength) {

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,14 +23,13 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 
 import org.apache.accumulo.core.client.admin.compaction.CompactableFile;
-import org.apache.accumulo.core.spi.compaction.CompactionExecutorId;
 import org.apache.accumulo.core.spi.compaction.CompactionJob;
 import org.apache.accumulo.core.spi.compaction.CompactionKind;
 import org.apache.accumulo.core.spi.compaction.CompactionPlan;
+import org.apache.accumulo.core.spi.compaction.CompactorGroupId;
 
 import com.google.common.base.Preconditions;
 
@@ -54,11 +53,11 @@ public class CompactionPlanImpl implements CompactionPlan {
 
   public static class BuilderImpl implements CompactionPlan.Builder {
 
-    private CompactionKind kind;
-    private ArrayList<CompactionJob> jobs = new ArrayList<>();
-    private Set<CompactableFile> allFiles;
-    private Set<CompactableFile> seenFiles = new HashSet<>();
-    private Set<CompactableFile> candidates;
+    private final CompactionKind kind;
+    private final ArrayList<CompactionJob> jobs = new ArrayList<>();
+    private final Set<CompactableFile> allFiles;
+    private final Set<CompactableFile> seenFiles = new HashSet<>();
+    private final Set<CompactableFile> candidates;
 
     public BuilderImpl(CompactionKind kind, Set<CompactableFile> allFiles,
         Set<CompactableFile> candidates) {
@@ -68,7 +67,7 @@ public class CompactionPlanImpl implements CompactionPlan {
     }
 
     @Override
-    public Builder addJob(short priority, CompactionExecutorId executor,
+    public Builder addJob(short priority, CompactorGroupId group,
         Collection<CompactableFile> files) {
       Set<CompactableFile> filesSet =
           files instanceof Set ? (Set<CompactableFile>) files : Set.copyOf(files);
@@ -80,8 +79,7 @@ public class CompactionPlanImpl implements CompactionPlan {
 
       seenFiles.addAll(filesSet);
 
-      jobs.add(new CompactionJobImpl(priority, executor, filesSet, kind,
-          Optional.of(filesSet.equals(allFiles))));
+      jobs.add(new CompactionJobImpl(priority, group, filesSet, kind));
       return this;
     }
 

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -39,6 +39,7 @@ import org.apache.commons.configuration2.CompositeConfiguration;
 import org.apache.commons.configuration2.MapConfiguration;
 import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
+import org.apache.commons.configuration2.io.FileHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,8 +78,7 @@ public class SiteConfiguration extends AccumuloConfiguration {
     // visible to package-private for testing only
     Builder() {}
 
-    // exists for testing only
-    OverridesOption noFile() {
+    private OverridesOption noFile() {
       return this;
     }
 
@@ -89,14 +89,6 @@ public class SiteConfiguration extends AccumuloConfiguration {
     }
 
     public OverridesOption fromEnv() {
-      URL siteUrl = SiteConfiguration.class.getClassLoader().getResource("accumulo-site.xml");
-      if (siteUrl != null) {
-        throw new IllegalArgumentException("Found deprecated config file 'accumulo-site.xml' on "
-            + "classpath. Since 2.0.0, this file was replaced by 'accumulo.properties'. Run the "
-            + "following command to convert an old 'accumulo-site.xml' file to the new format: "
-            + "accumulo convert-config -x /old/accumulo-site.xml -p /new/accumulo.properties");
-      }
-
       String configFile = System.getProperty("accumulo.properties", "accumulo.properties");
       if (configFile.startsWith("file://")) {
         File f;
@@ -167,9 +159,6 @@ public class SiteConfiguration extends AccumuloConfiguration {
       config.addConfiguration(overrideConfig);
       config.addConfiguration(propsFileConfig);
 
-      // Make sure any deprecated property names aren't using both the old and new name.
-      DeprecatedPropertyUtil.sanityCheckManagerProperties(config);
-
       var result = new HashMap<String,String>();
       config.getKeys().forEachRemaining(orig -> {
         String resolved = DeprecatedPropertyUtil.getReplacementName(orig, (log, replacement) -> {
@@ -197,6 +186,13 @@ public class SiteConfiguration extends AccumuloConfiguration {
   }
 
   /**
+   * Build a SiteConfiguration that is initially empty with the option to override.
+   */
+  public static SiteConfiguration.OverridesOption empty() {
+    return new SiteConfiguration.Builder().noFile();
+  }
+
+  /**
    * Build a SiteConfiguration from the environmental configuration and no overrides.
    */
   public static SiteConfiguration auto() {
@@ -206,7 +202,7 @@ public class SiteConfiguration extends AccumuloConfiguration {
   private final Map<String,String> config;
 
   private SiteConfiguration(Map<String,String> config) {
-    ConfigSanityCheck.validate(config.entrySet());
+    ConfigCheckUtil.validate(config.entrySet(), "site config");
     this.config = config;
   }
 
@@ -216,8 +212,9 @@ public class SiteConfiguration extends AccumuloConfiguration {
   private static AbstractConfiguration getPropsFileConfig(URL accumuloPropsLocation) {
     var config = new PropertiesConfiguration();
     if (accumuloPropsLocation != null) {
+      var fileHandler = new FileHandler(config);
       try (var reader = new InputStreamReader(accumuloPropsLocation.openStream(), UTF_8)) {
-        config.read(reader);
+        fileHandler.load(reader);
       } catch (ConfigurationException | IOException e) {
         throw new IllegalArgumentException(e);
       }
@@ -251,8 +248,8 @@ public class SiteConfiguration extends AccumuloConfiguration {
   }
 
   @Override
-  public boolean isPropertySet(Property prop, boolean cacheAndWatch) {
-    return config.containsKey(prop.getKey()) || parent.isPropertySet(prop, cacheAndWatch);
+  public boolean isPropertySet(Property prop) {
+    return config.containsKey(prop.getKey()) || parent.isPropertySet(prop);
   }
 
   @Override
@@ -270,5 +267,10 @@ public class SiteConfiguration extends AccumuloConfiguration {
         props.put(k, config.get(k));
       }
     });
+  }
+
+  @Override
+  public AccumuloConfiguration getParent() {
+    return parent;
   }
 }

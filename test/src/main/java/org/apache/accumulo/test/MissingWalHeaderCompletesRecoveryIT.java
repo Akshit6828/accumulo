@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,13 +19,15 @@
 package org.apache.accumulo.test;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.time.Duration;
 import java.util.UUID;
 
+import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.BatchWriter;
@@ -33,15 +35,13 @@ import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.TableId;
-import org.apache.accumulo.core.dataImpl.KeyExtent;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.security.TablePermission;
 import org.apache.accumulo.core.tabletserver.log.LogEntry;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloClusterImpl;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
-import org.apache.accumulo.server.ServerConstants;
 import org.apache.accumulo.test.functional.ConfigurableMacBase;
 import org.apache.accumulo.tserver.log.DfsLogger;
 import org.apache.hadoop.conf.Configuration;
@@ -50,9 +50,9 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.io.Text;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,26 +65,26 @@ public class MissingWalHeaderCompletesRecoveryIT extends ConfigurableMacBase {
   private boolean rootHasWritePermission;
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 2 * 60;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(2);
   }
 
   @Override
   public void configure(MiniAccumuloConfigImpl cfg, Configuration conf) {
-    cfg.setNumTservers(1);
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(1);
     cfg.setProperty(Property.MANAGER_RECOVERY_DELAY, "1s");
     // Make sure the GC doesn't delete the file before the metadata reference is added
     cfg.setProperty(Property.GC_CYCLE_START, "999999s");
     conf.set("fs.file.impl", RawLocalFileSystem.class.getName());
   }
 
-  @Before
+  @BeforeEach
   public void setupMetadataPermission() throws Exception {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProperties()).build()) {
       rootHasWritePermission = client.securityOperations().hasTablePermission("root",
-          MetadataTable.NAME, TablePermission.WRITE);
+          AccumuloTable.METADATA.tableName(), TablePermission.WRITE);
       if (!rootHasWritePermission) {
-        client.securityOperations().grantTablePermission("root", MetadataTable.NAME,
+        client.securityOperations().grantTablePermission("root", AccumuloTable.METADATA.tableName(),
             TablePermission.WRITE);
         // Make sure it propagates through ZK
         Thread.sleep(5000);
@@ -92,20 +92,20 @@ public class MissingWalHeaderCompletesRecoveryIT extends ConfigurableMacBase {
     }
   }
 
-  @After
+  @AfterEach
   public void resetMetadataPermission() throws Exception {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProperties()).build()) {
       // Final state doesn't match the original
       if (rootHasWritePermission != client.securityOperations().hasTablePermission("root",
-          MetadataTable.NAME, TablePermission.WRITE)) {
+          AccumuloTable.METADATA.tableName(), TablePermission.WRITE)) {
         if (rootHasWritePermission) {
           // root had write permission when starting, ensure root still does
-          client.securityOperations().grantTablePermission("root", MetadataTable.NAME,
-              TablePermission.WRITE);
+          client.securityOperations().grantTablePermission("root",
+              AccumuloTable.METADATA.tableName(), TablePermission.WRITE);
         } else {
           // root did not have write permission when starting, ensure that it does not
-          client.securityOperations().revokeTablePermission("root", MetadataTable.NAME,
-              TablePermission.WRITE);
+          client.securityOperations().revokeTablePermission("root",
+              AccumuloTable.METADATA.tableName(), TablePermission.WRITE);
         }
       }
     }
@@ -120,7 +120,7 @@ public class MissingWalHeaderCompletesRecoveryIT extends ConfigurableMacBase {
       // Fake out something that looks like host:port, it's irrelevant
       String fakeServer = "127.0.0.1:12345";
 
-      File walogs = new File(cluster.getConfig().getAccumuloDir(), ServerConstants.WAL_DIR);
+      File walogs = new File(cluster.getConfig().getAccumuloDir(), Constants.WAL_DIR);
       File walogServerDir = new File(walogs, fakeServer.replace(':', '+'));
       File emptyWalog = new File(walogServerDir, UUID.randomUUID().toString());
 
@@ -128,18 +128,17 @@ public class MissingWalHeaderCompletesRecoveryIT extends ConfigurableMacBase {
 
       fs.create(new Path(emptyWalog.toURI())).close();
 
-      assertTrue("root user did not have write permission to metadata table",
-          client.securityOperations().hasTablePermission("root", MetadataTable.NAME,
-              TablePermission.WRITE));
+      assertTrue(client.securityOperations().hasTablePermission("root",
+          AccumuloTable.METADATA.tableName(), TablePermission.WRITE),
+          "root user did not have write permission to metadata table");
 
       String tableName = getUniqueNames(1)[0];
       client.tableOperations().create(tableName);
 
       TableId tableId = TableId.of(client.tableOperations().tableIdMap().get(tableName));
-      assertNotNull("Table ID was null", tableId);
+      assertNotNull(tableId, "Table ID was null");
 
-      LogEntry logEntry =
-          new LogEntry(new KeyExtent(tableId, null, null), 0, emptyWalog.toURI().toString());
+      LogEntry logEntry = LogEntry.fromPath(emptyWalog.toURI().toString());
 
       log.info("Taking {} offline", tableName);
       client.tableOperations().offline(tableName, true);
@@ -148,9 +147,9 @@ public class MissingWalHeaderCompletesRecoveryIT extends ConfigurableMacBase {
 
       Text row = TabletsSection.encodeRow(tableId, null);
       Mutation m = new Mutation(row);
-      m.put(logEntry.getColumnFamily(), logEntry.getColumnQualifier(), logEntry.getValue());
+      logEntry.addToMutation(m);
 
-      try (BatchWriter bw = client.createBatchWriter(MetadataTable.NAME)) {
+      try (BatchWriter bw = client.createBatchWriter(AccumuloTable.METADATA.tableName())) {
         bw.addMutation(m);
       }
 
@@ -176,7 +175,7 @@ public class MissingWalHeaderCompletesRecoveryIT extends ConfigurableMacBase {
       // Fake out something that looks like host:port, it's irrelevant
       String fakeServer = "127.0.0.1:12345";
 
-      File walogs = new File(cluster.getConfig().getAccumuloDir(), ServerConstants.WAL_DIR);
+      File walogs = new File(cluster.getConfig().getAccumuloDir(), Constants.WAL_DIR);
       File walogServerDir = new File(walogs, fakeServer.replace(':', '+'));
       File partialHeaderWalog = new File(walogServerDir, UUID.randomUUID().toString());
 
@@ -188,17 +187,17 @@ public class MissingWalHeaderCompletesRecoveryIT extends ConfigurableMacBase {
           DfsLogger.LOG_FILE_HEADER_V4.length() / 2);
       wal.close();
 
-      assertTrue("root user did not have write permission to metadata table",
-          client.securityOperations().hasTablePermission("root", MetadataTable.NAME,
-              TablePermission.WRITE));
+      assertTrue(client.securityOperations().hasTablePermission("root",
+          AccumuloTable.METADATA.tableName(), TablePermission.WRITE),
+          "root user did not have write permission to metadata table");
 
       String tableName = getUniqueNames(1)[0];
       client.tableOperations().create(tableName);
 
       TableId tableId = TableId.of(client.tableOperations().tableIdMap().get(tableName));
-      assertNotNull("Table ID was null", tableId);
+      assertNotNull(tableId, "Table ID was null");
 
-      LogEntry logEntry = new LogEntry(null, 0, partialHeaderWalog.toURI().toString());
+      LogEntry logEntry = LogEntry.fromPath(partialHeaderWalog.toURI().toString());
 
       log.info("Taking {} offline", tableName);
       client.tableOperations().offline(tableName, true);
@@ -207,9 +206,9 @@ public class MissingWalHeaderCompletesRecoveryIT extends ConfigurableMacBase {
 
       Text row = TabletsSection.encodeRow(tableId, null);
       Mutation m = new Mutation(row);
-      m.put(logEntry.getColumnFamily(), logEntry.getColumnQualifier(), logEntry.getValue());
+      logEntry.addToMutation(m);
 
-      try (BatchWriter bw = client.createBatchWriter(MetadataTable.NAME)) {
+      try (BatchWriter bw = client.createBatchWriter(AccumuloTable.METADATA.tableName())) {
         bw.addMutation(m);
       }
 

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,14 +22,10 @@ import static java.util.Objects.requireNonNull;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Spliterator;
-import java.util.Spliterators;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
-import java.util.stream.StreamSupport;
 
-import org.apache.commons.configuration2.AbstractConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,15 +48,10 @@ public class DeprecatedPropertyUtil {
 
   private static final Logger log = LoggerFactory.getLogger(DeprecatedPropertyUtil.class);
 
-  @SuppressWarnings("deprecation")
-  public static final PropertyRenamer MASTER_MANAGER_RENAMER = PropertyRenamer
-      .renamePrefix(Property.MASTER_PREFIX.getKey(), Property.MANAGER_PREFIX.getKey());
-
   /**
    * Ordered list of renamers
    */
-  protected static final List<PropertyRenamer> renamers =
-      new ArrayList<>(List.of(MASTER_MANAGER_RENAMER));
+  protected static final List<PropertyRenamer> renamers = new ArrayList<>();
 
   /**
    * Checks if {@code propertyName} is a deprecated property name and return its replacement name,
@@ -73,10 +64,10 @@ public class DeprecatedPropertyUtil {
    * This is expected to be used only with system properties stored in the SiteConfiguration and
    * ZooConfiguration, and not for per-table or per-namespace configuration in ZooKeeper.
    *
-   * @param propertyName
-   *          the name of the potentially deprecated property to check for a replacement name
-   * @param loggerActionOnReplace
-   *          the action to execute, if not null, if a replacement name was found
+   * @param propertyName the name of the potentially deprecated property to check for a replacement
+   *        name
+   * @param loggerActionOnReplace the action to execute, if not null, if a replacement name was
+   *        found
    * @return either the replacement for {@code propertyName}, or {@code propertyName} if the
    *         property is not deprecated
    */
@@ -97,22 +88,10 @@ public class DeprecatedPropertyUtil {
   }
 
   /**
-   * Ensures that for any deprecated properties, both the deprecated and replacement property name
-   * are not both used in {@code config}.
-   *
-   * @param config
-   *          the configuration to check for invalid use of deprecated and replacement properties
+   * @return The list of property renamers
    */
-  static void sanityCheckManagerProperties(AbstractConfiguration config) {
-    boolean foundMasterPrefix = StreamSupport
-        .stream(Spliterators.spliteratorUnknownSize(config.getKeys(), Spliterator.ORDERED), false)
-        .anyMatch(MASTER_MANAGER_RENAMER.keyFilter);
-    boolean foundManagerPrefix = StreamSupport
-        .stream(Spliterators.spliteratorUnknownSize(config.getKeys(), Spliterator.ORDERED), false)
-        .anyMatch(k -> k.startsWith(Property.MANAGER_PREFIX.getKey()));
-    if (foundMasterPrefix && foundManagerPrefix) {
-      throw new IllegalStateException("Found both old 'master.*' and new 'manager.*' "
-          + "naming conventions in the same startup configuration");
-    }
+  public static List<PropertyRenamer> getPropertyRenamers() {
+    return renamers;
   }
+
 }

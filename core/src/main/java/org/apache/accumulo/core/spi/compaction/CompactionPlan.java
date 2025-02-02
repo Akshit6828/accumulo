@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -39,21 +39,20 @@ public interface CompactionPlan {
    */
   interface Builder {
     /**
-     * @param priority
-     *          This determines the order in which the job is taken off the execution queue. Larger
-     *          numbers are taken off the queue first. If two jobs are on the queue, one with a
-     *          priority of 4 and another with 5, then the one with 5 will be taken first.
-     * @param executor
-     *          Where the job should run.
-     * @param group
-     *          The files to compact.
+     * @param priority This determines the order in which the job is taken off the execution queue.
+     *        Larger numbers are taken off the queue first. If two jobs are on the queue, one with a
+     *        priority of 4 and another with 5, then the one with 5 will be taken first.
+     * @param group Where the job should run.
+     * @param files The files to compact.
      * @return this
      */
-    Builder addJob(short priority, CompactionExecutorId executor,
-        Collection<CompactableFile> group);
+    Builder addJob(short priority, CompactorGroupId group, Collection<CompactableFile> files);
 
     CompactionPlan build();
   }
 
+  /**
+   * Return the set of jobs this plan will submit for compaction.
+   */
   Collection<CompactionJob> getJobs();
 }

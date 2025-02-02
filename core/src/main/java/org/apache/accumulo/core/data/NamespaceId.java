@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,10 +18,10 @@
  */
 package org.apache.accumulo.core.data;
 
-import java.util.concurrent.ExecutionException;
+import org.apache.accumulo.core.util.cache.Caches;
+import org.apache.accumulo.core.util.cache.Caches.CacheName;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
+import com.github.benmanes.caffeine.cache.Cache;
 
 /**
  * A strongly typed representation of a namespace ID. This class cannot be used to get a namespace
@@ -35,7 +35,8 @@ public class NamespaceId extends AbstractId<NamespaceId> {
   // cache is for canonicalization/deduplication of created objects,
   // to limit the number of NamespaceId objects in the JVM at any given moment
   // WeakReferences are used because we don't need them to stick around any longer than they need to
-  static final Cache<String,NamespaceId> cache = CacheBuilder.newBuilder().weakValues().build();
+  static final Cache<String,NamespaceId> cache =
+      Caches.getInstance().createNewBuilder(CacheName.NAMESPACE_ID, false).weakValues().build();
 
   private NamespaceId(String canonical) {
     super(canonical);
@@ -44,16 +45,10 @@ public class NamespaceId extends AbstractId<NamespaceId> {
   /**
    * Get a NamespaceId object for the provided canonical string. This is guaranteed to be non-null
    *
-   * @param canonical
-   *          Namespace ID string
-   * @return Namespace.ID object
+   * @param canonical Namespace ID string
+   * @return NamespaceId object
    */
   public static NamespaceId of(final String canonical) {
-    try {
-      return cache.get(canonical, () -> new NamespaceId(canonical));
-    } catch (ExecutionException e) {
-      throw new AssertionError(
-          "This should never happen: ID constructor should never return null.");
-    }
+    return cache.get(canonical, k -> new NamespaceId(canonical));
   }
 }

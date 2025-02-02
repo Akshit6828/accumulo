@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -25,6 +25,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.Set;
 
@@ -56,10 +57,9 @@ public class KerberosToken implements AuthenticationToken {
    * (on top of another user). An {@link IllegalArgumentException} will be thrown for all other
    * cases.
    *
-   * @param principal
-   *          The user that is logged in
-   * @throws IllegalArgumentException
-   *           If the current user is not authentication via Kerberos or Proxy methods.
+   * @param principal The user that is logged in
+   * @throws IllegalArgumentException If the current user is not authentication via Kerberos or
+   *         Proxy methods.
    * @see UserGroupInformation#getCurrentUser()
    * @see UserGroupInformation#getAuthenticationMethod()
    */
@@ -82,10 +82,8 @@ public class KerberosToken implements AuthenticationToken {
    * <p>
    * This constructor does not have any side effects.
    *
-   * @param principal
-   *          The Kerberos principal
-   * @param keytab
-   *          A keytab file containing the principal's credentials.
+   * @param principal The Kerberos principal
+   * @param keytab A keytab file containing the principal's credentials.
    */
   public KerberosToken(String principal, File keytab) throws IOException {
     this.principal = requireNonNull(principal, "Principal was null");
@@ -97,8 +95,7 @@ public class KerberosToken implements AuthenticationToken {
    * Creates a token using the login user as returned by
    * {@link UserGroupInformation#getCurrentUser()}
    *
-   * @throws IOException
-   *           If the current logged in user cannot be computed.
+   * @throws IOException If the current logged in user cannot be computed.
    */
   public KerberosToken() throws IOException {
     this(UserGroupInformation.getCurrentUser().getUserName());
@@ -111,19 +108,24 @@ public class KerberosToken implements AuthenticationToken {
       clone.principal = principal;
       clone.keytab = keytab == null ? keytab : keytab.getCanonicalFile();
       return clone;
-    } catch (CloneNotSupportedException | IOException e) {
-      throw new RuntimeException(e);
+    } catch (CloneNotSupportedException e) {
+      throw new IllegalStateException(e);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
     }
   }
 
   @Override
   public boolean equals(Object obj) {
-    if (this == obj)
+    if (this == obj) {
       return true;
-    if (obj == null)
+    }
+    if (obj == null) {
       return false;
-    if (!(obj instanceof KerberosToken))
+    }
+    if (!(obj instanceof KerberosToken)) {
       return false;
+    }
     KerberosToken other = (KerberosToken) obj;
 
     return principal.equals(other.principal);

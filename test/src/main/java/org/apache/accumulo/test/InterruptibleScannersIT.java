@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,21 +18,25 @@
  */
 package org.apache.accumulo.test;
 
-import static org.junit.Assert.fail;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.IteratorSetting;
 import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.client.admin.ActiveScan;
+import org.apache.accumulo.core.client.admin.servers.ServerId;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.accumulo.test.functional.SlowIterator;
 import org.apache.hadoop.conf.Configuration;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.Iterators;
 
@@ -40,13 +44,13 @@ import com.google.common.collect.Iterators;
 public class InterruptibleScannersIT extends AccumuloClusterHarness {
 
   @Override
-  public int defaultTimeoutSeconds() {
-    return 60;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(1);
   }
 
   @Override
   public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
-    cfg.setNumTservers(1);
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(1);
   }
 
   @Test
@@ -60,17 +64,18 @@ public class InterruptibleScannersIT extends AccumuloClusterHarness {
       try (Scanner scanner = client.createScanner(tableName, Authorizations.EMPTY)) {
         final IteratorSetting cfg = new IteratorSetting(100, SlowIterator.class);
         // Wait long enough to be sure we can catch it, but not indefinitely.
-        SlowIterator.setSeekSleepTime(cfg, 60 * 1000);
+        SlowIterator.setSeekSleepTime(cfg, MINUTES.toMillis(1));
         scanner.addScanIterator(cfg);
         // create a thread to interrupt the slow scan
         final Thread scanThread = Thread.currentThread();
         Thread thread = new Thread(() -> {
           try {
             // ensure the scan is running: not perfect, the metadata tables could be scanned, too.
-            String tserver = client.instanceOperations().getTabletServers().iterator().next();
+            ServerId tserver = client.instanceOperations().getServers(ServerId.Type.TABLET_SERVER)
+                .iterator().next();
             do {
               ArrayList<ActiveScan> scans =
-                  new ArrayList<>(client.instanceOperations().getActiveScans(tserver));
+                  new ArrayList<>(client.instanceOperations().getActiveScans(List.of(tserver)));
               // Remove scans not against our table and not owned by us
               scans.removeIf(scan -> !getAdminPrincipal().equals(scan.getUser())
                   || !tableName.equals(scan.getTable()));
@@ -89,9 +94,9 @@ public class InterruptibleScannersIT extends AccumuloClusterHarness {
         thread.start();
         try {
           // Use the scanner, expect problems
-          Iterators.size(scanner.iterator());
-          fail("Scan should not succeed");
-        } catch (Exception ex) {} finally {
+          assertThrows(RuntimeException.class, () -> Iterators.size(scanner.iterator()),
+              "Scan should not succeed");
+        } finally {
           thread.join();
         }
       }

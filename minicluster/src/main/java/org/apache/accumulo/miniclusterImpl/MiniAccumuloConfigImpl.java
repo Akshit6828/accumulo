@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,25 +18,43 @@
  */
 package org.apache.accumulo.miniclusterImpl;
 
+import static org.apache.accumulo.minicluster.ServerType.COMPACTOR;
+import static org.apache.accumulo.minicluster.ServerType.GARBAGE_COLLECTOR;
+import static org.apache.accumulo.minicluster.ServerType.MANAGER;
+import static org.apache.accumulo.minicluster.ServerType.MONITOR;
+import static org.apache.accumulo.minicluster.ServerType.SCAN_SERVER;
+import static org.apache.accumulo.minicluster.ServerType.TABLET_SERVER;
+import static org.apache.accumulo.minicluster.ServerType.ZOOKEEPER;
+
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
+import java.util.function.Consumer;
 
+import org.apache.accumulo.compactor.Compactor;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ClientProperty;
 import org.apache.accumulo.core.conf.HadoopCredentialProvider;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.conf.SiteConfiguration;
+import org.apache.accumulo.gc.SimpleGarbageCollector;
+import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.minicluster.MemoryUnit;
 import org.apache.accumulo.minicluster.MiniAccumuloCluster;
 import org.apache.accumulo.minicluster.ServerType;
+import org.apache.accumulo.monitor.Monitor;
 import org.apache.accumulo.server.util.PortUtils;
+import org.apache.accumulo.tserver.ScanServer;
+import org.apache.accumulo.tserver.TabletServer;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.zookeeper.server.ZooKeeperServerMain;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,16 +65,21 @@ import org.slf4j.LoggerFactory;
  * @since 1.6.0
  */
 public class MiniAccumuloConfigImpl {
+
   private static final Logger log = LoggerFactory.getLogger(MiniAccumuloConfigImpl.class);
   private static final String DEFAULT_INSTANCE_SECRET = "DONTTELL";
 
   private File dir = null;
   private String rootPassword = null;
+  private Map<String,String> hadoopConfOverrides = new HashMap<>();
   private Map<String,String> siteConfig = new HashMap<>();
   private Map<String,String> configuredSiteConig = new HashMap<>();
   private Map<String,String> clientProps = new HashMap<>();
-  private int numTservers = 2;
   private Map<ServerType,Long> memoryConfig = new HashMap<>();
+  private final EnumMap<ServerType,Class<?>> serverTypeClasses =
+      new EnumMap<>(Map.of(MANAGER, Manager.class, GARBAGE_COLLECTOR, SimpleGarbageCollector.class,
+          MONITOR, Monitor.class, ZOOKEEPER, ZooKeeperServerMain.class, TABLET_SERVER,
+          TabletServer.class, SCAN_SERVER, ScanServer.class, COMPACTOR, Compactor.class));
   private boolean jdwpEnabled = false;
   private Map<String,String> systemProperties = new HashMap<>();
 
@@ -73,7 +96,7 @@ public class MiniAccumuloConfigImpl {
 
   private int zooKeeperPort = 0;
   private int configuredZooKeeperPort = 0;
-  private long zooKeeperStartupTime = 20 * 1000;
+  private long zooKeeperStartupTime = 20_000;
   private String existingZooKeepers;
 
   private long defaultMemorySize = 256 * 1024 * 1024;
@@ -95,22 +118,28 @@ public class MiniAccumuloConfigImpl {
   private Configuration hadoopConf;
   private SiteConfiguration accumuloConf;
 
+  private Consumer<MiniAccumuloConfigImpl> preStartConfigProcessor;
+
+  private final ClusterServerConfiguration serverConfiguration;
+
   /**
-   * @param dir
-   *          An empty or nonexistent directory that Accumulo and Zookeeper can store data in.
-   *          Creating the directory is left to the user. Java 7, Guava, and Junit provide methods
-   *          for creating temporary directories.
-   * @param rootPassword
-   *          The initial password for the Accumulo root user
+   * @param dir An empty or nonexistent directory that Accumulo and Zookeeper can store data in.
+   *        Creating the directory is left to the user. Java 7, Guava, and Junit provide methods for
+   *        creating temporary directories.
+   * @param rootPassword The initial password for the Accumulo root user
    */
   public MiniAccumuloConfigImpl(File dir, String rootPassword) {
     this.dir = dir;
     this.rootPassword = rootPassword;
+    this.serverConfiguration = new ClusterServerConfiguration();
   }
 
   /**
    * Set directories and fully populate site config
+   *
+   * @return this
    */
+  @SuppressWarnings("deprecation")
   MiniAccumuloConfigImpl initialize() {
 
     // Sanity checks
@@ -138,8 +167,10 @@ public class MiniAccumuloConfigImpl {
         existingInstance = false;
         mergeProp(Property.INSTANCE_VOLUMES.getKey(), "file://" + accumuloDir.getAbsolutePath());
         mergeProp(Property.INSTANCE_SECRET.getKey(), DEFAULT_INSTANCE_SECRET);
-        mergeProp(Property.TRACE_TOKEN_PROPERTY_PREFIX.getKey() + "password", getRootPassword());
       }
+
+      // enable metrics reporting - by default will appear in standard log files.
+      mergeProp(Property.GENERAL_MICROMETER_ENABLED.getKey(), "true");
 
       mergeProp(Property.TSERV_PORTSEARCH.getKey(), "true");
       mergeProp(Property.TSERV_DATACACHE_SIZE.getKey(), "10M");
@@ -148,24 +179,22 @@ public class MiniAccumuloConfigImpl {
       mergeProp(Property.TSERV_MAXMEM.getKey(), "40M");
       mergeProp(Property.TSERV_WAL_MAX_SIZE.getKey(), "100M");
       mergeProp(Property.TSERV_NATIVEMAP_ENABLED.getKey(), "false");
-      // since there is a small amount of memory, check more frequently for majc... setting may not
-      // be needed in 1.5
-      mergeProp(Property.TSERV_MAJC_DELAY.getKey(), "3");
-      @SuppressWarnings("deprecation")
-      Property generalClasspaths = Property.GENERAL_CLASSPATHS;
-      mergeProp(generalClasspaths.getKey(), libDir.getAbsolutePath() + "/[^.].*[.]jar");
-      @SuppressWarnings("deprecation")
-      Property generalDynamicClasspaths = Property.GENERAL_DYNAMIC_CLASSPATHS;
-      mergeProp(generalDynamicClasspaths.getKey(), libExtDir.getAbsolutePath() + "/[^.].*[.]jar");
       mergeProp(Property.GC_CYCLE_DELAY.getKey(), "4s");
       mergeProp(Property.GC_CYCLE_START.getKey(), "0s");
       mergePropWithRandomPort(Property.MANAGER_CLIENTPORT.getKey());
-      mergePropWithRandomPort(Property.TRACE_PORT.getKey());
       mergePropWithRandomPort(Property.TSERV_CLIENTPORT.getKey());
       mergePropWithRandomPort(Property.MONITOR_PORT.getKey());
       mergePropWithRandomPort(Property.GC_PORT.getKey());
-      mergePropWithRandomPort(Property.REPLICATION_RECEIPT_SERVICE_PORT.getKey());
-      mergePropWithRandomPort(Property.MANAGER_REPLICATION_COORDINATOR_PORT.getKey());
+
+      mergeProp(Property.COMPACTOR_PORTSEARCH.getKey(), "true");
+
+      mergeProp(Property.MANAGER_COMPACTION_SERVICE_PRIORITY_QUEUE_SIZE.getKey(),
+          Property.MANAGER_COMPACTION_SERVICE_PRIORITY_QUEUE_SIZE.getDefaultValue());
+      mergeProp(Property.COMPACTION_SERVICE_DEFAULT_PLANNER.getKey(),
+          Property.COMPACTION_SERVICE_DEFAULT_PLANNER.getDefaultValue());
+
+      mergeProp(Property.COMPACTION_SERVICE_DEFAULT_GROUPS.getKey(),
+          Property.COMPACTION_SERVICE_DEFAULT_GROUPS.getDefaultValue());
 
       if (isUseCredentialProvider()) {
         updateConfigForCredentialProvider();
@@ -249,20 +278,6 @@ public class MiniAccumuloConfigImpl {
   }
 
   /**
-   * Calling this method is optional. If not set, it defaults to two.
-   *
-   * @param numTservers
-   *          the number of tablet servers that mini accumulo cluster should start
-   */
-  public MiniAccumuloConfigImpl setNumTservers(int numTservers) {
-    if (numTservers < 1) {
-      throw new IllegalArgumentException("Must have at least one tablet server");
-    }
-    this.numTservers = numTservers;
-    return this;
-  }
-
-  /**
    * Calling this method is optional. If not set, defaults to 'miniInstance'
    *
    * @since 1.6.0
@@ -275,8 +290,7 @@ public class MiniAccumuloConfigImpl {
   /**
    * Calling this method is optional. If not set, it defaults to an empty map.
    *
-   * @param siteConfig
-   *          key/values that you normally put in accumulo.properties can be put here.
+   * @param siteConfig key/values that you normally put in accumulo.properties can be put here.
    */
   public MiniAccumuloConfigImpl setSiteConfig(Map<String,String> siteConfig) {
     if (existingInstance != null && existingInstance) {
@@ -308,8 +322,7 @@ public class MiniAccumuloConfigImpl {
   /**
    * Calling this method is optional. A random port is generated by default
    *
-   * @param zooKeeperPort
-   *          A valid (and unused) port to use for the zookeeper
+   * @param zooKeeperPort A valid (and unused) port to use for the zookeeper
    *
    * @since 1.6.0
    */
@@ -330,8 +343,7 @@ public class MiniAccumuloConfigImpl {
    * Configure the time to wait for ZooKeeper to startup. Calling this method is optional. The
    * default is 20000 milliseconds
    *
-   * @param zooKeeperStartupTime
-   *          Time to wait for ZooKeeper to startup, in milliseconds
+   * @param zooKeeperStartupTime Time to wait for ZooKeeper to startup, in milliseconds
    *
    * @since 1.6.1
    */
@@ -351,9 +363,8 @@ public class MiniAccumuloConfigImpl {
    * Configure an existing ZooKeeper instance to use. Calling this method is optional. If not set, a
    * new ZooKeeper instance is created.
    *
-   * @param existingZooKeepers
-   *          Connection string for a already-running ZooKeeper instance. A null value will turn off
-   *          this feature.
+   * @param existingZooKeepers Connection string for a already-running ZooKeeper instance. A null
+   *        value will turn off this feature.
    *
    * @since 1.8.0
    */
@@ -366,13 +377,10 @@ public class MiniAccumuloConfigImpl {
    * Sets the amount of memory to use in the specified process. Calling this method is optional.
    * Default memory is 256M
    *
-   * @param serverType
-   *          the type of server to apply the memory settings
-   * @param memory
-   *          amount of memory to set
+   * @param serverType the type of server to apply the memory settings
+   * @param memory amount of memory to set
    *
-   * @param memoryUnit
-   *          the units for which to apply with the memory size
+   * @param memoryUnit the units for which to apply with the memory size
    *
    * @since 1.6.0
    */
@@ -386,17 +394,34 @@ public class MiniAccumuloConfigImpl {
    * Sets the default memory size to use. This value is also used when a ServerType has not been
    * configured explicitly. Calling this method is optional. Default memory is 256M
    *
-   * @param memory
-   *          amount of memory to set
+   * @param memory amount of memory to set
    *
-   * @param memoryUnit
-   *          the units for which to apply with the memory size
+   * @param memoryUnit the units for which to apply with the memory size
    *
    * @since 1.6.0
    */
   public MiniAccumuloConfigImpl setDefaultMemory(long memory, MemoryUnit memoryUnit) {
     this.defaultMemorySize = memoryUnit.toBytes(memory);
     return this;
+  }
+
+  /**
+   * Sets the class that will be used to instantiate this server type.
+   */
+  public MiniAccumuloConfigImpl setServerClass(ServerType type, Class<?> serverClass) {
+    serverTypeClasses.put(type, Objects.requireNonNull(serverClass));
+    return this;
+  }
+
+  /**
+   * @return the class to use to instantiate this server type.
+   */
+  public Class<?> getServerClass(ServerType type) {
+    var clazz = serverTypeClasses.get(type);
+    if (clazz == null) {
+      throw new IllegalStateException("Server type " + type + " has no class");
+    }
+    return clazz;
   }
 
   /**
@@ -476,8 +501,7 @@ public class MiniAccumuloConfigImpl {
   }
 
   /**
-   * @param serverType
-   *          get configuration for this server type
+   * @param serverType get configuration for this server type
    *
    * @return memory configured in bytes, returns default if this server type is not configured
    *
@@ -520,10 +544,10 @@ public class MiniAccumuloConfigImpl {
   }
 
   /**
-   * @return the number of tservers configured for this cluster
+   * @return ClusterServerConfiguration
    */
-  public int getNumTservers() {
-    return numTservers;
+  public ClusterServerConfiguration getClusterServerConfiguration() {
+    return serverConfiguration;
   }
 
   /**
@@ -536,8 +560,7 @@ public class MiniAccumuloConfigImpl {
   }
 
   /**
-   * @param jdwpEnabled
-   *          should the processes run remote jdwpEnabled servers?
+   * @param jdwpEnabled should the processes run remote jdwpEnabled servers?
    * @return the current instance
    *
    * @since 1.6.0
@@ -559,16 +582,6 @@ public class MiniAccumuloConfigImpl {
    */
   public void useMiniDFS(boolean useMiniDFS) {
     this.useMiniDFS = useMiniDFS;
-  }
-
-  /**
-   * @return location of client conf file containing connection parameters for connecting to this
-   *         minicluster
-   *
-   * @since 1.6.0
-   */
-  public File getClientConfFile() {
-    return new File(getConfDir(), "client.conf");
   }
 
   public File getAccumuloPropsFile() {
@@ -614,8 +627,7 @@ public class MiniAccumuloConfigImpl {
   /**
    * Sets the classpath elements to use when spawning processes.
    *
-   * @param classpathItems
-   *          the classpathItems to set
+   * @param classpathItems the classpathItems to set
    * @since 1.6.0
    */
   public void setClasspathItems(String... classpathItems) {
@@ -634,8 +646,7 @@ public class MiniAccumuloConfigImpl {
   /**
    * Sets the path for processes to use for loading native libraries
    *
-   * @param nativePathItems
-   *          the nativePathItems to set
+   * @param nativePathItems the nativePathItems to set
    * @since 1.6.0
    */
   public MiniAccumuloConfigImpl setNativeLibPaths(String... nativePathItems) {
@@ -677,8 +688,7 @@ public class MiniAccumuloConfigImpl {
   }
 
   /**
-   * @param useCredentialProvider
-   *          the useCredentialProvider to set
+   * @param useCredentialProvider the useCredentialProvider to set
    */
   public void setUseCredentialProvider(boolean useCredentialProvider) {
     this.useCredentialProvider = useCredentialProvider;
@@ -688,18 +698,16 @@ public class MiniAccumuloConfigImpl {
    * Informs MAC that it's running against an existing accumulo instance. It is assumed that it's
    * already initialized and hdfs/zookeeper are already running.
    *
-   * @param accumuloProps
-   *          a File representation of the accumulo.properties file for the instance being run
-   * @param hadoopConfDir
-   *          a File representation of the hadoop configuration directory containing core-site.xml
-   *          and hdfs-site.xml
+   * @param accumuloProps a File representation of the accumulo.properties file for the instance
+   *        being run
+   * @param hadoopConfDir a File representation of the hadoop configuration directory containing
+   *        core-site.xml and hdfs-site.xml
    *
    * @return MiniAccumuloConfigImpl which uses an existing accumulo configuration
    *
    * @since 1.6.2
    *
-   * @throws IOException
-   *           when there are issues converting the provided Files to URLs
+   * @throws IOException when there are issues converting the provided Files to URLs
    */
   public MiniAccumuloConfigImpl useExistingInstance(File accumuloProps, File hadoopConfDir)
       throws IOException {
@@ -780,11 +788,51 @@ public class MiniAccumuloConfigImpl {
   /**
    * Sets the default Accumulo "superuser".
    *
-   * @param rootUserName
-   *          The name of the user to create with administrative permissions during initialization
+   * @param rootUserName The name of the user to create with administrative permissions during
+   *        initialization
    * @since 1.7.0
    */
   public void setRootUserName(String rootUserName) {
     this.rootUserName = rootUserName;
+  }
+
+  /**
+   * Set the object that will be used to modify the site configuration right before it's written out
+   * a file. This would be useful in the case where the configuration needs to be updated based on a
+   * property that is set in MiniAccumuloClusterImpl like instance.volumes
+   *
+   */
+  public void setPreStartConfigProcessor(Consumer<MiniAccumuloConfigImpl> processor) {
+    this.preStartConfigProcessor = processor;
+  }
+
+  /**
+   * Called by MiniAccumuloClusterImpl after all modifications are done to the configuration and
+   * right before it's written out to a file.
+   */
+  public void preStartConfigUpdate() {
+    if (this.preStartConfigProcessor != null) {
+      this.preStartConfigProcessor.accept(this);
+    }
+  }
+
+  /**
+   * Add server-side Hadoop configuration properties
+   *
+   * @param overrides properties
+   * @since 2.1.1
+   */
+  public void setHadoopConfOverrides(Map<String,String> overrides) {
+    hadoopConfOverrides.putAll(overrides);
+  }
+
+  /**
+   * Get server-side Hadoop configuration properties
+   *
+   * @return map of properties set in prior call to {@link #setHadoopConfOverrides(Map)}
+   * @since 2.1.1
+   */
+  public Map<String,String> getHadoopConfOverrides() {
+    return new HashMap<>(hadoopConfOverrides);
   }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -71,8 +71,9 @@ public class TestRandomDeletes {
     @Override
     public int compareTo(RowColumn other) {
       int result = row.compareTo(other.row);
-      if (result != 0)
+      if (result != 0) {
         return result;
+      }
       return column.compareTo(other.column);
     }
 
@@ -147,8 +148,9 @@ public class TestRandomDeletes {
       while (true) {
         long half = scrambleDeleteHalfAndCheck(opts, doomed);
         deleted += half;
-        if (half == 0)
+        if (half == 0) {
           break;
+        }
       }
       long stopTime = System.currentTimeMillis();
 

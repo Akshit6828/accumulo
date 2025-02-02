@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -110,55 +110,66 @@ public class ShellCompletor implements Completer {
             if (next != null) {
               current_command_token = next;
 
-              if (current_command_token.getCaseSensitive())
+              if (current_command_token.getCaseSensitive()) {
                 prefix += current_string_token + " ";
-              else
+              } else {
                 prefix += current_string_token.toUpperCase() + " ";
+              }
 
               candidates.addAll(current_command_token.getSubcommandNames());
             }
           }
           Collections.sort(candidates);
-          return (prefix.length());
+          return prefix.length();
         }
         // need to match current command
         // if we're in -t <table>, -u <user>, or -tn <namespace> complete those
         if (inTableFlag) {
-          for (String a : options.get(Shell.Command.CompletionSet.TABLENAMES))
-            if (a.startsWith(current_string_token))
+          for (String a : options.get(Shell.Command.CompletionSet.TABLENAMES)) {
+            if (a.startsWith(current_string_token)) {
               candidates.add(a);
+            }
+          }
         } else if (inUserFlag) {
-          for (String a : options.get(Shell.Command.CompletionSet.USERNAMES))
-            if (a.startsWith(current_string_token))
+          for (String a : options.get(Shell.Command.CompletionSet.USERNAMES)) {
+            if (a.startsWith(current_string_token)) {
               candidates.add(a);
+            }
+          }
         } else if (inNamespaceFlag) {
-          for (String a : options.get(Shell.Command.CompletionSet.NAMESPACES))
-            if (a.startsWith(current_string_token))
+          for (String a : options.get(Shell.Command.CompletionSet.NAMESPACES)) {
+            if (a.startsWith(current_string_token)) {
               candidates.add(a);
-        } else if (current_command_token != null)
+            }
+          }
+        } else if (current_command_token != null) {
           candidates.addAll(current_command_token.getSubcommandNames(current_string_token));
+        }
 
         Collections.sort(candidates);
-        return (prefix.length());
+        return prefix.length();
       }
 
-      if (current_string_token.trim().equals("-" + Shell.tableOption))
+      if (current_string_token.trim().equals("-" + Shell.tableOption)) {
         inTableFlag = true;
-      else if (current_string_token.trim().equals("-" + Shell.userOption))
+      } else if (current_string_token.trim().equals("-" + Shell.userOption)) {
         inUserFlag = true;
-      else if (current_string_token.trim().equals("-" + Shell.namespaceOption))
+      } else if (current_string_token.trim().equals("-" + Shell.namespaceOption)) {
         inNamespaceFlag = true;
-      else
+      } else {
         inUserFlag = inTableFlag = inNamespaceFlag = false;
+      }
 
-      if (current_command_token != null && current_command_token.getCaseSensitive())
+      if (current_command_token != null && current_command_token.getCaseSensitive()) {
         prefix += current_string_token + " ";
-      else
+      } else {
         prefix += current_string_token.toUpperCase() + " ";
+      }
 
       if (current_command_token != null
-          && current_command_token.getSubcommandNames().contains(current_string_token))
+          && current_command_token.getSubcommandNames().contains(current_string_token)) {
         current_command_token = current_command_token.getSubcommand(current_string_token);
+      }
 
     }
     return 0;

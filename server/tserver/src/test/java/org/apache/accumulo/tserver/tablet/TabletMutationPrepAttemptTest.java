@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,9 +19,10 @@
 package org.apache.accumulo.tserver.tablet;
 
 import static org.easymock.EasyMock.mock;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -30,7 +31,7 @@ import java.util.Set;
 
 import org.apache.accumulo.core.constraints.Violations;
 import org.apache.accumulo.core.data.Mutation;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class TabletMutationPrepAttemptTest {
 
@@ -40,28 +41,28 @@ public class TabletMutationPrepAttemptTest {
     assertTrue(prepared.tabletClosed());
   }
 
-  @Test(expected = IllegalStateException.class)
+  @Test
   public void callGetSessionWhenClosed() {
     PreparedMutations prepared = new PreparedMutations();
-    prepared.getCommitSession();
+    assertThrows(IllegalStateException.class, prepared::getCommitSession);
   }
 
-  @Test(expected = IllegalStateException.class)
+  @Test
   public void callGetNonViolatorsWhenClosed() {
     PreparedMutations prepared = new PreparedMutations();
-    prepared.getNonViolators();
+    assertThrows(IllegalStateException.class, prepared::getNonViolators);
   }
 
-  @Test(expected = IllegalStateException.class)
+  @Test
   public void callGetViolatorsWhenClosed() {
     PreparedMutations prepared = new PreparedMutations();
-    prepared.getViolators();
+    assertThrows(IllegalStateException.class, prepared::getViolators);
   }
 
-  @Test(expected = IllegalStateException.class)
+  @Test
   public void callGetViolationsWhenClosed() {
     PreparedMutations prepared = new PreparedMutations();
-    prepared.getViolations();
+    assertThrows(IllegalStateException.class, prepared::getViolations);
   }
 
   @Test

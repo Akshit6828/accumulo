@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -49,11 +49,11 @@ import org.apache.accumulo.core.client.IsolatedScanner;
 import org.apache.accumulo.core.client.IteratorSetting;
 import org.apache.accumulo.core.client.RowIterator;
 import org.apache.accumulo.core.client.Scanner;
+import org.apache.accumulo.core.client.ScannerBase.ConsistencyLevel;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.clientImpl.ClientContext;
-import org.apache.accumulo.core.clientImpl.Tables;
-import org.apache.accumulo.core.clientImpl.TabletLocator;
+import org.apache.accumulo.core.clientImpl.ClientTabletCache;
 import org.apache.accumulo.core.conf.ClientProperty;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.PartialKey;
@@ -63,7 +63,7 @@ import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.manager.state.tables.TableState;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.CurrentLocationColumnFamily;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.FutureLocationColumnFamily;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.LastLocationColumnFamily;
@@ -116,18 +116,17 @@ public class InputConfigurator extends ConfiguratorBase {
     USE_LOCAL_ITERATORS,
     SCAN_OFFLINE,
     BATCH_SCANNER,
-    BATCH_SCANNER_THREADS
+    BATCH_SCANNER_THREADS,
+    CONSISTENCY_LEVEL
   }
 
   /**
    * Sets the name of the context classloader to use for scans
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param context
-   *          the name of the context classloader
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param context the name of the context classloader
    * @since 1.8.0
    */
   public static void setClassLoaderContext(Class<?> implementingClass, Configuration conf,
@@ -139,10 +138,9 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Gets the name of the context classloader to use for scans
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return the classloader context name
    * @since 1.8.0
    */
@@ -153,12 +151,10 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Sets the name of the input table, over which this job will scan.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param tableName
-   *          the table to use when the tablename is null in the write call
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param tableName the table to use when the tablename is null in the write call
    * @since 1.6.0
    */
   public static void setInputTableName(Class<?> implementingClass, Configuration conf,
@@ -170,10 +166,9 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Sets the name of the input table, over which this job will scan.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @since 1.6.0
    */
   public static String getInputTableName(Class<?> implementingClass, Configuration conf) {
@@ -184,27 +179,25 @@ public class InputConfigurator extends ConfiguratorBase {
    * Sets the {@link Authorizations} used to scan. Must be a subset of the user's authorization.
    * Defaults to the empty set.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param auths
-   *          the user's authorizations
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param auths the user's authorizations
    * @since 1.6.0
    */
   public static void setScanAuthorizations(Class<?> implementingClass, Configuration conf,
       Authorizations auths) {
-    if (auths != null && !auths.isEmpty())
+    if (auths != null && !auths.isEmpty()) {
       conf.set(enumToConfKey(implementingClass, ScanOpts.AUTHORIZATIONS), auths.serialize());
+    }
   }
 
   /**
    * Gets the authorizations to set for the scans from the configuration.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return the Accumulo scan authorizations
    * @since 1.6.0
    * @see #setScanAuthorizations(Class, Configuration, Authorizations)
@@ -220,14 +213,11 @@ public class InputConfigurator extends ConfiguratorBase {
    * Sets the input ranges to scan on all input tables for this job. If not set, the entire table
    * will be scanned.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param ranges
-   *          the ranges that will be mapped over
-   * @throws IllegalArgumentException
-   *           if the ranges cannot be encoded into base 64
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param ranges the ranges that will be mapped over
+   * @throws IllegalArgumentException if the ranges cannot be encoded into base 64
    * @since 1.6.0
    */
   public static void setRanges(Class<?> implementingClass, Configuration conf,
@@ -251,13 +241,11 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Gets the ranges to scan over from a job.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return the ranges
-   * @throws IOException
-   *           if the ranges have been encoded improperly
+   * @throws IOException if the ranges have been encoded improperly
    * @since 1.6.0
    * @see #setRanges(Class, Configuration, Collection)
    */
@@ -286,8 +274,9 @@ public class InputConfigurator extends ConfiguratorBase {
     String iterators = conf.get(enumToConfKey(implementingClass, ScanOpts.ITERATORS));
 
     // If no iterators are present, return an empty list
-    if (iterators == null || iterators.isEmpty())
+    if (iterators == null || iterators.isEmpty()) {
       return new ArrayList<>();
+    }
 
     // Compose the set of iterators encoded in the job configuration
     StringTokenizer tokens = new StringTokenizer(iterators, StringUtils.COMMA_STR);
@@ -323,12 +312,14 @@ public class InputConfigurator extends ConfiguratorBase {
     ArrayList<String> columnStrings = new ArrayList<>(columnFamilyColumnQualifierPairs.size());
     for (Pair<Text,Text> column : columnFamilyColumnQualifierPairs) {
 
-      if (column.getFirst() == null)
+      if (column.getFirst() == null) {
         throw new IllegalArgumentException("Column family can not be null");
+      }
 
       String col = Base64.getEncoder().encodeToString(TextUtil.getBytes(column.getFirst()));
-      if (column.getSecond() != null)
+      if (column.getSecond() != null) {
         col += ":" + Base64.getEncoder().encodeToString(TextUtil.getBytes(column.getSecond()));
+      }
       columnStrings.add(col);
     }
 
@@ -409,12 +400,10 @@ public class InputConfigurator extends ConfiguratorBase {
    * <p>
    * By default, this feature is <b>enabled</b>.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param enableFeature
-   *          the feature is enabled if true, disabled otherwise
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param enableFeature the feature is enabled if true, disabled otherwise
    * @see #setRanges(Class, Configuration, Collection)
    * @since 1.6.0
    */
@@ -426,10 +415,9 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Determines whether a configuration has auto-adjust ranges enabled.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return false if the feature is disabled, true otherwise
    * @since 1.6.0
    * @see #setAutoAdjustRanges(Class, Configuration, boolean)
@@ -444,12 +432,10 @@ public class InputConfigurator extends ConfiguratorBase {
    * <p>
    * By default, this feature is <b>disabled</b>.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param enableFeature
-   *          the feature is enabled if true, disabled otherwise
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param enableFeature the feature is enabled if true, disabled otherwise
    * @since 1.6.0
    */
   public static void setScanIsolation(Class<?> implementingClass, Configuration conf,
@@ -460,10 +446,9 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Determines whether a configuration has isolation enabled.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return true if the feature is enabled, false otherwise
    * @since 1.6.0
    * @see #setScanIsolation(Class, Configuration, boolean)
@@ -481,12 +466,10 @@ public class InputConfigurator extends ConfiguratorBase {
    * <p>
    * By default, this feature is <b>disabled</b>.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param enableFeature
-   *          the feature is enabled if true, disabled otherwise
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param enableFeature the feature is enabled if true, disabled otherwise
    * @since 1.6.0
    */
   public static void setLocalIterators(Class<?> implementingClass, Configuration conf,
@@ -497,10 +480,9 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Determines whether a configuration uses local iterators.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return true if the feature is enabled, false otherwise
    * @since 1.6.0
    * @see #setLocalIterators(Class, Configuration, boolean)
@@ -538,12 +520,10 @@ public class InputConfigurator extends ConfiguratorBase {
    * <p>
    * By default, this feature is <b>disabled</b>.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param enableFeature
-   *          the feature is enabled if true, disabled otherwise
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param enableFeature the feature is enabled if true, disabled otherwise
    * @since 1.6.0
    */
   public static void setOfflineTableScan(Class<?> implementingClass, Configuration conf,
@@ -554,10 +534,9 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Determines whether a configuration has the offline table scan feature enabled.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return true if the feature is enabled, false otherwise
    * @since 1.6.0
    * @see #setOfflineTableScan(Class, Configuration, boolean)
@@ -573,12 +552,10 @@ public class InputConfigurator extends ConfiguratorBase {
    * <p>
    * By default, this feature is <b>disabled</b>.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param enableFeature
-   *          the feature is enabled if true, disabled otherwise
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param enableFeature the feature is enabled if true, disabled otherwise
    * @since 1.7.0
    */
   public static void setBatchScan(Class<?> implementingClass, Configuration conf,
@@ -589,10 +566,9 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Determines whether a configuration has the BatchScanner feature enabled.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return true if the feature is enabled, false otherwise
    * @since 1.7.0
    * @see #setBatchScan(Class, Configuration, boolean)
@@ -602,21 +578,50 @@ public class InputConfigurator extends ConfiguratorBase {
   }
 
   /**
+   * Set the ConsistencyLevel for the Accumulo scans that create the input data
+   *
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param level the consistency level
+   * @since 2.1.0
+   */
+  public static void setConsistencyLevel(Class<?> implementingClass, Configuration conf,
+      ConsistencyLevel level) {
+    conf.set(enumToConfKey(implementingClass, Features.CONSISTENCY_LEVEL), level.name());
+  }
+
+  /**
+   * Get the ConsistencyLevel for the Accumulo scans that create the input data
+   *
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @return the consistency level
+   * @since 2.1.0
+   */
+  public static ConsistencyLevel getConsistencyLevel(Class<?> implementingClass,
+      Configuration conf) {
+    return ConsistencyLevel
+        .valueOf(conf.get(enumToConfKey(implementingClass, Features.CONSISTENCY_LEVEL),
+            ConsistencyLevel.IMMEDIATE.name()));
+  }
+
+  /**
    * Sets configurations for multiple tables at a time.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param configs
-   *          an array of {@link InputTableConfig} objects to associate with the job
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param configs an array of {@link InputTableConfig} objects to associate with the job
    * @since 1.6.0
    */
   public static void setInputTableConfigs(Class<?> implementingClass, Configuration conf,
       Map<String,InputTableConfig> configs) {
     MapWritable mapWritable = new MapWritable();
-    for (Map.Entry<String,InputTableConfig> tableConfig : configs.entrySet())
+    for (Map.Entry<String,InputTableConfig> tableConfig : configs.entrySet()) {
       mapWritable.put(new Text(tableConfig.getKey()), tableConfig.getValue());
+    }
 
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
     try {
@@ -632,10 +637,9 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Returns all {@link InputTableConfig} objects associated with this job.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
    * @return all of the table query configs for the job
    * @since 1.6.0
    */
@@ -648,12 +652,10 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Returns all {@link InputTableConfig} objects associated with this job.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param tableName
-   *          the table name for which to retrieve the configuration
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param tableName the table name for which to retrieve the configuration
    * @return all of the table query configs for the job
    * @since 1.6.0
    */
@@ -662,8 +664,9 @@ public class InputConfigurator extends ConfiguratorBase {
     Map<String,InputTableConfig> configs = new HashMap<>();
     Map.Entry<String,InputTableConfig> defaultConfig =
         getDefaultInputTableConfig(implementingClass, conf, tableName);
-    if (defaultConfig != null)
+    if (defaultConfig != null) {
       configs.put(defaultConfig.getKey(), defaultConfig.getValue());
+    }
     String configString = conf.get(enumToConfKey(implementingClass, ScanOpts.TABLE_CONFIGS));
     MapWritable mapWritable = new MapWritable();
     if (configString != null) {
@@ -677,8 +680,9 @@ public class InputConfigurator extends ConfiguratorBase {
             + " from the given configuration");
       }
     }
-    for (Map.Entry<Writable,Writable> entry : mapWritable.entrySet())
+    for (Map.Entry<Writable,Writable> entry : mapWritable.entrySet()) {
       configs.put(entry.getKey().toString(), (InputTableConfig) entry.getValue());
+    }
 
     return configs;
   }
@@ -686,12 +690,10 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Returns the {@link InputTableConfig} for the given table
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param tableName
-   *          the table name for which to fetch the table query config
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param tableName the table name for which to fetch the table query config
    * @return the table query config for the given table name (if it exists) and null if it does not
    * @since 1.6.0
    */
@@ -703,21 +705,19 @@ public class InputConfigurator extends ConfiguratorBase {
   }
 
   /**
-   * Initializes an Accumulo {@link TabletLocator} based on the configuration.
+   * Initializes an Accumulo {@link ClientTabletCache} based on the configuration.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param tableId
-   *          The table id for which to initialize the {@link TabletLocator}
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param tableId The table id for which to initialize the {@link ClientTabletCache}
    * @return an Accumulo tablet locator
    * @since 1.6.0
    */
-  public static TabletLocator getTabletLocator(Class<?> implementingClass, Configuration conf,
+  public static ClientTabletCache getTabletLocator(Class<?> implementingClass, Configuration conf,
       TableId tableId) {
     try (AccumuloClient client = createClient(implementingClass, conf)) {
-      return TabletLocator.getLocator((ClientContext) client, tableId);
+      return ClientTabletCache.getInstance((ClientContext) client, tableId);
     }
   }
 
@@ -733,12 +733,10 @@ public class InputConfigurator extends ConfiguratorBase {
   /**
    * Validates that the user has permissions on the requested tables
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop configuration object to configure
-   * @param client
-   *          the Accumulo client
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop configuration object to configure
+   * @param client the Accumulo client
    * @since 1.7.0
    */
   public static void validatePermissions(Class<?> implementingClass, Configuration conf,
@@ -746,8 +744,9 @@ public class InputConfigurator extends ConfiguratorBase {
     Map<String,InputTableConfig> inputTableConfigs = getInputTableConfigs(implementingClass, conf);
 
     try {
-      if (getInputTableConfigs(implementingClass, conf).isEmpty())
+      if (getInputTableConfigs(implementingClass, conf).isEmpty()) {
         throw new IOException("No table set.");
+      }
 
       Properties props = getClientProperties(implementingClass, conf);
       String principal = ClientProperty.AUTH_PRINCIPAL.getValue(props);
@@ -772,9 +771,10 @@ public class InputConfigurator extends ConfiguratorBase {
           if (tableConfig.getIterators() != null) {
             for (IteratorSetting iter : tableConfig.getIterators()) {
               if (!client.tableOperations().testClassLoad(tableConfigEntry.getKey(),
-                  iter.getIteratorClass(), SortedKeyValueIterator.class.getName()))
+                  iter.getIteratorClass(), SortedKeyValueIterator.class.getName())) {
                 throw new AccumuloException("Servers are unable to load " + iter.getIteratorClass()
                     + " as a " + SortedKeyValueIterator.class.getName());
+              }
             }
           }
         }
@@ -788,12 +788,10 @@ public class InputConfigurator extends ConfiguratorBase {
    * Returns the {@link InputTableConfig} for the configuration based on the properties set using
    * the single-table input methods.
    *
-   * @param implementingClass
-   *          the class whose name will be used as a prefix for the property configuration key
-   * @param conf
-   *          the Hadoop instance for which to retrieve the configuration
-   * @param tableName
-   *          the table name for which to retrieve the configuration
+   * @param implementingClass the class whose name will be used as a prefix for the property
+   *        configuration key
+   * @param conf the Hadoop instance for which to retrieve the configuration
+   * @param tableName the table name for which to retrieve the configuration
    * @return the config object built from the single input table properties set on the job
    * @since 1.6.0
    */
@@ -802,19 +800,22 @@ public class InputConfigurator extends ConfiguratorBase {
     if (tableName != null) {
       InputTableConfig queryConfig = new InputTableConfig();
       List<IteratorSetting> itrs = getIterators(implementingClass, conf);
-      if (itrs != null)
+      if (itrs != null) {
         itrs.forEach(queryConfig::addIterator);
+      }
       Set<IteratorSetting.Column> columns = getFetchedColumns(implementingClass, conf);
-      if (columns != null)
+      if (columns != null) {
         queryConfig.fetchColumns(columns);
+      }
       List<Range> ranges = null;
       try {
         ranges = getRanges(implementingClass, conf);
       } catch (IOException e) {
         throw new RuntimeException(e);
       }
-      if (ranges != null)
+      if (ranges != null) {
         queryConfig.setRanges(ranges);
+      }
 
       SamplerConfiguration samplerConfig = getSamplerConfiguration(implementingClass, conf);
       if (samplerConfig != null) {
@@ -835,9 +836,9 @@ public class InputConfigurator extends ConfiguratorBase {
       List<Range> ranges, ClientContext context) throws AccumuloException, TableNotFoundException {
     Map<String,Map<KeyExtent,List<Range>>> binnedRanges = new HashMap<>();
 
-    if (Tables.getTableState(context, tableId) != TableState.OFFLINE) {
-      Tables.clearCache(context);
-      if (Tables.getTableState(context, tableId) != TableState.OFFLINE) {
+    if (context.getTableState(tableId) != TableState.OFFLINE) {
+      context.clearTableListCache();
+      if (context.getTableState(tableId) != TableState.OFFLINE) {
         throw new AccumuloException(
             "Table is online tableId:" + tableId + " cannot scan table in offline mode ");
       }
@@ -846,14 +847,16 @@ public class InputConfigurator extends ConfiguratorBase {
     for (Range range : ranges) {
       Text startRow;
 
-      if (range.getStartKey() != null)
+      if (range.getStartKey() != null) {
         startRow = range.getStartKey().getRow();
-      else
+      } else {
         startRow = new Text();
+      }
 
       Range metadataRange =
           new Range(new KeyExtent(tableId, startRow, null).toMetaRow(), true, null, false);
-      Scanner scanner = context.createScanner(MetadataTable.NAME, Authorizations.EMPTY);
+      Scanner scanner =
+          context.createScanner(AccumuloTable.METADATA.tableName(), Authorizations.EMPTY);
       TabletColumnFamily.PREV_ROW_COLUMN.fetch(scanner);
       scanner.fetchColumnFamily(LastLocationColumnFamily.NAME);
       scanner.fetchColumnFamily(CurrentLocationColumnFamily.NAME);
@@ -887,8 +890,9 @@ public class InputConfigurator extends ConfiguratorBase {
 
         }
 
-        if (location != null)
+        if (location != null) {
           return null;
+        }
 
         if (!extent.tableId().equals(tableId)) {
           throw new AccumuloException("Saw unexpected table Id " + tableId + " " + extent);
@@ -952,8 +956,9 @@ public class InputConfigurator extends ConfiguratorBase {
     String key = enumToConfKey(implementingClass, ScanOpts.SAMPLER_CONFIG);
 
     String encodedSC = conf.get(key);
-    if (encodedSC == null)
+    if (encodedSC == null) {
       return null;
+    }
 
     return fromBase64(new SamplerConfigurationImpl(), encodedSC).toSamplerConfiguration();
   }

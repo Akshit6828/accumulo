@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,73 +22,93 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.accumulo.core.metadata.RootTable.ZROOT_TABLET_GC_CANDIDATES;
 import static org.apache.accumulo.server.util.MetadataTableUtil.EMPTY_TEXT;
 
+import java.net.URI;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
+import java.util.function.Function;
 
 import org.apache.accumulo.core.client.BatchWriter;
 import org.apache.accumulo.core.client.MutationsRejectedException;
 import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.client.TableNotFoundException;
-import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
-import org.apache.accumulo.core.data.PartialKey;
 import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.TableId;
+import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.gc.GcCandidate;
+import org.apache.accumulo.core.gc.ReferenceFile;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.RootTable;
+import org.apache.accumulo.core.metadata.ScanServerRefStore;
 import org.apache.accumulo.core.metadata.StoredTabletFile;
-import org.apache.accumulo.core.metadata.TabletFileUtil;
+import org.apache.accumulo.core.metadata.ValidationUtil;
 import org.apache.accumulo.core.metadata.schema.Ample;
 import org.apache.accumulo.core.metadata.schema.AmpleImpl;
-import org.apache.accumulo.core.metadata.schema.ExternalCompactionFinalState;
-import org.apache.accumulo.core.metadata.schema.ExternalCompactionId;
+import org.apache.accumulo.core.metadata.schema.MetadataSchema.BlipSection;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.DeletesSection;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.DeletesSection.SkewedKeyValue;
-import org.apache.accumulo.core.metadata.schema.MetadataSchema.ExternalCompactionSection;
 import org.apache.accumulo.core.security.Authorizations;
-import org.apache.accumulo.fate.zookeeper.ZooReader;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.hadoop.io.Text;
 import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Preconditions;
+import com.google.common.annotations.VisibleForTesting;
 
 public class ServerAmpleImpl extends AmpleImpl implements Ample {
 
-  private static Logger log = LoggerFactory.getLogger(ServerAmpleImpl.class);
+  private static final Logger log = LoggerFactory.getLogger(ServerAmpleImpl.class);
 
-  private ServerContext context;
+  private final ServerContext context;
+  private final ScanServerRefStore scanServerRefStore;
 
-  public ServerAmpleImpl(ServerContext ctx) {
-    super(ctx);
-    this.context = ctx;
+  public ServerAmpleImpl(ServerContext context) {
+    this(context, DataLevel::metaTable);
+  }
+
+  public ServerAmpleImpl(ServerContext context, Function<DataLevel,String> tableMapper) {
+    super(context, tableMapper);
+    this.context = context;
+    this.scanServerRefStore =
+        new ScanServerRefStoreImpl(context, AccumuloTable.SCAN_REF.tableName());
   }
 
   @Override
   public Ample.TabletMutator mutateTablet(KeyExtent extent) {
     TabletsMutator tmi = mutateTablets();
     Ample.TabletMutator tabletMutator = tmi.mutateTablet(extent);
-    ((TabletMutatorBase) tabletMutator).setCloseAfterMutate(tmi);
+    ((TabletMutatorImpl) tabletMutator).setCloseAfterMutate(tmi);
     return tabletMutator;
   }
 
   @Override
   public TabletsMutator mutateTablets() {
-    return new TabletsMutatorImpl(context);
+    return new TabletsMutatorImpl(context, getTableMapper());
+  }
+
+  @Override
+  public ConditionalTabletsMutator conditionallyMutateTablets() {
+    return new ConditionalTabletsMutatorImpl(context, getTableMapper());
+  }
+
+  @Override
+  public AsyncConditionalTabletsMutator
+      conditionallyMutateTablets(Consumer<ConditionalResult> resultsConsumer) {
+    return new AsyncConditionalTabletsMutatorImpl(resultsConsumer,
+        () -> new ConditionalTabletsMutatorImpl(context, getTableMapper()));
   }
 
   private void mutateRootGcCandidates(Consumer<RootGcCandidates> mutator) {
     String zpath = context.getZooKeeperRoot() + ZROOT_TABLET_GC_CANDIDATES;
     try {
-      context.getZooReaderWriter().mutateOrCreate(zpath, new byte[0], currVal -> {
+      // TODO calling create seems unnecessary and is possibly racy and inefficient
+      context.getZooSession().asReaderWriter().mutateOrCreate(zpath, new byte[0], currVal -> {
         String currJson = new String(currVal, UTF_8);
-        RootGcCandidates rgcc = RootGcCandidates.fromJson(currJson);
+        RootGcCandidates rgcc = new RootGcCandidates(currJson);
         log.debug("Root GC candidates before change : {}", currJson);
         mutator.accept(rgcc);
         String newJson = rgcc.toJson();
@@ -102,129 +122,151 @@ public class ServerAmpleImpl extends AmpleImpl implements Ample {
         return newJson.getBytes(UTF_8);
       });
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      throw new IllegalStateException(e);
     }
   }
 
   @Override
   public void putGcCandidates(TableId tableId, Collection<StoredTabletFile> candidates) {
 
-    if (RootTable.ID.equals(tableId)) {
-      mutateRootGcCandidates(rgcc -> rgcc.add(candidates.iterator()));
+    if (AccumuloTable.ROOT.tableId().equals(tableId)) {
+      mutateRootGcCandidates(rgcc -> rgcc.add(candidates.stream()));
       return;
     }
 
-    try (BatchWriter writer = createWriter(tableId)) {
+    try (BatchWriter writer = context.createBatchWriter(getMetaTable(DataLevel.of(tableId)))) {
       for (StoredTabletFile file : candidates) {
         writer.addMutation(createDeleteMutation(file));
       }
-    } catch (MutationsRejectedException e) {
-      throw new RuntimeException(e);
+    } catch (MutationsRejectedException | TableNotFoundException e) {
+      throw new IllegalStateException(e);
     }
   }
 
   @Override
-  public void putGcFileAndDirCandidates(TableId tableId, Collection<String> candidates) {
+  public void putGcFileAndDirCandidates(TableId tableId, Collection<ReferenceFile> candidates) {
 
-    if (RootTable.ID.equals(tableId)) {
-
+    if (DataLevel.of(tableId) == DataLevel.ROOT) {
       // Directories are unexpected for the root tablet, so convert to stored tablet file
-      mutateRootGcCandidates(
-          rgcc -> rgcc.add(candidates.stream().map(StoredTabletFile::new).iterator()));
+      mutateRootGcCandidates(rgcc -> rgcc.add(candidates.stream()
+          .map(reference -> StoredTabletFile.of(URI.create(reference.getMetadataPath())))));
       return;
     }
 
-    try (BatchWriter writer = createWriter(tableId)) {
-      for (String fileOrDir : candidates) {
+    try (BatchWriter writer = context.createBatchWriter(getMetaTable(DataLevel.of(tableId)))) {
+      for (var fileOrDir : candidates) {
         writer.addMutation(createDeleteMutation(fileOrDir));
       }
-    } catch (MutationsRejectedException e) {
-      throw new RuntimeException(e);
+    } catch (MutationsRejectedException | TableNotFoundException e) {
+      throw new IllegalStateException(e);
     }
   }
 
   @Override
-  public void deleteGcCandidates(DataLevel level, Collection<String> paths) {
+  public void addBulkLoadInProgressFlag(String path, FateId fateId) {
+
+    // Bulk Import operations are not supported on the metadata table, so no entries will ever be
+    // required on the root table.
+    Mutation m = new Mutation(BlipSection.getRowPrefix() + path);
+    m.put(EMPTY_TEXT, EMPTY_TEXT, new Value(fateId.canonical()));
+
+    try (BatchWriter bw = context.createBatchWriter(AccumuloTable.METADATA.tableName())) {
+      bw.addMutation(m);
+    } catch (MutationsRejectedException | TableNotFoundException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  @Override
+  public void removeBulkLoadInProgressFlag(String path) {
+
+    // Bulk Import operations are not supported on the metadata table, so no entries will ever be
+    // required on the root table.
+    Mutation m = new Mutation(BlipSection.getRowPrefix() + path);
+    m.putDelete(EMPTY_TEXT, EMPTY_TEXT);
+
+    try (BatchWriter bw = context.createBatchWriter(AccumuloTable.METADATA.tableName())) {
+      bw.addMutation(m);
+    } catch (MutationsRejectedException | TableNotFoundException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  @Override
+  public void deleteGcCandidates(DataLevel level, Collection<GcCandidate> candidates,
+      GcCandidateType type) {
 
     if (level == DataLevel.ROOT) {
-      mutateRootGcCandidates(rgcc -> rgcc.remove(paths));
+      if (type == GcCandidateType.INUSE) {
+        // Since there is only a single root tablet, supporting INUSE candidate deletions would add
+        // additional code complexity without any substantial benefit.
+        // Therefore, deletion of root INUSE candidates is not supported.
+        return;
+      }
+      mutateRootGcCandidates(rgcc -> rgcc.remove(candidates.stream()));
       return;
     }
 
-    try (BatchWriter writer = context.createBatchWriter(level.metaTable())) {
-      for (String path : paths) {
-        Mutation m = new Mutation(DeletesSection.encodeRow(path));
-        m.putDelete(EMPTY_TEXT, EMPTY_TEXT);
-        writer.addMutation(m);
+    try (BatchWriter writer = context.createBatchWriter(getMetaTable(level))) {
+      if (type == GcCandidateType.VALID) {
+        for (GcCandidate candidate : candidates) {
+          Mutation m = new Mutation(DeletesSection.encodeRow(candidate.getPath()));
+          // Removes all versions of the candidate to avoid reprocessing deleted file entries
+          m.putDelete(EMPTY_TEXT, EMPTY_TEXT);
+          writer.addMutation(m);
+        }
+      } else {
+        for (GcCandidate candidate : candidates) {
+          Mutation m = new Mutation(DeletesSection.encodeRow(candidate.getPath()));
+          // Removes this and older versions while allowing newer candidate versions to persist
+          m.putDelete(EMPTY_TEXT, EMPTY_TEXT, candidate.getUid());
+          writer.addMutation(m);
+        }
       }
     } catch (MutationsRejectedException | TableNotFoundException e) {
-      throw new RuntimeException(e);
+      throw new IllegalStateException(e);
     }
   }
 
   @Override
-  public Iterator<String> getGcCandidates(DataLevel level, String continuePoint) {
+  public Iterator<GcCandidate> getGcCandidates(DataLevel level) {
     if (level == DataLevel.ROOT) {
-      var zooReader = new ZooReader(context.getZooKeepers(), context.getZooKeepersSessionTimeOut());
-      byte[] json;
+      var zooReader = context.getZooSession().asReader();
+      byte[] jsonBytes;
       try {
-        json = zooReader.getData(context.getZooKeeperRoot() + RootTable.ZROOT_TABLET_GC_CANDIDATES);
+        jsonBytes =
+            zooReader.getData(context.getZooKeeperRoot() + RootTable.ZROOT_TABLET_GC_CANDIDATES);
       } catch (KeeperException | InterruptedException e) {
-        throw new RuntimeException(e);
+        throw new IllegalStateException(e);
       }
-      Stream<String> candidates = RootGcCandidates.fromJson(json).stream().sorted();
-
-      if (continuePoint != null && !continuePoint.isEmpty()) {
-        candidates = candidates.dropWhile(candidate -> candidate.compareTo(continuePoint) <= 0);
-      }
-
-      return candidates.iterator();
+      return new RootGcCandidates(new String(jsonBytes, UTF_8)).sortedStream().iterator();
     } else if (level == DataLevel.METADATA || level == DataLevel.USER) {
       Range range = DeletesSection.getRange();
-      if (continuePoint != null && !continuePoint.isEmpty()) {
-        String continueRow = DeletesSection.encodeRow(continuePoint);
-        range = new Range(new Key(continueRow).followingKey(PartialKey.ROW), true,
-            range.getEndKey(), range.isEndKeyInclusive());
-      }
 
       Scanner scanner;
       try {
-        scanner = context.createScanner(level.metaTable(), Authorizations.EMPTY);
+        scanner = context.createScanner(getMetaTable(level), Authorizations.EMPTY);
       } catch (TableNotFoundException e) {
-        throw new RuntimeException(e);
+        throw new IllegalStateException(e);
       }
       scanner.setRange(range);
-      return StreamSupport.stream(scanner.spliterator(), false)
-          .filter(entry -> entry.getValue().equals(SkewedKeyValue.NAME))
-          .map(entry -> DeletesSection.decodeRow(entry.getKey().getRow().toString())).iterator();
+      return scanner.stream().filter(entry -> entry.getValue().equals(SkewedKeyValue.NAME))
+          .map(
+              entry -> new GcCandidate(DeletesSection.decodeRow(entry.getKey().getRow().toString()),
+                  entry.getKey().getTimestamp()))
+          .iterator();
     } else {
       throw new IllegalArgumentException();
     }
   }
 
-  private BatchWriter createWriter(TableId tableId) {
-
-    Preconditions.checkArgument(!RootTable.ID.equals(tableId));
-
-    try {
-      if (MetadataTable.ID.equals(tableId)) {
-        return context.createBatchWriter(RootTable.NAME);
-      } else {
-        return context.createBatchWriter(MetadataTable.NAME);
-      }
-    } catch (TableNotFoundException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
   @Override
-  public Mutation createDeleteMutation(String tabletFilePathToRemove) {
-    String path = TabletFileUtil.validate(tabletFilePathToRemove);
-    return createDelMutation(path);
+  public Mutation createDeleteMutation(ReferenceFile tabletFilePathToRemove) {
+    return createDelMutation(ValidationUtil.validate(tabletFilePathToRemove).getMetadataPath());
   }
 
   public Mutation createDeleteMutation(StoredTabletFile pathToRemove) {
-    return createDelMutation(pathToRemove.getMetaUpdateDelete());
+    return createDelMutation(pathToRemove.getMetadataPath());
   }
 
   private Mutation createDelMutation(String path) {
@@ -234,51 +276,16 @@ public class ServerAmpleImpl extends AmpleImpl implements Ample {
   }
 
   @Override
-  public void
-      putExternalCompactionFinalStates(Collection<ExternalCompactionFinalState> finalStates) {
-    try (BatchWriter writer = context.createBatchWriter(DataLevel.USER.metaTable())) {
-      String prefix = ExternalCompactionSection.getRowPrefix();
-      for (ExternalCompactionFinalState finalState : finalStates) {
-        Mutation m = new Mutation(prefix + finalState.getExternalCompactionId().canonical());
-        m.put("", "", finalState.toJson());
-        writer.addMutation(m);
-      }
-    } catch (MutationsRejectedException | TableNotFoundException e) {
-      throw new RuntimeException(e);
-    }
+  public ScanServerRefStore scanServerRefs() {
+    return scanServerRefStore;
   }
 
-  @Override
-  public Stream<ExternalCompactionFinalState> getExternalCompactionFinalStates() {
-    Scanner scanner;
-    try {
-      scanner = context.createScanner(DataLevel.USER.metaTable(), Authorizations.EMPTY);
-    } catch (TableNotFoundException e) {
-      throw new RuntimeException(e);
-    }
-
-    scanner.setRange(ExternalCompactionSection.getRange());
-    int pLen = ExternalCompactionSection.getRowPrefix().length();
-    return StreamSupport.stream(scanner.spliterator(), false)
-        .map(e -> ExternalCompactionFinalState.fromJson(
-            ExternalCompactionId.of(e.getKey().getRowData().toString().substring(pLen)),
-            e.getValue().toString()));
+  @VisibleForTesting
+  protected ServerContext getContext() {
+    return context;
   }
 
-  @Override
-  public void
-      deleteExternalCompactionFinalStates(Collection<ExternalCompactionId> statusesToDelete) {
-    try (BatchWriter writer = context.createBatchWriter(DataLevel.USER.metaTable())) {
-      String prefix = ExternalCompactionSection.getRowPrefix();
-      for (ExternalCompactionId ecid : statusesToDelete) {
-        Mutation m = new Mutation(prefix + ecid.canonical());
-        m.putDelete(EMPTY_TEXT, EMPTY_TEXT);
-        writer.addMutation(m);
-      }
-      log.debug("Deleted external compaction final state entries for external compactions: {}",
-          statusesToDelete);
-    } catch (MutationsRejectedException | TableNotFoundException e) {
-      throw new RuntimeException(e);
-    }
+  private String getMetaTable(DataLevel dataLevel) {
+    return getTableMapper().apply(dataLevel);
   }
 }

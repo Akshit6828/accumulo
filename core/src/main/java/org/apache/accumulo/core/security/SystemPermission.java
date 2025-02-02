@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -45,11 +45,12 @@ public enum SystemPermission {
 
   private byte permID;
 
-  private static HashMap<Byte,SystemPermission> mapping;
+  private static final HashMap<Byte,SystemPermission> mapping;
   static {
     mapping = new HashMap<>(SystemPermission.values().length);
-    for (SystemPermission perm : SystemPermission.values())
+    for (SystemPermission perm : SystemPermission.values()) {
       mapping.put(perm.permID, perm);
+    }
   }
 
   private SystemPermission(byte id) {
@@ -75,8 +76,9 @@ public enum SystemPermission {
 
     List<String> list = new ArrayList<>(a.length);
 
-    for (SystemPermission p : a)
+    for (SystemPermission p : a) {
       list.add("System." + p);
+    }
 
     return list;
   }
@@ -84,15 +86,14 @@ public enum SystemPermission {
   /**
    * Gets the permission matching the given byte ID.
    *
-   * @param id
-   *          byte ID
+   * @param id byte ID
    * @return system permission
-   * @throws IndexOutOfBoundsException
-   *           if the byte ID is invalid
+   * @throws IndexOutOfBoundsException if the byte ID is invalid
    */
   public static SystemPermission getPermissionById(byte id) {
-    if (mapping.containsKey(id))
+    if (mapping.containsKey(id)) {
       return mapping.get(id);
+    }
     throw new IndexOutOfBoundsException("No such permission");
   }
 }

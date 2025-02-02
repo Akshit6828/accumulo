@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -36,6 +36,7 @@ import java.util.function.Function;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.TabletId;
 import org.apache.accumulo.core.manager.balancer.TabletServerIdImpl;
+import org.apache.accumulo.core.metadata.schema.Ample.DataLevel;
 import org.apache.accumulo.core.spi.balancer.data.TServerStatus;
 import org.apache.accumulo.core.spi.balancer.data.TabletMigration;
 import org.apache.accumulo.core.spi.balancer.data.TabletServerId;
@@ -68,7 +69,8 @@ public abstract class GroupBalancer implements TabletBalancer {
 
   protected BalancerEnvironment environment;
   private final TableId tableId;
-  private long lastRun = 0;
+
+  protected final Map<DataLevel,Long> lastRunTimes = new HashMap<>(DataLevel.values().length);
 
   @Override
   public void init(BalancerEnvironment balancerEnvironment) {
@@ -211,7 +213,9 @@ public abstract class GroupBalancer implements TabletBalancer {
       return 5000;
     }
 
-    if (System.currentTimeMillis() - lastRun < getWaitTime()) {
+    final DataLevel currentLevel = DataLevel.valueOf(params.currentLevel());
+
+    if (System.currentTimeMillis() - lastRunTimes.getOrDefault(currentLevel, 0L) < getWaitTime()) {
       return 5000;
     }
 
@@ -275,7 +279,7 @@ public abstract class GroupBalancer implements TabletBalancer {
 
     populateMigrations(tservers.keySet(), params.migrationsOut(), moves);
 
-    lastRun = System.currentTimeMillis();
+    lastRunTimes.put(currentLevel, System.currentTimeMillis());
 
     return 5000;
   }
@@ -415,7 +419,7 @@ public abstract class GroupBalancer implements TabletBalancer {
   }
 
   private static class Move {
-    TserverGroupInfo dest;
+    final TserverGroupInfo dest;
     int count;
 
     public Move(TserverGroupInfo dest, int num) {

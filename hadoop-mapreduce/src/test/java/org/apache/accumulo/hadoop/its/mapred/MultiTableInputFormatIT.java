@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,8 +18,9 @@
  */
 package org.apache.accumulo.hadoop.its.mapred;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.io.File;
 import java.io.IOException;
@@ -44,7 +45,7 @@ import org.apache.hadoop.mapred.Reporter;
 import org.apache.hadoop.mapred.lib.NullOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class MultiTableInputFormatIT extends AccumuloClusterHarness {
 
@@ -61,10 +62,11 @@ public class MultiTableInputFormatIT extends AccumuloClusterHarness {
           throws IOException {
         try {
           String tableName = ((RangeInputSplit) reporter.getInputSplit()).getTableName();
-          if (key != null)
-            assertEquals(key.getRow().toString(), new String(v.get()));
+          if (key != null) {
+            assertEquals(key.getRow().toString(), new String(v.get(), UTF_8));
+          }
           assertEquals(new Text(String.format("%s_%09x", tableName, count + 1)), k.getRow());
-          assertEquals(String.format("%s_%09x", tableName, count), new String(v.get()));
+          assertEquals(String.format("%s_%09x", tableName, count), new String(v.get(), UTF_8));
         } catch (AssertionError e) {
           e1 = e;
         }
@@ -102,8 +104,8 @@ public class MultiTableInputFormatIT extends AccumuloClusterHarness {
 
       job.setInputFormat(AccumuloInputFormat.class);
 
-      AccumuloInputFormat.configure().clientProperties(getClientInfo().getProperties())
-          .table(table1).table(table2).store(job);
+      AccumuloInputFormat.configure().clientProperties(getClientProps()).table(table1).table(table2)
+          .store(job);
 
       job.setMapperClass(TestMapper.class);
       job.setMapOutputKeyClass(Key.class);

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,74 +18,110 @@
  */
 package org.apache.accumulo.tserver.metrics;
 
-import org.apache.accumulo.tserver.TabletServer;
-import org.apache.hadoop.metrics2.MetricsRecordBuilder;
-import org.apache.hadoop.metrics2.lib.Interns;
-import org.apache.hadoop.metrics2.lib.MetricsRegistry;
-import org.apache.hadoop.metrics2.lib.MutableGaugeLong;
+import static org.apache.accumulo.core.metrics.Metric.COMPACTOR_ENTRIES_READ;
+import static org.apache.accumulo.core.metrics.Metric.COMPACTOR_ENTRIES_WRITTEN;
+import static org.apache.accumulo.core.metrics.Metric.COMPACTOR_MINC_STUCK;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_ENTRIES;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_HOLD;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_INGEST_BYTES;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_INGEST_ENTRIES;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_MEM_ENTRIES;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_MINC_QUEUED;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_MINC_RUNNING;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_MINC_TOTAL;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_TABLETS_FILES;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_TABLETS_LONG_ASSIGNMENTS;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_TABLETS_ONDEMAND_UNLOADED_FOR_MEM;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_TABLETS_ONLINE;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_TABLETS_ONLINE_ONDEMAND;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_TABLETS_OPENING;
+import static org.apache.accumulo.core.metrics.Metric.TSERVER_TABLETS_UNOPENED;
 
-public class TabletServerMetrics extends TServerMetrics {
+import org.apache.accumulo.core.metrics.MetricsProducer;
+import org.apache.accumulo.server.compaction.CompactionWatcher;
+import org.apache.accumulo.server.compaction.FileCompactor;
+import org.apache.accumulo.tserver.TabletServer;
+
+import io.micrometer.core.instrument.FunctionCounter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.LongTaskTimer;
+import io.micrometer.core.instrument.MeterRegistry;
+
+public class TabletServerMetrics implements MetricsProducer {
 
   private final TabletServerMetricsUtil util;
 
-  private final MutableGaugeLong entries;
-  private final MutableGaugeLong entriesInMemory;
-  private final MutableGaugeLong activeMajcs;
-  private final MutableGaugeLong queuedMajcs;
-  private final MutableGaugeLong activeMincs;
-  private final MutableGaugeLong queuedMincs;
-  private final MutableGaugeLong onlineTablets;
-  private final MutableGaugeLong openingTablets;
-  private final MutableGaugeLong unopenedTablets;
-  private final MutableGaugeLong queries;
-  private final MutableGaugeLong totalMincs;
-
   public TabletServerMetrics(TabletServer tserver) {
-    super("general");
     util = new TabletServerMetricsUtil(tserver);
+  }
 
-    MetricsRegistry registry = super.getRegistry();
-    entries = registry.newGauge("entries", "Number of entries", 0L);
-    entriesInMemory = registry.newGauge("entriesInMem", "Number of entries in memory", 0L);
-    activeMajcs = registry.newGauge("activeMajCs", "Number of active major compactions", 0L);
-    queuedMajcs = registry.newGauge("queuedMajCs", "Number of queued major compactions", 0L);
-    activeMincs = registry.newGauge("activeMinCs", "Number of active minor compactions", 0L);
-    queuedMincs = registry.newGauge("queuedMinCs", "Number of queued minor compactions", 0L);
-    onlineTablets = registry.newGauge("onlineTablets", "Number of online tablets", 0L);
-    openingTablets = registry.newGauge("openingTablets", "Number of opening tablets", 0L);
-    unopenedTablets = registry.newGauge("unopenedTablets", "Number of unopened tablets", 0L);
-    queries = registry.newGauge("queries", "Number of queries", 0L);
-    totalMincs = registry.newGauge("totalMinCs", "Total number of minor compactions performed", 0L);
+  private long getTotalEntriesRead() {
+    return FileCompactor.getTotalEntriesRead();
+  }
+
+  private long getTotalEntriesWritten() {
+    return FileCompactor.getTotalEntriesWritten();
   }
 
   @Override
-  protected void prepareMetrics() {
-    entries.set(util.getEntries());
-    entriesInMemory.set(util.getEntriesInMemory());
-    activeMajcs.set(util.getMajorCompactions());
-    queuedMajcs.set(util.getMajorCompactionsQueued());
-    activeMincs.set(util.getMinorCompactions());
-    queuedMincs.set(util.getMinorCompactionsQueued());
-    onlineTablets.set(util.getOnlineCount());
-    openingTablets.set(util.getOpeningCount());
-    unopenedTablets.set(util.getUnopenedCount());
-    queries.set(util.getQueries());
-    totalMincs.set(util.getTotalMinorCompactions());
-  }
+  public void registerMetrics(MeterRegistry registry) {
+    FunctionCounter
+        .builder(COMPACTOR_ENTRIES_READ.getName(), this, TabletServerMetrics::getTotalEntriesRead)
+        .description(COMPACTOR_ENTRIES_READ.getDescription()).register(registry);
+    FunctionCounter
+        .builder(COMPACTOR_ENTRIES_WRITTEN.getName(), this,
+            TabletServerMetrics::getTotalEntriesWritten)
+        .description(COMPACTOR_ENTRIES_WRITTEN.getDescription()).register(registry);
+    LongTaskTimer timer = LongTaskTimer.builder(COMPACTOR_MINC_STUCK.getName())
+        .description(COMPACTOR_MINC_STUCK.getDescription()).register(registry);
+    CompactionWatcher.setTimer(timer);
 
-  @Override
-  protected void getMoreMetrics(MetricsRecordBuilder builder, boolean all) {
-    // TODO Some day, MetricsRegistry will also support the MetricsGaugeDouble or allow us to
-    // instantiate it directly
-    builder.addGauge(Interns.info("filesPerTablet", "Number of files per tablet"),
-        util.getAverageFilesPerTablet());
-    builder.addGauge(Interns.info("holdTime", "Time commits held"), util.getHoldTime());
-    builder.addGauge(Interns.info("ingestRate", "Ingest rate (entries/sec)"), util.getIngest());
-    builder.addGauge(Interns.info("ingestByteRate", "Ingest rate (bytes/sec)"),
-        util.getIngestByteRate());
-    builder.addGauge(Interns.info("queryRate", "Query rate (entries/sec)"), util.getQueryRate());
-    builder.addGauge(Interns.info("queryByteRate", "Query rate (bytes/sec)"),
-        util.getQueryByteRate());
-    builder.addGauge(Interns.info("scannedRate", "Scanned rate"), util.getScannedRate());
+    Gauge
+        .builder(TSERVER_TABLETS_LONG_ASSIGNMENTS.getName(), util,
+            TabletServerMetricsUtil::getLongTabletAssignments)
+        .description(TSERVER_TABLETS_LONG_ASSIGNMENTS.getDescription()).register(registry);
+
+    Gauge.builder(TSERVER_ENTRIES.getName(), util, TabletServerMetricsUtil::getEntries)
+        .description(TSERVER_ENTRIES.getDescription()).register(registry);
+    Gauge.builder(TSERVER_MEM_ENTRIES.getName(), util, TabletServerMetricsUtil::getEntriesInMemory)
+        .description(TSERVER_MEM_ENTRIES.getDescription()).register(registry);
+    Gauge
+        .builder(TSERVER_MINC_RUNNING.getName(), util, TabletServerMetricsUtil::getMinorCompactions)
+        .description(TSERVER_MINC_RUNNING.getDescription()).register(registry);
+    Gauge
+        .builder(TSERVER_MINC_QUEUED.getName(), util,
+            TabletServerMetricsUtil::getMinorCompactionsQueued)
+        .description(TSERVER_MINC_QUEUED.getDescription()).register(registry);
+    Gauge
+        .builder(TSERVER_TABLETS_ONLINE_ONDEMAND.getName(), util,
+            TabletServerMetricsUtil::getOnDemandOnlineCount)
+        .description(TSERVER_TABLETS_ONLINE_ONDEMAND.getDescription()).register(registry);
+    Gauge
+        .builder(TSERVER_TABLETS_ONDEMAND_UNLOADED_FOR_MEM.getName(), util,
+            TabletServerMetricsUtil::getOnDemandUnloadedLowMem)
+        .description(TSERVER_TABLETS_ONDEMAND_UNLOADED_FOR_MEM.getDescription()).register(registry);
+    Gauge.builder(TSERVER_TABLETS_ONLINE.getName(), util, TabletServerMetricsUtil::getOnlineCount)
+        .description(TSERVER_TABLETS_ONLINE.getDescription()).register(registry);
+    Gauge.builder(TSERVER_TABLETS_OPENING.getName(), util, TabletServerMetricsUtil::getOpeningCount)
+        .description(TSERVER_TABLETS_OPENING.getDescription()).register(registry);
+    Gauge
+        .builder(TSERVER_TABLETS_UNOPENED.getName(), util,
+            TabletServerMetricsUtil::getUnopenedCount)
+        .description(TSERVER_TABLETS_UNOPENED.getDescription()).register(registry);
+    Gauge
+        .builder(TSERVER_MINC_TOTAL.getName(), util,
+            TabletServerMetricsUtil::getTotalMinorCompactions)
+        .description(TSERVER_MINC_TOTAL.getDescription()).register(registry);
+
+    Gauge
+        .builder(TSERVER_TABLETS_FILES.getName(), util,
+            TabletServerMetricsUtil::getAverageFilesPerTablet)
+        .description(TSERVER_TABLETS_FILES.getDescription()).register(registry);
+    Gauge.builder(TSERVER_HOLD.getName(), util, TabletServerMetricsUtil::getHoldTime)
+        .description(TSERVER_HOLD.getDescription()).register(registry);
+    Gauge.builder(TSERVER_INGEST_ENTRIES.getName(), util, TabletServerMetricsUtil::getIngestCount)
+        .description(TSERVER_INGEST_ENTRIES.getDescription()).register(registry);
+    Gauge.builder(TSERVER_INGEST_BYTES.getName(), util, TabletServerMetricsUtil::getIngestByteCount)
+        .description(TSERVER_INGEST_BYTES.getDescription()).register(registry);
   }
 }

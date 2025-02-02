@@ -8,7 +8,7 @@
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
 #
-#   http://www.apache.org/licenses/LICENSE-2.0
+#   https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
@@ -23,20 +23,20 @@ function print_usage {
 Usage: accumulo-service <service> <command>
 
 Services:
-  gc          Accumulo garbage collector
-  monitor     Accumulo monitor
-  manager     Accumulo manager
-  master      Accumulo master (Deprecated)
-  tserver     Accumulo tserver
-  tracer      Accumulo tracter
+  gc                     Accumulo garbage collector
+  monitor                Accumulo monitor
+  manager                Accumulo manager
+  tserver                Accumulo tserver
+  compactor              Accumulo compactor (experimental)
+  sserver                Accumulo scan server (experimental)
 
 Commands:
-  start       Starts service
-  stop        Stops service
-  kill        Kills service
+  start                   Starts service(s)
+  stop [--all | [<name>]] Stops service(s)
+  kill [--all | [<name>]] Kills service(s)
+  list                    List running service(s)
 
 EOF
-  exit 1
 }
 
 function invalid_args {
@@ -45,65 +45,172 @@ function invalid_args {
   exit 1
 }
 
-function rotate_log () {
+function rotate_log() {
   logfile="$1"
   max_retained="5"
-  if [[ -f "$logfile" ]]; then
-    while [[ "$max_retained" -gt 1 ]]; do
-      prev=$(( max_retained - 1))
+  if [[ -f $logfile ]]; then
+    while [[ $max_retained -gt 1 ]]; do
+      prev=$((max_retained - 1))
       [ -f "$logfile.$prev" ] && mv -f "$logfile.$prev" "$logfile.$max_retained"
       max_retained=$prev
     done
-    mv -f "$logfile" "$logfile.$max_retained";
+    mv -f "$logfile" "$logfile.$max_retained"
   fi
+}
+
+function get_group() {
+  # Find the group parameter if any
+  local group="default"
+  local param
+  for param in "$@"; do
+    if [[ $param =~ ^[a-z]*[.]group=(.*)$ ]]; then
+      group="${BASH_REMATCH[1]}"
+    fi
+  done
+  echo "$group"
 }
 
 function start_service() {
-  if [[ -f "$pid_file" ]]; then
-    pid=$(cat "$pid_file")
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "$host : $service already running (${pid})"
-      exit 0
+  local service_type=$1
+  local service_name=$2
+  shift 2
+
+  local build_service_name="false"
+  if [[ -n $service_name ]]; then
+    # if service_name is supplied, then we are only starting one instance
+    servers_per_host=1
+  else
+    build_service_name="true"
+    servers_per_host=${ACCUMULO_CLUSTER_ARG:-1}
+  fi
+
+  for ((process_num = 1; process_num <= servers_per_host; process_num++)); do
+    if [[ ${build_service_name} == "true" ]]; then
+      service_name="${service_type}_${group}_${process_num}"
     fi
-  fi
-  echo "Starting $service on $host"
+    # The ACCUMULO_SERVICE_INSTANCE variable is used in
+    # accumulo-env.sh to set parameters on the command
+    # line.
+    export ACCUMULO_SERVICE_INSTANCE="${service_name}"
 
-  if [[ $service == "manager" ]]; then
-    "${bin}/accumulo" org.apache.accumulo.manager.state.SetGoalState NORMAL
-  fi
+    local pid_file="${ACCUMULO_PID_DIR}/accumulo-${service_name}.pid"
+    if [[ -f $pid_file ]]; then
+      pid=$(cat "$pid_file")
+      if kill -0 "$pid" 2>/dev/null; then
+        echo "$HOST : ${service_name} already running (${pid})"
+        continue
+      fi
+    fi
+    echo "Starting $service_name on $HOST"
 
-  outfile="${ACCUMULO_LOG_DIR}/${service}${ACCUMULO_SERVICE_INSTANCE}_${host}.out"
-  errfile="${ACCUMULO_LOG_DIR}/${service}${ACCUMULO_SERVICE_INSTANCE}_${host}.err"
-  rotate_log "$outfile"
-  rotate_log "$errfile"
+    if [[ ${service_type} == "manager" ]]; then
+      "${bin}/accumulo" org.apache.accumulo.manager.state.SetGoalState NORMAL
+    fi
+    outfile="${ACCUMULO_LOG_DIR}/${service_name}_${HOST}.out"
+    errfile="${ACCUMULO_LOG_DIR}/${service_name}_${HOST}.err"
+    rotate_log "$outfile"
+    rotate_log "$errfile"
 
-  nohup "${bin}/accumulo" "$service" >"$outfile" 2>"$errfile" < /dev/null &
-  echo "$!" > "${pid_file}"
+    nohup "${bin}/accumulo" "$service_type" "$@" >"$outfile" 2>"$errfile" </dev/null &
+    echo "$!" >"${pid_file}"
+
+  done
 
   # Check the max open files limit and selectively warn
   max_files_open=$(ulimit -n)
-  if [[ -n $max_files_open ]] ; then
+  if [[ -n $max_files_open ]]; then
     max_files_recommended=32768
-    if (( max_files_open < max_files_recommended )); then
-      echo "WARN : Max open files on $host is $max_files_open, recommend $max_files_recommended" >&2
+    if ((max_files_open < max_files_recommended)); then
+      echo "WARN : Max open files on $HOST is $max_files_open, recommend $max_files_recommended" >&2
     fi
   fi
 }
 
-function stop_service() {
-  if [[ -f "$pid_file" ]]; then
-    echo "Stopping $service on $host";
-    kill -s TERM "$(cat "$pid_file")" 2>/dev/null
+function control_process() {
+  local kill_code=$1
+  local service_name=$2
+  local pid_file=$3
+  if [[ -f $pid_file ]]; then
+    echo "Stopping $service_name on $HOST"
+    kill -s "$kill_code" "$(cat "$pid_file")" 2>/dev/null
     rm -f "${pid_file}" 2>/dev/null
+  fi
+}
+
+function find_processes() {
+  local service_type=$1
+  local file
+  for file in "$ACCUMULO_PID_DIR"/*; do
+    if file=$(expr "$file" : '^.*/accumulo-\('"$service_type"'.*\)[.]pid$'); then
+      RUNNING_PROCESSES+=("$file")
+    fi
+  done
+}
+
+function stop_service() {
+  local service_type=$1
+  local service_name=$2
+  local all_flag=$3
+  if $all_flag; then
+    find_processes "$service_type"
+    for process in "${RUNNING_PROCESSES[@]}"; do
+      local pid_file="${ACCUMULO_PID_DIR}/accumulo-${process}.pid"
+      control_process "TERM" "$process" "$pid_file"
+    done
+  elif [[ -n $ACCUMULO_CLUSTER_ARG ]]; then
+
+    servers_per_host=${ACCUMULO_CLUSTER_ARG:-1}
+    group=$(get_group "$@")
+
+    for ((process_num = 1; process_num <= servers_per_host; process_num++)); do
+      service_name="${service_type}_${group}_${process_num}"
+      echo "Stopping service process: $service_name"
+      local pid_file="${ACCUMULO_PID_DIR}/accumulo-${service_name}.pid"
+      control_process "TERM" "$service_name" "$pid_file"
+    done
+
+  else
+    echo "Stopping service process: $service_name"
+    local pid_file="${ACCUMULO_PID_DIR}/accumulo-${service_name}.pid"
+    control_process "TERM" "$service_name" "$pid_file"
   fi
 }
 
 function kill_service() {
-  if [[ -f "$pid_file" ]]; then
-    echo "Killing $service on $host";
-    kill -s KILL "$(cat "$pid_file")" 2>/dev/null
-    rm -f "${pid_file}" 2>/dev/null
+  local service_type=$1
+  local service_name=$2
+  local all_flag=$3
+  if $all_flag; then
+    find_processes "$service_type"
+    for process in "${RUNNING_PROCESSES[@]}"; do
+      local pid_file="${ACCUMULO_PID_DIR}/accumulo-${process}.pid"
+      control_process "KILL" "$process" "$pid_file"
+    done
+  elif [[ -n $ACCUMULO_CLUSTER_ARG ]]; then
+
+    servers_per_host=${ACCUMULO_CLUSTER_ARG:-1}
+    group=$(get_group "$@")
+
+    for ((process_num = 1; process_num <= servers_per_host; process_num++)); do
+      service_name="${service_type}_${group}_${process_num}"
+      echo "Stopping service process: $service_name"
+      local pid_file="${ACCUMULO_PID_DIR}/accumulo-${service_name}.pid"
+      control_process "KILL" "$service_name" "$pid_file"
+    done
+
+  else
+    local pid_file="${ACCUMULO_PID_DIR}/accumulo-${service_name}.pid"
+    control_process "KILL" "$service_name" "$pid_file"
   fi
+}
+
+function list_processes() {
+  local service_type=$1
+  find_processes "$service_type"
+  echo "Currently running ${service_type} processes:"
+  for process in "${RUNNING_PROCESSES[@]}"; do
+    echo "$process"
+  done
 }
 
 function main() {
@@ -111,20 +218,29 @@ function main() {
     invalid_args "<service> cannot be empty"
   fi
 
+  # Create a global array for process tracking
+  declare -a RUNNING_PROCESSES
+
   # Resolve base directory
   SOURCE="${BASH_SOURCE[0]}"
   while [ -h "${SOURCE}" ]; do
-     bin="$( cd -P "$( dirname "${SOURCE}" )" && pwd )"
-     SOURCE="$(readlink "${SOURCE}")"
-     [[ "${SOURCE}" != /* ]] && SOURCE="${bin}/${SOURCE}"
+    bin="$(cd -P "$(dirname "${SOURCE}")" && pwd)"
+    SOURCE="$(readlink "${SOURCE}")"
+    [[ ${SOURCE} != /* ]] && SOURCE="${bin}/${SOURCE}"
   done
   # Set up variables needed by accumulo-env.sh
-  export bin="$( cd -P "$( dirname "${SOURCE}" )" && pwd )"
-  export basedir=$( cd -P "${bin}"/.. && pwd )
+  bin="$(cd -P "$(dirname "${SOURCE}")" && pwd)"
+  export bin
+  basedir=$(cd -P "${bin}"/.. && pwd)
+  export basedir
   export conf="${ACCUMULO_CONF_DIR:-${basedir}/conf}"
   export lib="${basedir}/lib"
 
+  group=$(get_group "$@")
+  export ACCUMULO_RESOURCE_GROUP="$group"
+
   if [[ -f "${conf}/accumulo-env.sh" ]]; then
+    #shellcheck source=../conf/accumulo-env.sh
     source "${conf}/accumulo-env.sh"
   fi
   ACCUMULO_LOG_DIR="${ACCUMULO_LOG_DIR:-${basedir}/logs}"
@@ -133,40 +249,55 @@ function main() {
   mkdir -p "$ACCUMULO_LOG_DIR" 2>/dev/null
   mkdir -p "$ACCUMULO_PID_DIR" 2>/dev/null
 
-  host="$(hostname)"
-  if [[ -z "$host" ]]; then
-    host=$(ip addr | grep 'state UP' -A2 | tail -n1 | awk '{print $2}' | cut -f1  -d'/')
-  fi 
-  service="$1"
-
-  if [[ $service == "master" ]]; then
-    echo "WARN : Use of 'master' service name is deprecated; use 'manager' instead."
-    service="manager"
+  HOST="$(hostname)"
+  if [[ -z $HOST ]]; then
+    HOST=$(ip addr | grep 'state UP' -A2 | tail -n1 | awk '{print $2}' | cut -f1 -d'/')
   fi
 
-  pid_file="${ACCUMULO_PID_DIR}/accumulo-${service}${ACCUMULO_SERVICE_INSTANCE}.pid"
-  case "$service" in
-    gc|manager|monitor|tserver|tracer)
-      if [[ -z $2 ]]; then
+  local service_type="$1"
+  local command_name="$2"
+  shift 2
+  local service_name=""
+  local all_flag=false
+
+  # Check and see if accumulo-cluster is calling this script
+  if [[ -z $ACCUMULO_CLUSTER_ARG ]]; then
+    # The rest of the arguments are from a user
+    if [[ $1 == "--all" ]]; then
+      all_flag=true
+    else
+      # A named service has been specified
+      if [[ $1 != "-o" ]]; then
+        service_name="$1"
+      fi
+    fi
+  fi
+
+  case "$service_type" in
+    gc | manager | monitor | tserver | compactor | sserver)
+      if [[ -z $command_name ]]; then
         invalid_args "<command> cannot be empty"
       fi
-      case "$2" in 
+      case "$command_name" in
         start)
-          start_service
+          start_service "$service_type" "$service_name" "$@"
           ;;
         stop)
-          stop_service
+          stop_service "$service_type" "$service_name" $all_flag "$@"
           ;;
         kill)
-          kill_service
+          kill_service "$service_type" "$service_name" $all_flag "$@"
+          ;;
+        list)
+          list_processes "$service_type"
           ;;
         *)
-          invalid_args "'$2' is an invalid <command>"
+          invalid_args "'$command_name' is an invalid <command>"
           ;;
       esac
       ;;
     *)
-      invalid_args "'$service' is an invalid <service>"
+      invalid_args "'$service_type' is an invalid <service>"
       ;;
   esac
 }

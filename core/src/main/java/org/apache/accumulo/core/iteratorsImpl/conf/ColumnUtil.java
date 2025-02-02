@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,8 +27,9 @@ public class ColumnUtil {
     int hash = 1;
     int end = offset + len;
 
-    for (int i = offset; i < end; i++)
+    for (int i = offset; i < end; i++) {
       hash = (31 * hash) + bytes[i];
+    }
 
     return hash;
   }
@@ -38,7 +39,7 @@ public class ColumnUtil {
   }
 
   public static class ColFamHashKey {
-    Text columnFamily;
+    final Text columnFamily;
 
     Key key;
 
@@ -65,21 +66,23 @@ public class ColumnUtil {
 
     @Override
     public boolean equals(Object o) {
-      if (o instanceof ColFamHashKey)
+      if (o instanceof ColFamHashKey) {
         return equals((ColFamHashKey) o);
+      }
       return false;
     }
 
     public boolean equals(ColFamHashKey ohk) {
-      if (columnFamily == null)
+      if (columnFamily == null) {
         return key.compareColumnFamily(ohk.columnFamily) == 0;
+      }
       return ohk.key.compareColumnFamily(columnFamily) == 0;
     }
   }
 
   public static class ColHashKey {
-    Text columnFamily;
-    Text columnQualifier;
+    final Text columnFamily;
+    final Text columnQualifier;
 
     Key key;
 
@@ -109,15 +112,17 @@ public class ColumnUtil {
 
     @Override
     public boolean equals(Object o) {
-      if (o instanceof ColHashKey)
+      if (o instanceof ColHashKey) {
         return equals((ColHashKey) o);
+      }
       return false;
     }
 
     public boolean equals(ColHashKey ohk) {
-      if (columnFamily == null)
+      if (columnFamily == null) {
         return key.compareColumnFamily(ohk.columnFamily) == 0
             && key.compareColumnQualifier(ohk.columnQualifier) == 0;
+      }
       return ohk.key.compareColumnFamily(columnFamily) == 0
           && ohk.key.compareColumnQualifier(columnQualifier) == 0;
     }

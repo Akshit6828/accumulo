@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,17 +22,14 @@ import java.util.Iterator;
 import java.util.Set;
 
 import org.apache.accumulo.core.clientImpl.Namespace;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.util.Pair;
+import org.apache.accumulo.core.util.tables.TableNameUtil;
 import org.apache.accumulo.shell.Shell;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class DeleteTableCommand extends TableOperation {
-  private static final Logger log = LoggerFactory.getLogger(DeleteTableCommand.class);
 
   private Option forceOpt;
 
@@ -76,9 +73,9 @@ public class DeleteTableCommand extends TableOperation {
     Iterator<String> tableNames = tables.iterator();
     while (tableNames.hasNext()) {
       String table = tableNames.next();
-      Pair<String,String> qualifiedName = Tables.qualify(table);
+      Pair<String,String> qualifiedName = TableNameUtil.qualify(table);
       if (Namespace.ACCUMULO.name().equals(qualifiedName.getFirst())) {
-        log.trace("Removing table from deletion set: {}", table);
+        Shell.log.trace("Removing table from deletion set: {}", table);
         tableNames.remove();
       }
     }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,21 +18,20 @@
  */
 package org.apache.accumulo.core.singletons;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.apache.accumulo.core.singletons.SingletonManager.Mode;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class SingletonManagerTest {
 
   TestService service1;
   TestService service2;
 
-  @Before
+  @BeforeEach
   public void setup() {
     SingletonManager.reset();
     assertEquals(0, SingletonManager.getReservationCount());
@@ -91,57 +90,6 @@ public class SingletonManagerTest {
     assertEquals(0, SingletonManager.getReservationCount());
     assertEquals(new TestService(false, 1, 2), service1);
     assertEquals(new TestService(false, 2, 2), service2);
-  }
-
-  @Test
-  public void testConnectorPreventsDisable() {
-
-    SingletonManager.setMode(Mode.CONNECTOR);
-    assertEquals(Mode.CONNECTOR, SingletonManager.getMode());
-
-    SingletonReservation resv1 = SingletonManager.getClientReservation();
-
-    assertEquals(1, SingletonManager.getReservationCount());
-
-    SingletonReservation resv2 = SingletonManager.getClientReservation();
-
-    assertEquals(2, SingletonManager.getReservationCount());
-
-    resv1.close();
-    resv2.close();
-
-    assertEquals(0, SingletonManager.getReservationCount());
-
-    assertEquals(new TestService(true, 0, 0), service1);
-    assertEquals(new TestService(true, 1, 0), service2);
-
-    SingletonManager.setMode(Mode.CLIENT);
-    assertEquals(Mode.CLIENT, SingletonManager.getMode());
-
-    assertEquals(new TestService(false, 0, 1), service1);
-    assertEquals(new TestService(false, 1, 1), service2);
-
-    try {
-      SingletonManager.setMode(Mode.CONNECTOR);
-      fail("Should only be able to set mode to CONNECTOR once");
-    } catch (IllegalStateException e) {}
-
-    assertEquals(Mode.CLIENT, SingletonManager.getMode());
-  }
-
-  @Test
-  public void testConnectorEnables() {
-    SingletonReservation resv1 = SingletonManager.getClientReservation();
-    resv1.close();
-
-    assertEquals(new TestService(false, 0, 1), service1);
-    assertEquals(new TestService(false, 1, 1), service2);
-
-    // this should enable services
-    SingletonManager.setMode(Mode.CONNECTOR);
-
-    assertEquals(new TestService(true, 1, 1), service1);
-    assertEquals(new TestService(true, 2, 1), service2);
   }
 
   @Test

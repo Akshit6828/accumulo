@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -31,7 +31,7 @@ import org.apache.hadoop.mapreduce.Partitioner;
  * @since 2.0.0
  */
 public class KeyRangePartitioner extends Partitioner<Key,Writable> implements Configurable {
-  private RangePartitioner rp = new RangePartitioner();
+  private final RangePartitioner rp = new RangePartitioner();
 
   @Override
   public int getPartition(Key key, Writable value, int numPartitions) {

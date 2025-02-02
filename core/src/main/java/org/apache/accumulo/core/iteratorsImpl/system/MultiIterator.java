@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -56,8 +56,9 @@ public class MultiIterator extends HeapIterator {
   }
 
   private void init() {
-    for (SortedKeyValueIterator<Key,Value> skvi : iters)
+    for (SortedKeyValueIterator<Key,Value> skvi : iters) {
       addSource(skvi);
+    }
   }
 
   private MultiIterator(List<SortedKeyValueIterator<Key,Value>> iters, Range seekFence,
@@ -98,8 +99,9 @@ public class MultiIterator extends HeapIterator {
 
     if (fence != null) {
       range = fence.clip(range, true);
-      if (range == null)
+      if (range == null) {
         return;
+      }
     }
 
     for (SortedKeyValueIterator<Key,Value> skvi : iters) {

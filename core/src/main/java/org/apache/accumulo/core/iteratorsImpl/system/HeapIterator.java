@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -43,8 +43,9 @@ public abstract class HeapIterator implements SortedKeyValueIterator<Key,Value> 
   }
 
   protected void createHeap(int maxSize) {
-    if (heap != null)
+    if (heap != null) {
       throw new IllegalStateException("heap already exist");
+    }
 
     heap = new PriorityQueue<>(maxSize == 0 ? 1 : maxSize,
         (si1, si2) -> si1.getTopKey().compareTo(si2.getTopKey()));

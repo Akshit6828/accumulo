@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -31,11 +31,11 @@ import org.apache.accumulo.core.util.UnsynchronizedBuffer;
 
 public class CompressedIterators {
   private Map<String,Integer> symbolMap;
-  private List<String> symbolTable;
+  private final List<String> symbolTable;
 
   public static class IterConfig {
-    public List<IterInfo> ssiList = new ArrayList<>();
-    public Map<String,Map<String,String>> ssio = new HashMap<>();
+    public final List<IterInfo> ssiList = new ArrayList<>();
+    public final Map<String,Map<String,String>> ssio = new HashMap<>();
   }
 
   public CompressedIterators() {

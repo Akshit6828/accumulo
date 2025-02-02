@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -58,12 +58,13 @@ import org.apache.hadoop.io.Text;
  * classes should override the {@link TermSource#seekColfams} in their implementation's
  * {@link #init(SortedKeyValueIterator, Map, IteratorEnvironment)} method.
  *
- * An example of using the IntersectingIterator is available at
- * https://github.com/apache/accumulo-examples/blob/main/docs/shard.md
+ * An example of using the IntersectingIterator is available in
+ * <a href="https://github.com/apache/accumulo-examples/blob/main/docs/shard.md">the examples
+ * repo</a>
  */
 public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
 
-  protected Text nullText = new Text();
+  protected final Text nullText = new Text();
 
   protected Text getPartition(Key key) {
     return key.getRow();
@@ -90,10 +91,10 @@ public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
   }
 
   public static class TermSource {
-    public SortedKeyValueIterator<Key,Value> iter;
-    public Text term;
+    public final SortedKeyValueIterator<Key,Value> iter;
+    public final Text term;
     public Collection<ByteSequence> seekColfams;
-    public boolean notFlag;
+    public final boolean notFlag;
 
     public TermSource(TermSource other) {
       this.iter = other.iter;
@@ -127,7 +128,7 @@ public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
 
   // query-time settings
   protected Text currentPartition = null;
-  protected Text currentDocID = new Text(emptyByteArray);
+  protected final Text currentDocID = new Text(emptyByteArray);
   static final byte[] emptyByteArray = new byte[0];
 
   protected Key topKey = null;
@@ -398,8 +399,9 @@ public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
   }
 
   public static String stringTopKey(SortedKeyValueIterator<Key,Value> iter) {
-    if (iter.hasTop())
+    if (iter.hasTop()) {
       return iter.getTopKey().toString();
+    }
     return "";
   }
 
@@ -424,10 +426,11 @@ public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
   protected static String encodeBooleans(boolean[] flags) {
     byte[] bytes = new byte[flags.length];
     for (int i = 0; i < flags.length; i++) {
-      if (flags[i])
+      if (flags[i]) {
         bytes[i] = 1;
-      else
+      } else {
         bytes[i] = 0;
+      }
     }
     return Base64.getEncoder().encodeToString(bytes);
   }
@@ -446,8 +449,9 @@ public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
    */
   protected static boolean[] decodeBooleans(String flags) {
     // return null of there were no flags
-    if (flags == null)
+    if (flags == null) {
       return null;
+    }
 
     byte[] bytes = Base64.getDecoder().decode(flags);
     boolean[] bFlags = new boolean[bytes.length];
@@ -473,8 +477,9 @@ public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
     // And we are going to re-order such that the first term is not a ! term
     if (notFlag == null) {
       notFlag = new boolean[terms.length];
-      for (int i = 0; i < terms.length; i++)
+      for (int i = 0; i < terms.length; i++) {
         notFlag[i] = false;
+      }
     }
     if (notFlag[0]) {
       for (int i = 1; i < notFlag.length; i++) {
@@ -532,8 +537,9 @@ public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
    * Encode the columns to be used when iterating.
    */
   public static void setColumnFamilies(IteratorSetting cfg, Text[] columns) {
-    if (columns.length < 1)
+    if (columns.length < 1) {
       throw new IllegalArgumentException("Must supply at least one term to intersect");
+    }
     cfg.addOption(IntersectingIterator.columnFamiliesOptionName,
         IntersectingIterator.encodeColumns(columns));
   }
@@ -543,10 +549,12 @@ public class IntersectingIterator implements SortedKeyValueIterator<Key,Value> {
    * excluded if matching negated columns, instead of included).
    */
   public static void setColumnFamilies(IteratorSetting cfg, Text[] columns, boolean[] notFlags) {
-    if (columns.length < 1)
+    if (columns.length < 1) {
       throw new IllegalArgumentException("Must supply at least one terms to intersect");
-    if (columns.length != notFlags.length)
+    }
+    if (columns.length != notFlags.length) {
       throw new IllegalArgumentException("columns and notFlags arrays must be the same length");
+    }
     setColumnFamilies(cfg, columns);
     cfg.addOption(IntersectingIterator.notFlagOptionName,
         IntersectingIterator.encodeBooleans(notFlags));

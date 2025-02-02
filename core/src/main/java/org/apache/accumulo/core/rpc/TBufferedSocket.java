@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -24,12 +24,13 @@ import java.io.IOException;
 
 import org.apache.thrift.transport.TIOStreamTransport;
 import org.apache.thrift.transport.TSocket;
+import org.apache.thrift.transport.TTransportException;
 
 public class TBufferedSocket extends TIOStreamTransport {
 
   String client;
 
-  public TBufferedSocket(TSocket sock, int bufferSize) throws IOException {
+  public TBufferedSocket(TSocket sock, int bufferSize) throws IOException, TTransportException {
     super(new BufferedInputStream(sock.getSocket().getInputStream(), bufferSize),
         new BufferedOutputStream(sock.getSocket().getOutputStream(), bufferSize));
     client = sock.getSocket().getInetAddress().getHostAddress() + ":" + sock.getSocket().getPort();

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -34,8 +34,7 @@ public class TabletServersRecovery {
   /**
    * Adds a new tserver recovery to the list
    *
-   * @param tabletServerRecovery
-   *          TServer recovery to add
+   * @param tabletServerRecovery TServer recovery to add
    */
   public void addRecovery(TabletServerRecoveryInformation tabletServerRecovery) {
     this.recoveryList.add(tabletServerRecovery);

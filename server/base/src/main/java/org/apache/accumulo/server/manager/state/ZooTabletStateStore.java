@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,160 +18,186 @@
  */
 package org.apache.accumulo.server.manager.state;
 
-import java.util.ArrayList;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.AbstractMap;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.accumulo.core.data.Key;
+import org.apache.accumulo.core.data.Range;
+import org.apache.accumulo.core.data.Value;
+import org.apache.accumulo.core.dataImpl.KeyExtent;
+import org.apache.accumulo.core.iterators.IteratorUtil.IteratorScope;
+import org.apache.accumulo.core.iteratorsImpl.system.SortedMapIterator;
+import org.apache.accumulo.core.manager.state.TabletManagement;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.RootTable;
 import org.apache.accumulo.core.metadata.TServerInstance;
-import org.apache.accumulo.core.metadata.TabletLocationState;
 import org.apache.accumulo.core.metadata.schema.Ample;
-import org.apache.accumulo.core.metadata.schema.Ample.ReadConsistency;
-import org.apache.accumulo.core.metadata.schema.Ample.TabletMutator;
+import org.apache.accumulo.core.metadata.schema.Ample.DataLevel;
+import org.apache.accumulo.core.metadata.schema.RootTabletMetadata;
 import org.apache.accumulo.core.metadata.schema.TabletMetadata;
-import org.apache.accumulo.core.metadata.schema.TabletMetadata.Location;
-import org.apache.accumulo.core.metadata.schema.TabletMetadata.LocationType;
-import org.apache.accumulo.core.tabletserver.log.LogEntry;
+import org.apache.accumulo.core.util.time.SteadyTime;
+import org.apache.accumulo.server.ServerContext;
+import org.apache.accumulo.server.iterators.TabletIteratorEnvironment;
 import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class ZooTabletStateStore implements TabletStateStore {
+import com.google.common.base.Preconditions;
+
+class ZooTabletStateStore extends AbstractTabletStateStore implements TabletStateStore {
 
   private static final Logger log = LoggerFactory.getLogger(ZooTabletStateStore.class);
-  private final Ample ample;
+  private final DataLevel level;
+  private final ServerContext ctx;
 
-  ZooTabletStateStore(Ample ample) {
-    this.ample = ample;
+  ZooTabletStateStore(DataLevel level, ServerContext context) {
+    super(context);
+    this.ctx = context;
+    this.level = level;
   }
 
   @Override
-  public ClosableIterator<TabletLocationState> iterator() {
+  public DataLevel getLevel() {
+    return level;
+  }
 
-    return new ClosableIterator<>() {
-      boolean finished = false;
+  @Override
+  public ClosableIterator<TabletManagement> iterator(List<Range> ranges,
+      TabletManagementParameters parameters) {
+    Preconditions.checkArgument(parameters.getLevel() == getLevel());
+
+    final TabletIteratorEnvironment env = new TabletIteratorEnvironment(ctx, IteratorScope.scan,
+        ctx.getTableConfiguration(AccumuloTable.ROOT.tableId()), AccumuloTable.ROOT.tableId());
+    final TabletManagementIterator tmi = new TabletManagementIterator();
+    final AtomicBoolean closed = new AtomicBoolean(false);
+
+    try {
+      final RootTabletMetadata rtm = RootTabletMetadata.read(ctx);
+      final SortedMapIterator iter = new SortedMapIterator(rtm.toKeyValues());
+      tmi.init(iter,
+          Map.of(TabletManagementIterator.TABLET_GOAL_STATE_PARAMS_OPTION, parameters.serialize()),
+          env);
+      tmi.seek(new Range(), null, true);
+    } catch (IOException e2) {
+      throw new IllegalStateException(
+          "Error setting up TabletManagementIterator for the root tablet", e2);
+    }
+
+    return new ClosableIterator<TabletManagement>() {
+
+      @Override
+      public void close() {
+        closed.compareAndSet(false, true);
+      }
 
       @Override
       public boolean hasNext() {
-        return !finished;
+        if (closed.get()) {
+          return false;
+        }
+
+        boolean result = tmi.hasTop();
+        if (!result) {
+          close();
+        }
+        return result;
       }
 
       @Override
-      public TabletLocationState next() {
-        finished = true;
+      public TabletManagement next() {
+        if (closed.get() || !tmi.hasTop()) {
+          throw new NoSuchElementException(this.getClass().getSimpleName() + " is closed");
+        }
+
+        Key k = tmi.getTopKey();
+        Value v = tmi.getTopValue();
+        Entry<Key,Value> e = new AbstractMap.SimpleImmutableEntry<>(k, v);
         try {
-
-          TabletMetadata rootMeta = ample.readTablet(RootTable.EXTENT, ReadConsistency.EVENTUAL);
-
-          TServerInstance currentSession = null;
-          TServerInstance futureSession = null;
-          TServerInstance lastSession = null;
-
-          Location loc = rootMeta.getLocation();
-
-          if (loc != null && loc.getType() == LocationType.FUTURE)
-            futureSession = loc;
-
-          if (rootMeta.getLast() != null)
-            lastSession = rootMeta.getLast();
-
-          if (loc != null && loc.getType() == LocationType.CURRENT) {
-            currentSession = loc;
-          }
-
-          List<Collection<String>> logs = new ArrayList<>();
-          rootMeta.getLogs().forEach(logEntry -> {
-            logs.add(Collections.singleton(logEntry.filename));
-            log.debug("root tablet log {}", logEntry.filename);
-          });
-
-          return new TabletLocationState(RootTable.EXTENT, futureSession, currentSession,
-              lastSession, null, logs, false);
-        } catch (Exception ex) {
-          throw new RuntimeException(ex);
+          tmi.next();
+          Preconditions.checkState(!tmi.hasTop(),
+              "Saw multiple tablet metadata entries for root table");
+          TabletManagement tm = TabletManagementIterator.decode(e);
+          log.trace(
+              "Returning metadata tablet, extent: {}, hostingGoal: {}, actions: {}, error: {}",
+              tm.getTabletMetadata().getExtent(), tm.getTabletMetadata().getTabletAvailability(),
+              tm.getActions(), tm.getErrorMessage());
+          return tm;
+        } catch (IOException e1) {
+          throw new UncheckedIOException("Error creating TabletMetadata object for root tablet",
+              e1);
         }
       }
-
-      @Override
-      public void remove() {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public void close() {}
     };
+
+  }
+
+  private static void validateAssignments(Collection<Assignment> assignments) {
+    if (assignments.size() != 1) {
+      throw new IllegalArgumentException("There is only one root tablet");
+    }
+    Assignment assignment = assignments.iterator().next();
+    if (assignment.tablet.compareTo(RootTable.EXTENT) != 0) {
+      throw new IllegalArgumentException("You can only store the root tablet location");
+    }
   }
 
   @Override
-  public void setFutureLocations(Collection<Assignment> assignments)
+  public Set<KeyExtent> setFutureLocations(Collection<Assignment> assignments)
       throws DistributedStoreException {
-    if (assignments.size() != 1)
-      throw new IllegalArgumentException("There is only one root tablet");
-    Assignment assignment = assignments.iterator().next();
-    if (assignment.tablet.compareTo(RootTable.EXTENT) != 0)
-      throw new IllegalArgumentException("You can only store the root tablet location");
-
-    TabletMutator tabletMutator = ample.mutateTablet(assignment.tablet);
-    tabletMutator.putLocation(assignment.server, LocationType.FUTURE);
-    tabletMutator.mutate();
+    validateAssignments(assignments);
+    return super.setFutureLocations(assignments);
   }
 
   @Override
   public void setLocations(Collection<Assignment> assignments) throws DistributedStoreException {
-    if (assignments.size() != 1)
+    validateAssignments(assignments);
+    super.setLocations(assignments);
+  }
+
+  private static void validateTablets(Collection<TabletMetadata> tablets) {
+    if (tablets.size() != 1) {
       throw new IllegalArgumentException("There is only one root tablet");
-    Assignment assignment = assignments.iterator().next();
-    if (assignment.tablet.compareTo(RootTable.EXTENT) != 0)
+    }
+    TabletMetadata tm = tablets.iterator().next();
+    if (tm.getExtent().compareTo(RootTable.EXTENT) != 0) {
       throw new IllegalArgumentException("You can only store the root tablet location");
-
-    TabletMutator tabletMutator = ample.mutateTablet(assignment.tablet);
-    tabletMutator.putLocation(assignment.server, LocationType.CURRENT);
-    tabletMutator.deleteLocation(assignment.server, LocationType.FUTURE);
-
-    tabletMutator.mutate();
+    }
   }
 
   @Override
-  public void unassign(Collection<TabletLocationState> tablets,
+  public void unassign(Collection<TabletMetadata> tablets,
       Map<TServerInstance,List<Path>> logsForDeadServers) throws DistributedStoreException {
-    if (tablets.size() != 1)
-      throw new IllegalArgumentException("There is only one root tablet");
-    TabletLocationState tls = tablets.iterator().next();
-    if (tls.extent.compareTo(RootTable.EXTENT) != 0)
-      throw new IllegalArgumentException("You can only store the root tablet location");
+    validateTablets(tablets);
 
-    TabletMutator tabletMutator = ample.mutateTablet(tls.extent);
-
-    tabletMutator.deleteLocation(tls.futureOrCurrent(), LocationType.FUTURE);
-    tabletMutator.deleteLocation(tls.futureOrCurrent(), LocationType.CURRENT);
-    if (logsForDeadServers != null) {
-      List<Path> logs = logsForDeadServers.get(tls.futureOrCurrent());
-      if (logs != null) {
-        for (Path entry : logs) {
-          LogEntry logEntry =
-              new LogEntry(RootTable.EXTENT, System.currentTimeMillis(), entry.toString());
-          tabletMutator.putWal(logEntry);
-        }
-      }
-    }
-
-    tabletMutator.mutate();
+    super.unassign(tablets, logsForDeadServers);
 
     log.debug("unassign root tablet location");
   }
 
   @Override
-  public void suspend(Collection<TabletLocationState> tablets,
-      Map<TServerInstance,List<Path>> logsForDeadServers, long suspensionTimestamp)
+  public void suspend(Collection<TabletMetadata> tablets,
+      Map<TServerInstance,List<Path>> logsForDeadServers, SteadyTime suspensionTimestamp)
       throws DistributedStoreException {
-    // No support for suspending root tablet.
-    unassign(tablets, logsForDeadServers);
+    validateTablets(tablets);
+    super.suspend(tablets, logsForDeadServers, suspensionTimestamp);
   }
 
   @Override
-  public void unsuspend(Collection<TabletLocationState> tablets) {
+  protected void processSuspension(Ample.ConditionalTabletMutator tabletMutator, TabletMetadata tm,
+      SteadyTime suspensionTimestamp) {
+    // No support for suspending root tablet, so this is a NOOP
+  }
+
+  @Override
+  public void unsuspend(Collection<TabletMetadata> tablets) {
     // no support for suspending root tablet.
   }
 

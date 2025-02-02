@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -37,7 +37,7 @@ public class OutputFormatBuilderImpl<T>
   // optional values
   private Optional<String> defaultTableName = Optional.empty();
   private boolean createTables = false;
-  private boolean simulationMode = false;
+  private final boolean simulationMode = false;
 
   public OutputFormatBuilderImpl(Class<?> callingClass) {
     this.callingClass = callingClass;
@@ -86,8 +86,9 @@ public class OutputFormatBuilderImpl<T>
 
   private void _store(Configuration conf) {
     OutputConfigurator.setClientProperties(callingClass, conf, clientProps, clientPropsPath);
-    if (defaultTableName.isPresent())
-      OutputConfigurator.setDefaultTableName(callingClass, conf, defaultTableName.get());
+    if (defaultTableName.isPresent()) {
+      OutputConfigurator.setDefaultTableName(callingClass, conf, defaultTableName.orElseThrow());
+    }
     OutputConfigurator.setCreateTables(callingClass, conf, createTables);
     OutputConfigurator.setSimulationMode(callingClass, conf, simulationMode);
     OutputConfigurator.setJobStored(callingClass, conf);

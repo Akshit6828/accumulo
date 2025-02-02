@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,11 +18,9 @@
  */
 package org.apache.accumulo.monitor.view;
 
-import static org.apache.accumulo.monitor.util.ParameterValidator.ALPHA_NUM_REGEX;
 import static org.apache.accumulo.monitor.util.ParameterValidator.ALPHA_NUM_REGEX_BLANK_OK;
 import static org.apache.accumulo.monitor.util.ParameterValidator.ALPHA_NUM_REGEX_TABLE_ID;
 import static org.apache.accumulo.monitor.util.ParameterValidator.HOSTNAME_PORT_REGEX;
-import static org.apache.accumulo.monitor.util.ParameterValidator.RESOURCE_REGEX;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -32,11 +30,8 @@ import java.util.List;
 import java.util.Map;
 
 import jakarta.inject.Inject;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -46,7 +41,6 @@ import jakarta.ws.rs.core.MediaType;
 
 import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.TableNotFoundException;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.TableId;
@@ -75,8 +69,7 @@ public class WebViews {
   /**
    * Get HTML for external CSS and JS resources from configuration. See ACCUMULO-4739
    *
-   * @param model
-   *          map of the MVC model
+   * @param model map of the MVC model
    */
   private void addExternalResources(Map<String,Object> model) {
     AccumuloConfiguration conf = monitor.getContext().getConfiguration();
@@ -150,8 +143,7 @@ public class WebViews {
   /**
    * Returns the tservers templates
    *
-   * @param server
-   *          TServer to show details
+   * @param server TServer to show details
    * @return tserver model
    */
   @GET
@@ -184,9 +176,48 @@ public class WebViews {
   public Map<String,Object> getScans() {
 
     Map<String,Object> model = getModel();
-    model.put("title", "Scans");
+    model.put("title", "Active scans");
     model.put("template", "scans.ftl");
     model.put("js", "scans.js");
+
+    return model;
+  }
+
+  /**
+   * Returns the compactions template
+   *
+   * @return Scans model
+   */
+  @GET
+  @Path("compactions")
+  @Template(name = "/default.ftl")
+  public Map<String,Object> getCompactions() {
+
+    Map<String,Object> model = getModel();
+    model.put("title", "Active Compactions");
+    model.put("template", "compactions.ftl");
+    model.put("js", "compactions.js");
+
+    return model;
+  }
+
+  /**
+   * Returns the compactions template
+   *
+   * @return Scans model
+   */
+  @GET
+  @Path("ec")
+  @Template(name = "/default.ftl")
+  public Map<String,Object> getExternalCompactions() {
+    var ccHost = monitor.getCoordinatorHost();
+
+    Map<String,Object> model = getModel();
+    model.put("title", "External Compactions");
+    model.put("template", "ec.ftl");
+
+    model.put("coordinatorRunning", ccHost.isPresent());
+    model.put("js", "ec.js");
 
     return model;
   }
@@ -248,8 +279,7 @@ public class WebViews {
   /**
    * Returns participating tservers template
    *
-   * @param tableID
-   *          Table ID for participating tservers
+   * @param tableID Table ID for participating tservers
    * @return Participating tservers model
    */
   @GET
@@ -259,7 +289,7 @@ public class WebViews {
       @PathParam("tableID") @NotNull @Pattern(regexp = ALPHA_NUM_REGEX_TABLE_ID) String tableID)
       throws TableNotFoundException {
 
-    String tableName = Tables.getTableName(monitor.getContext(), TableId.of(tableID));
+    String tableName = monitor.getContext().getTableName(TableId.of(tableID));
 
     Map<String,Object> model = getModel();
     model.put("title", "Table Status");
@@ -273,99 +303,9 @@ public class WebViews {
   }
 
   /**
-   * Returns trace summary template
-   *
-   * @param minutes
-   *          Range of minutes, default 10 minutes Min of 0 Max of 30 days in minutes
-   * @return Trace summary model
-   */
-  @GET
-  @Path("trace/summary")
-  @Template(name = "/default.ftl")
-  public Map<String,Object> getTracesSummary(
-      @QueryParam("minutes") @DefaultValue("10") @Min(0) @Max(2592000) int minutes) {
-    Map<String,Object> model = getModel();
-    model.put("title", "Traces for the last&nbsp;" + String.valueOf(minutes) + "&nbsp;minute(s)");
-
-    model.put("template", "summary.ftl");
-    model.put("js", "summary.js");
-    model.put("minutes", String.valueOf(minutes));
-
-    return model;
-  }
-
-  /**
-   * Returns traces by type template
-   *
-   * @param type
-   *          Type of trace
-   * @param minutes
-   *          Range of minutes, default 10 minutes Min of 0 Max of 30 days in minutes
-   * @return Traces by type model
-   */
-  @GET
-  @Path("trace/listType")
-  @Template(name = "/default.ftl")
-  public Map<String,Object> getTracesForType(
-      @QueryParam("type") @NotNull @Pattern(regexp = RESOURCE_REGEX) String type,
-      @QueryParam("minutes") @DefaultValue("10") @Min(0) @Max(2592000) int minutes) {
-    Map<String,Object> model = getModel();
-    model.put("title",
-        "Traces for " + type + " for the last " + String.valueOf(minutes) + " minute(s)");
-
-    model.put("template", "listType.ftl");
-    model.put("js", "listType.js");
-    model.put("type", type);
-    model.put("minutes", String.valueOf(minutes));
-
-    return model;
-  }
-
-  /**
-   * Returns traces by ID template
-   *
-   * @param id
-   *          ID of the traces
-   * @return Traces by ID model
-   */
-  @GET
-  @Path("trace/show")
-  @Template(name = "/default.ftl")
-  public Map<String,Object>
-      getTraceShow(@QueryParam("id") @NotNull @Pattern(regexp = ALPHA_NUM_REGEX) String id) {
-
-    Map<String,Object> model = getModel();
-    model.put("title", "Trace ID " + id);
-
-    model.put("template", "show.ftl");
-    model.put("js", "show.js");
-    model.put("id", id);
-
-    return model;
-  }
-
-  /**
-   * Returns log report template
-   *
-   * @return Log report model
-   */
-  @GET
-  @Path("log")
-  @Template(name = "/default.ftl")
-  public Map<String,Object> getLogs() {
-
-    Map<String,Object> model = getModel();
-    model.put("title", "Recent Logs");
-    model.put("template", "log.ftl");
-
-    return model;
-  }
-
-  /**
    * Returns problem report template
    *
-   * @param table
-   *          Table ID to display problem details
+   * @param table Table ID to display problem details
    * @return Problem report model
    */
   @GET
@@ -387,22 +327,4 @@ public class WebViews {
     return model;
   }
 
-  /**
-   * Returns replication table template
-   *
-   * @return Replication model
-   */
-  @GET
-  @Path("replication")
-  @Template(name = "/default.ftl")
-  public Map<String,Object> getReplication() {
-
-    Map<String,Object> model = getModel();
-    model.put("title", "Replication Overview");
-
-    model.put("template", "replication.ftl");
-    model.put("js", "replication.js");
-
-    return model;
-  }
 }

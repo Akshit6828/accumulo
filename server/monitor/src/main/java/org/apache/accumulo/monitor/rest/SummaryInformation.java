@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -60,12 +60,9 @@ public class SummaryInformation {
   /**
    * Stores Monitor information as XML or JSON
    *
-   * @param size
-   *          Number of tservers
-   * @param info
-   *          Manager information
-   * @param tablesList
-   *          Table list
+   * @param size Number of tservers
+   * @param info Manager information
+   * @param tablesList Table list
    */
   public SummaryInformation(int size, ManagerInformation info, TableInformationList tablesList) {
     this.servers = new ArrayList<>(size);
@@ -87,8 +84,7 @@ public class SummaryInformation {
   /**
    * Adds a new tablet
    *
-   * @param tablet
-   *          Tablet to add
+   * @param tablet Tablet to add
    */
   public void addTabletServer(TabletServer tablet) {
     servers.add(tablet);

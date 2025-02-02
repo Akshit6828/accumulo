@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,61 +18,66 @@
  */
 package org.apache.accumulo.tserver.tablet;
 
-import java.io.IOException;
-
-import org.apache.accumulo.core.metadata.TabletFile;
+import org.apache.accumulo.core.file.FilePrefix;
+import org.apache.accumulo.core.metadata.ReferencedTabletFile;
 import org.apache.accumulo.core.metadata.schema.DataFileValue;
 import org.apache.accumulo.core.trace.TraceUtil;
 import org.apache.accumulo.tserver.MinorCompactionReason;
 import org.apache.hadoop.fs.Path;
-import org.apache.htrace.Trace;
-import org.apache.htrace.TraceScope;
-import org.apache.htrace.impl.ProbabilitySampler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 
 class MinorCompactionTask implements Runnable {
 
   private static final Logger log = LoggerFactory.getLogger(MinorCompactionTask.class);
 
   private final Tablet tablet;
-  private long queued;
-  private CommitSession commitSession;
+  private final long queued;
+  private final CommitSession commitSession;
   private DataFileValue stats;
-  private long flushId;
-  private MinorCompactionReason mincReason;
-  private double tracePercent;
+  private final long flushId;
+  private final MinorCompactionReason mincReason;
 
   MinorCompactionTask(Tablet tablet, CommitSession commitSession, long flushId,
-      MinorCompactionReason mincReason, double tracePercent) {
+      MinorCompactionReason mincReason) {
     this.tablet = tablet;
     queued = System.currentTimeMillis();
     tablet.minorCompactionWaitingToStart();
     this.commitSession = commitSession;
     this.flushId = flushId;
     this.mincReason = mincReason;
-    this.tracePercent = tracePercent;
   }
 
   @Override
   public void run() {
     tablet.minorCompactionStarted();
-    ProbabilitySampler sampler = TraceUtil.probabilitySampler(tracePercent);
     try {
-      try (TraceScope minorCompaction = Trace.startSpan("minorCompaction", sampler)) {
-        try (TraceScope span = Trace.startSpan("waitForCommits")) {
+      Span span = TraceUtil.startSpan(this.getClass(), "minorCompaction");
+      try (Scope scope = span.makeCurrent()) {
+        Span span2 = TraceUtil.startSpan(this.getClass(), "waitForCommits");
+        try (Scope scope2 = span2.makeCurrent()) {
           synchronized (tablet) {
             commitSession.waitForCommitsToFinish();
           }
+        } catch (Exception e) {
+          TraceUtil.setException(span2, e, true);
+          throw e;
+        } finally {
+          span2.end();
         }
-        TabletFile newFile = null;
-        TabletFile tmpFile = null;
-        try (TraceScope span = Trace.startSpan("start")) {
+        ReferencedTabletFile newFile = null;
+        ReferencedTabletFile tmpFile = null;
+        Span span3 = TraceUtil.startSpan(this.getClass(), "start");
+        try (Scope scope3 = span3.makeCurrent()) {
           while (true) {
             try {
               if (newFile == null) {
-                newFile = tablet.getNextMapFilename("F");
-                tmpFile = new TabletFile(new Path(newFile.getPathStr() + "_tmp"));
+                newFile = tablet.getNextDataFilename(FilePrefix.MINOR_COMPACTION);
+                tmpFile =
+                    new ReferencedTabletFile(new Path(newFile.getNormalizedPathStr() + "_tmp"));
               }
               /*
                * the purpose of the minor compaction start event is to keep track of the filename...
@@ -83,33 +88,46 @@ class MinorCompactionTask implements Runnable {
                * for the minor compaction
                */
               tablet.getTabletServer().minorCompactionStarted(commitSession,
-                  commitSession.getWALogSeq() + 1, newFile.getMetaInsert());
+                  commitSession.getWALogSeq() + 1, newFile.insert().getMetadataPath());
               break;
-            } catch (IOException e) {
-              // An IOException could have occurred while creating the new file
-              if (newFile == null)
+            } catch (Exception e) {
+              // Catching Exception here rather than something more specific as we can't allow the
+              // MinorCompactionTask to exit and the thread to die. Tablet.minorCompact *must* be
+              // called and *must* complete else no future minor compactions can be performed on
+              // this Tablet.
+              if (newFile == null) {
                 log.warn("Failed to create new file for minor compaction {}", e.getMessage(), e);
-              else
+              } else {
                 log.warn("Failed to write to write ahead log {}", e.getMessage(), e);
+              }
 
             }
           }
+        } catch (Exception e) {
+          TraceUtil.setException(span3, e, true);
+          throw e;
+        } finally {
+          span3.end();
         }
-        try (TraceScope span = Trace.startSpan("compact")) {
+        Span span4 = TraceUtil.startSpan(this.getClass(), "compact");
+        try (Scope scope4 = span4.makeCurrent()) {
           this.stats = tablet.minorCompact(tablet.getTabletMemory().getMinCMemTable(), tmpFile,
               newFile, queued, commitSession, flushId, mincReason);
+        } catch (Exception e) {
+          TraceUtil.setException(span4, e, true);
+          throw e;
+        } finally {
+          span4.end();
         }
 
-        if (minorCompaction.getSpan() != null) {
-          minorCompaction.getSpan().addKVAnnotation("extent", tablet.getExtent().toString());
-          minorCompaction.getSpan().addKVAnnotation("numEntries",
-              Long.toString(this.stats.getNumEntries()));
-          minorCompaction.getSpan().addKVAnnotation("size", Long.toString(this.stats.getSize()));
-        }
-      }
-
-      if (tablet.needsSplit()) {
-        tablet.getTabletServer().executeSplit(tablet);
+        span.setAttribute("extent", tablet.getExtent().toString());
+        span.setAttribute("numEntries", Long.toString(this.stats.getNumEntries()));
+        span.setAttribute("size", Long.toString(this.stats.getSize()));
+      } catch (Exception e) {
+        TraceUtil.setException(span, e, true);
+        throw e;
+      } finally {
+        span.end();
       }
     } catch (Exception e) {
       log.error("Unknown error during minor compaction for extent: {}", tablet.getExtent(), e);

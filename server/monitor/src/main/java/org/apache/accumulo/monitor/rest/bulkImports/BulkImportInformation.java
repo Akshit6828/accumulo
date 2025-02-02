@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,7 @@
  */
 package org.apache.accumulo.monitor.rest.bulkImports;
 
-import org.apache.accumulo.core.master.thrift.BulkImportState;
+import org.apache.accumulo.core.manager.thrift.BulkImportState;
 
 /**
  * Stores bulk import in a JSON object
@@ -37,12 +37,9 @@ public class BulkImportInformation {
   /**
    * Creates new bulk import object
    *
-   * @param filename
-   *          name of the bulk import file
-   * @param age
-   *          age of the bulk import
-   * @param state
-   *          state of the bulk import
+   * @param filename name of the bulk import file
+   * @param age age of the bulk import
+   * @param state state of the bulk import
    */
   public BulkImportInformation(String filename, long age, BulkImportState state) {
     this.filename = filename;

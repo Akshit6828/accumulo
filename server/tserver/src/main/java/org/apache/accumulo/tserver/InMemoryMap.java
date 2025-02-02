@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,7 @@
  */
 package org.apache.accumulo.tserver;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
+import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -58,11 +58,12 @@ import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.iterators.WrappingIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.EmptyIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.InterruptibleIterator;
-import org.apache.accumulo.core.iteratorsImpl.system.InterruptibleMapIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.LocalityGroupIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.LocalityGroupIterator.LocalityGroup;
+import org.apache.accumulo.core.iteratorsImpl.system.SortedMapIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.SourceSwitchingIterator;
 import org.apache.accumulo.core.iteratorsImpl.system.SourceSwitchingIterator.DataSource;
+import org.apache.accumulo.core.metadata.UnreferencedTabletFile;
 import org.apache.accumulo.core.sample.impl.SamplerConfigurationImpl;
 import org.apache.accumulo.core.sample.impl.SamplerFactory;
 import org.apache.accumulo.core.util.LocalityGroupUtil;
@@ -70,6 +71,7 @@ import org.apache.accumulo.core.util.LocalityGroupUtil.Partitioner;
 import org.apache.accumulo.core.util.Pair;
 import org.apache.accumulo.core.util.PreAllocatedArray;
 import org.apache.accumulo.server.ServerContext;
+import org.apache.accumulo.server.conf.TableConfiguration;
 import org.apache.commons.lang3.mutable.MutableLong;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -77,19 +79,18 @@ import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.collect.Iterables;
-
 public class InMemoryMap {
   private SimpleMap map = null;
 
   private static final Logger log = LoggerFactory.getLogger(InMemoryMap.class);
 
-  private ServerContext context;
+  private final ServerContext context;
   private volatile String memDumpFile = null;
   private final String memDumpDir;
   private final String mapType;
+  private final TableId tableId;
 
-  private Map<String,Set<ByteSequence>> lggroups;
+  private final Map<String,Set<ByteSequence>> lggroups;
 
   private static Pair<SamplerConfigurationImpl,Sampler> getSampler(AccumuloConfiguration config) {
     try {
@@ -109,10 +110,10 @@ public class InMemoryMap {
   public static final String TYPE_LOCALITY_GROUP_MAP = "LocalityGroupMap";
   public static final String TYPE_LOCALITY_GROUP_MAP_NATIVE = "LocalityGroupMap with native";
 
-  private AtomicReference<Pair<SamplerConfigurationImpl,Sampler>> samplerRef =
+  private final AtomicReference<Pair<SamplerConfigurationImpl,Sampler>> samplerRef =
       new AtomicReference<>(null);
 
-  private AccumuloConfiguration config;
+  private final AccumuloConfiguration config;
 
   // defer creating sampler until first write. This was done because an empty sample map configured
   // with no sampler will not flush after a user changes sample
@@ -129,7 +130,7 @@ public class InMemoryMap {
     return pair.getSecond();
   }
 
-  public InMemoryMap(AccumuloConfiguration config, ServerContext serverContext, TableId tableId) {
+  public InMemoryMap(AccumuloConfiguration config, ServerContext context, TableId tableId) {
 
     boolean useNativeMap = config.getBoolean(Property.TSERV_NATIVEMAP_ENABLED);
 
@@ -137,7 +138,8 @@ public class InMemoryMap {
     this.lggroups = LocalityGroupUtil.getLocalityGroupsIgnoringErrors(config, tableId);
 
     this.config = config;
-    this.context = serverContext;
+    this.context = context;
+    this.tableId = tableId;
 
     SimpleMap allMap;
     SimpleMap sampleMap;
@@ -156,7 +158,7 @@ public class InMemoryMap {
   }
 
   private static SimpleMap newMap(boolean useNativeMap) {
-    if (useNativeMap && NativeMap.isLoaded()) {
+    if (useNativeMap) {
       try {
         return new NativeMapWrapper();
       } catch (Exception t) {
@@ -196,8 +198,8 @@ public class InMemoryMap {
 
   private class SampleMap implements SimpleMap {
 
-    private SimpleMap map;
-    private SimpleMap sample;
+    private final SimpleMap map;
+    private final SimpleMap sample;
 
     public SampleMap(SimpleMap map, SimpleMap sampleMap) {
       this.map = map;
@@ -211,9 +213,9 @@ public class InMemoryMap {
 
     @Override
     public InterruptibleIterator skvIterator(SamplerConfigurationImpl samplerConfig) {
-      if (samplerConfig == null)
+      if (samplerConfig == null) {
         return map.skvIterator(null);
-      else {
+      } else {
         Pair<SamplerConfigurationImpl,Sampler> samplerAndConf = samplerRef.get();
         if (samplerAndConf == null) {
           return EmptyIterator.EMPTY_ITERATOR;
@@ -278,12 +280,12 @@ public class InMemoryMap {
 
   private static class LocalityGroupMap implements SimpleMap {
 
-    private PreAllocatedArray<Map<ByteSequence,MutableLong>> groupFams;
+    private final PreAllocatedArray<Map<ByteSequence,MutableLong>> groupFams;
 
     // the last map in the array is the default locality group
-    private SimpleMap[] maps;
-    private Partitioner partitioner;
-    private PreAllocatedArray<List<Mutation>> partitioned;
+    private final SimpleMap[] maps;
+    private final Partitioner partitioner;
+    private final PreAllocatedArray<List<Mutation>> partitioned;
 
     LocalityGroupMap(Map<String,Set<ByteSequence>> groups, boolean useNativeMap) {
       this.groupFams = new PreAllocatedArray<>(groups.size());
@@ -297,8 +299,9 @@ public class InMemoryMap {
       int count = 0;
       for (Set<ByteSequence> cfset : groups.values()) {
         HashMap<ByteSequence,MutableLong> map = new HashMap<>();
-        for (ByteSequence bs : cfset)
+        for (ByteSequence bs : cfset) {
           map.put(bs, new MutableLong(1));
+        }
         this.groupFams.set(count++, map);
       }
 
@@ -312,22 +315,25 @@ public class InMemoryMap {
     @Override
     public int size() {
       int sum = 0;
-      for (SimpleMap map : maps)
+      for (SimpleMap map : maps) {
         sum += map.size();
+      }
       return sum;
     }
 
     @Override
     public InterruptibleIterator skvIterator(SamplerConfigurationImpl samplerConfig) {
-      if (samplerConfig != null)
+      if (samplerConfig != null) {
         throw new SampleNotPresentException();
+      }
 
       LocalityGroup[] groups = new LocalityGroup[maps.length];
       for (int i = 0; i < groups.length; i++) {
-        if (i < groupFams.length)
+        if (i < groupFams.length) {
           groups[i] = new LocalityGroup(maps[i].skvIterator(null), groupFams.get(i), false);
-        else
+        } else {
           groups[i] = new LocalityGroup(maps[i].skvIterator(null), null, true);
+        }
       }
 
       return new LocalityGroupIterator(groups);
@@ -335,15 +341,17 @@ public class InMemoryMap {
 
     @Override
     public void delete() {
-      for (SimpleMap map : maps)
+      for (SimpleMap map : maps) {
         map.delete();
+      }
     }
 
     @Override
     public long getMemoryUsed() {
       long sum = 0;
-      for (SimpleMap map : maps)
+      for (SimpleMap map : maps) {
         sum += map.getMemoryUsed();
+      }
       return sum;
     }
 
@@ -359,8 +367,9 @@ public class InMemoryMap {
         for (int i = 0; i < partitioned.length; i++) {
           if (!partitioned.get(i).isEmpty()) {
             maps[i].mutate(partitioned.get(i), kvCount);
-            for (Mutation m : partitioned.get(i))
+            for (Mutation m : partitioned.get(i)) {
               kvCount += m.getUpdates().size();
+            }
           }
         }
       } finally {
@@ -376,15 +385,16 @@ public class InMemoryMap {
   private static class DefaultMap implements SimpleMap {
     private ConcurrentSkipListMap<Key,Value> map =
         new ConcurrentSkipListMap<>(new MemKeyComparator());
-    private AtomicLong bytesInMemory = new AtomicLong();
-    private AtomicInteger size = new AtomicInteger();
+    private final AtomicLong bytesInMemory = new AtomicLong();
+    private final AtomicInteger size = new AtomicInteger();
 
     public void put(Key key, Value value) {
       // Always a MemKey, so account for the kvCount int
       bytesInMemory.addAndGet(key.getLength() + 4);
       bytesInMemory.addAndGet(value.getSize());
-      if (map.put(key, value) == null)
+      if (map.put(key, value) == null) {
         size.incrementAndGet();
+      }
     }
 
     @Override
@@ -394,12 +404,14 @@ public class InMemoryMap {
 
     @Override
     public InterruptibleIterator skvIterator(SamplerConfigurationImpl samplerConfig) {
-      if (samplerConfig != null)
+      if (samplerConfig != null) {
         throw new SampleNotPresentException();
-      if (map == null)
+      }
+      if (map == null) {
         throw new IllegalStateException();
+      }
 
-      return new InterruptibleMapIterator(map, null);
+      return new SortedMapIterator(map);
     }
 
     @Override
@@ -436,7 +448,7 @@ public class InMemoryMap {
   }
 
   private static class NativeMapWrapper implements SimpleMap {
-    private NativeMap nativeMap;
+    private final NativeMap nativeMap;
 
     NativeMapWrapper() {
       nativeMap = new NativeMap();
@@ -449,8 +461,9 @@ public class InMemoryMap {
 
     @Override
     public InterruptibleIterator skvIterator(SamplerConfigurationImpl samplerConfig) {
-      if (samplerConfig != null)
+      if (samplerConfig != null) {
         throw new SampleNotPresentException();
+      }
       return (InterruptibleIterator) nativeMap.skvIterator();
     }
 
@@ -470,10 +483,10 @@ public class InMemoryMap {
     }
   }
 
-  private AtomicInteger nextKVCount = new AtomicInteger(1);
-  private AtomicInteger kvCount = new AtomicInteger(0);
+  private final AtomicInteger nextKVCount = new AtomicInteger(1);
+  private final AtomicInteger kvCount = new AtomicInteger(0);
 
-  private Object writeSerializer = new Object();
+  private final Object writeSerializer = new Object();
 
   /**
    * Applies changes to a row in the InMemoryMap
@@ -503,15 +516,17 @@ public class InMemoryMap {
    * @return bytesInMemory
    */
   public synchronized long estimatedSizeInBytes() {
-    if (map == null)
+    if (map == null) {
       return 0;
+    }
 
     return map.getMemoryUsed();
   }
 
   public synchronized long getNumEntries() {
-    if (map == null)
+    if (map == null) {
       return 0;
+    }
     return map.size();
   }
 
@@ -522,10 +537,10 @@ public class InMemoryMap {
     private boolean switched = false;
     private InterruptibleIterator iter;
     private FileSKVIterator reader;
-    private MemoryDataSource parent;
-    private IteratorEnvironment env;
+    private final MemoryDataSource parent;
+    private final IteratorEnvironment env;
     private AtomicBoolean iflag;
-    private SamplerConfigurationImpl iteratorSamplerConfig;
+    private final SamplerConfigurationImpl iteratorSamplerConfig;
 
     private SamplerConfigurationImpl getSamplerConfig() {
       if (env != null) {
@@ -554,16 +569,18 @@ public class InMemoryMap {
 
     @Override
     public boolean isCurrent() {
-      if (switched)
+      if (switched) {
         return true;
-      else
+      } else {
         return memDumpFile == null;
+      }
     }
 
     @Override
     public DataSource getNewDataSource() {
-      if (switched)
+      if (switched) {
         throw new IllegalStateException();
+      }
 
       if (!isCurrent()) {
         switched = true;
@@ -584,11 +601,14 @@ public class InMemoryMap {
         Configuration conf = context.getHadoopConf();
         FileSystem fs = FileSystem.getLocal(conf);
 
+        TableConfiguration tableConf = context.getTableConfiguration(tableId);
         reader = new RFileOperations().newReaderBuilder()
-            .forFile(memDumpFile, fs, conf, context.getCryptoService())
-            .withTableConfiguration(context.getConfiguration()).seekToBeginning().build();
-        if (iflag != null)
+            .forFile(UnreferencedTabletFile.of(fs, new Path(memDumpFile)), fs, conf,
+                tableConf.getCryptoService())
+            .withTableConfiguration(tableConf).seekToBeginning().build();
+        if (iflag != null) {
           reader.setInterruptFlag(iflag);
+        }
 
         if (getSamplerConfig() != null) {
           reader = reader.getSample(getSamplerConfig());
@@ -600,15 +620,16 @@ public class InMemoryMap {
 
     @Override
     public SortedKeyValueIterator<Key,Value> iterator() throws IOException {
-      if (iter == null)
+      if (iter == null) {
         if (!switched) {
           iter = map.skvIterator(getSamplerConfig());
-          if (iflag != null)
+          if (iflag != null) {
             iter.setInterruptFlag(iflag);
+          }
         } else {
-          if (parent == null)
+          if (parent == null) {
             iter = new MemKeyConversionIterator(getReader());
-          else
+          } else {
             synchronized (parent) {
               // synchronize deep copy operation on parent, this prevents multiple threads from deep
               // copying the rfile shared from parent its possible that the
@@ -616,7 +637,9 @@ public class InMemoryMap {
               // copies
               iter = new MemKeyConversionIterator(parent.getReader().deepCopy(env));
             }
+          }
         }
+      }
 
       return iter;
     }
@@ -636,7 +659,7 @@ public class InMemoryMap {
 
   public class MemoryIterator extends WrappingIterator implements InterruptibleIterator {
 
-    private AtomicBoolean closed;
+    private final AtomicBoolean closed;
     private SourceSwitchingIterator ssi;
     private MemoryDataSource mds;
 
@@ -659,8 +682,9 @@ public class InMemoryMap {
       synchronized (this) {
         if (closed.compareAndSet(false, true)) {
           try {
-            if (mds.reader != null)
+            if (mds.reader != null) {
               mds.reader.close();
+            }
           } catch (IOException e) {
             log.warn("{}", e.getMessage(), e);
           }
@@ -672,8 +696,9 @@ public class InMemoryMap {
     }
 
     private synchronized boolean switchNow() throws IOException {
-      if (closed.get())
+      if (closed.get()) {
         return false;
+      }
 
       ssi.switchNow();
       return true;
@@ -695,11 +720,13 @@ public class InMemoryMap {
   }
 
   public synchronized MemoryIterator skvIterator(SamplerConfigurationImpl iteratorSamplerConfig) {
-    if (map == null)
+    if (map == null) {
       throw new NullPointerException();
+    }
 
-    if (deleted)
+    if (deleted) {
       throw new IllegalStateException("Can not obtain iterator after map deleted");
+    }
 
     int mc = kvCount.get();
     MemoryDataSource mds = new MemoryDataSource(iteratorSamplerConfig);
@@ -713,9 +740,10 @@ public class InMemoryMap {
 
   public SortedKeyValueIterator<Key,Value> compactionIterator() {
 
-    if (nextKVCount.get() - 1 != kvCount.get())
+    if (nextKVCount.get() - 1 != kvCount.get()) {
       throw new IllegalStateException("Memory map in unexpected state : nextKVCount = "
           + nextKVCount.get() + " kvCount = " + kvCount.get());
+    }
 
     return map.skvIterator(null);
   }
@@ -725,8 +753,9 @@ public class InMemoryMap {
   public void delete(long waitTime) {
 
     synchronized (this) {
-      if (deleted)
+      if (deleted) {
         throw new IllegalStateException("Double delete");
+      }
 
       deleted = true;
     }
@@ -754,9 +783,11 @@ public class InMemoryMap {
           aconf = createSampleConfig(aconf);
         }
 
+        TableConfiguration tableConf = context.getTableConfiguration(tableId);
         FileSKVWriter out = new RFileOperations().newWriterBuilder()
-            .forFile(tmpFile, fs, newConf, context.getCryptoService()).withTableConfiguration(aconf)
-            .build();
+            .forFile(UnreferencedTabletFile.of(fs, new Path(tmpFile)), fs, newConf,
+                tableConf.getCryptoService())
+            .withTableConfiguration(aconf).build();
 
         InterruptibleIterator iter = map.skvIterator(null);
 
@@ -810,8 +841,8 @@ public class InMemoryMap {
   }
 
   private AccumuloConfiguration createSampleConfig(AccumuloConfiguration siteConf) {
-    ConfigurationCopy confCopy = new ConfigurationCopy(Iterables.filter(siteConf,
-        input -> !input.getKey().startsWith(Property.TABLE_SAMPLER.getKey())));
+    ConfigurationCopy confCopy = new ConfigurationCopy(siteConf.stream()
+        .filter(input -> !input.getKey().startsWith(Property.TABLE_SAMPLER.getKey())));
 
     for (Entry<String,String> entry : samplerRef.get().getFirst().toTablePropertiesMap()
         .entrySet()) {

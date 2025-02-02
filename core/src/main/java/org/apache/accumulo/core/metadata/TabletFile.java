@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,141 +18,43 @@
  */
 package org.apache.accumulo.core.metadata;
 
-import java.util.Objects;
-
-import org.apache.accumulo.core.Constants;
-import org.apache.accumulo.core.data.TableId;
-import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.ServerColumnFamily;
+import org.apache.accumulo.core.data.Range;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.Text;
-
-import com.google.common.base.Preconditions;
 
 /**
- * Object representing a tablet file that may exist in the metadata table. This class is used for
- * reading and opening tablet files. It is also used when inserting new tablet files. When a new
- * file is inserted, the {@link #insert()} method is called and returns a {@link StoredTabletFile}
- * For situations where a tablet file needs to be updated or deleted in the metadata, a
- * {@link StoredTabletFile} is required.
- * <p>
- * As of 2.1, Tablet file paths should now be only absolute URIs with the removal of relative paths
- * in Upgrader9to10.upgradeRelativePaths()
+ * An interface that represents different types of file references that are handled by code that
+ * processes tablet files.
  */
-public class TabletFile implements Comparable<TabletFile> {
-  // parts of an absolute URI, like "hdfs://1.2.3.4/accumulo/tables/2a/t-0003/C0004.rf"
-  private final String volume; // hdfs://1.2.3.4/accumulo
-  private final TableId tableId; // 2a
-  private final String tabletDir; // t-0003
-  private final String fileName; // C0004.rf
-  protected final Path metaPath;
-  private final String normalizedPath;
+public interface TabletFile {
 
   /**
-   * Construct new tablet file using a Path. Used in the case where we had to use Path object to
-   * qualify an absolute path or create a new file.
+   * Returns the fileName of the TabletFile. The value return is the name itself and not the entire
+   * path. For example, if the full path for a TabletFile is
+   * 'hdfs://nn1/accumulo/tables/5a/t-0001/F0002.rf', this method returns 'F0002.rf'.
    */
-  public TabletFile(Path metaPath) {
-    this.metaPath = Objects.requireNonNull(metaPath);
-    String errorMsg = "Missing or invalid part of tablet file metadata entry: " + metaPath;
-
-    // use Path object to step backwards from the filename through all the parts
-    this.fileName = metaPath.getName();
-    ServerColumnFamily.validateDirCol(fileName);
-
-    Path tabletDirPath = Objects.requireNonNull(metaPath.getParent(), errorMsg);
-    this.tabletDir = tabletDirPath.getName();
-    ServerColumnFamily.validateDirCol(tabletDir);
-
-    Path tableIdPath = Objects.requireNonNull(tabletDirPath.getParent(), errorMsg);
-    this.tableId = TableId.of(tableIdPath.getName());
-    ServerColumnFamily.validateDirCol(tableId.canonical());
-
-    Path tablePath = Objects.requireNonNull(tableIdPath.getParent(), errorMsg);
-    String tpString = "/" + tablePath.getName();
-    Preconditions.checkArgument(tpString.equals(Constants.HDFS_TABLES_DIR), errorMsg);
-
-    Path volumePath = Objects.requireNonNull(tablePath.getParent(), errorMsg);
-    Preconditions.checkArgument(volumePath.toUri().getScheme() != null, errorMsg);
-    this.volume = volumePath.toString();
-
-    this.normalizedPath = volume + Constants.HDFS_TABLES_DIR + "/" + tableId.canonical() + "/"
-        + tabletDir + "/" + fileName;
-  }
-
-  public String getVolume() {
-    return volume;
-  }
-
-  public TableId getTableId() {
-    return tableId;
-  }
-
-  public String getTabletDir() {
-    return tabletDir;
-  }
-
-  public String getFileName() {
-    return fileName;
-  }
+  String getFileName();
 
   /**
-   * Return a string for opening and reading the tablet file. Doesn't have to be exact string in
-   * metadata.
+   * Returns the full path for the TabletFile on the file system. The path may be normalized
+   * depending on the specific implementation. For example, a path in hdfs would be returned as
+   * 'hdfs://nn1/accumulo/tables/5a/t-0001/F0002.rf'
    */
-  public String getPathStr() {
-    return normalizedPath;
-  }
+  Path getPath();
 
   /**
-   * Return a string for inserting a new tablet file.
+   * @return The range of the TabletFile
+   *
    */
-  public String getMetaInsert() {
-    return normalizedPath;
-  }
+  Range getRange();
 
   /**
-   * Return a new Text object of {@link #getMetaInsert()}
+   * @return True if this file is fenced by a range
+   *
    */
-  public Text getMetaInsertText() {
-    return new Text(getMetaInsert());
-  }
+  boolean hasRange();
 
   /**
-   * New file was written to metadata so return a StoredTabletFile
+   * @return a string with the filename and row range if there is one.
    */
-  public StoredTabletFile insert() {
-    return new StoredTabletFile(normalizedPath);
-  }
-
-  public Path getPath() {
-    return metaPath;
-  }
-
-  @Override
-  public int compareTo(TabletFile o) {
-    if (equals(o)) {
-      return 0;
-    } else {
-      return normalizedPath.compareTo(o.normalizedPath);
-    }
-  }
-
-  @Override
-  public boolean equals(Object obj) {
-    if (obj instanceof TabletFile) {
-      TabletFile that = (TabletFile) obj;
-      return normalizedPath.equals(that.normalizedPath);
-    }
-    return false;
-  }
-
-  @Override
-  public int hashCode() {
-    return normalizedPath.hashCode();
-  }
-
-  @Override
-  public String toString() {
-    return normalizedPath;
-  }
+  String toMinimalString();
 }

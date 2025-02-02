@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,29 +18,27 @@
  */
 package org.apache.accumulo.core.security;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import java.security.SecureRandom;
-import java.util.Random;
+import java.util.stream.IntStream;
 
 import org.apache.accumulo.core.client.security.tokens.AuthenticationToken;
 import org.apache.accumulo.core.client.security.tokens.AuthenticationToken.AuthenticationTokenSerializer;
 import org.apache.accumulo.core.client.security.tokens.NullToken;
 import org.apache.accumulo.core.client.security.tokens.PasswordToken;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class AuthenticationTokenTest {
+
   @Test
   public void testSerializeDeserializeToken() {
-    Random random = new SecureRandom();
     byte[] randomBytes = new byte[12];
-    random.nextBytes(randomBytes);
-    boolean allZero = true;
-    for (byte b : randomBytes)
-      allZero = allZero && b == 0;
-    assertFalse(allZero);
+    do {
+      // random fill, but avoid all zeros case
+      RANDOM.get().nextBytes(randomBytes);
+    } while (IntStream.range(0, randomBytes.length).allMatch(i -> randomBytes[i] == 0));
 
     byte[] serialized = AuthenticationTokenSerializer.serialize(new PasswordToken(randomBytes));
     PasswordToken passwordToken =

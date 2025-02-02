@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,11 +18,14 @@
  */
 package org.apache.accumulo.shell.commands;
 
+import static org.apache.accumulo.core.client.security.SecurityErrorCode.PERMISSION_DENIED;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -31,7 +34,6 @@ import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.NamespaceNotFoundException;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.clientImpl.Namespaces;
-import org.apache.accumulo.core.clientImpl.Tables;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.security.ColumnVisibility;
@@ -45,13 +47,14 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.OptionGroup;
 import org.apache.commons.cli.Options;
+import org.apache.commons.lang3.StringUtils;
 import org.jline.reader.LineReader;
 
 import com.google.common.collect.ImmutableSortedMap;
 
 public class ConfigCommand extends Command {
-  private Option tableOpt, deleteOpt, setOpt, filterOpt, filterWithValuesOpt, disablePaginationOpt,
-      outputFileOpt, namespaceOpt;
+  private Option tableOpt, deleteOpt, setOpt, forceOpt, filterOpt, filterWithValuesOpt,
+      disablePaginationOpt, outputFileOpt, namespaceOpt;
 
   private int COL1 = 10, COL2 = 7;
   private LineReader reader;
@@ -62,7 +65,7 @@ public class ConfigCommand extends Command {
     final Token cmd = new Token(getName());
     final Token sub = new Token("-" + setOpt.getOpt());
     for (Property p : Property.values()) {
-      if (!(p.getKey().endsWith(".")) && !p.isExperimental()) {
+      if (!p.getKey().endsWith(".") && !p.isExperimental()) {
         sub.addSubcommand(new Token(p.toString()));
       }
     }
@@ -75,6 +78,8 @@ public class ConfigCommand extends Command {
       throws AccumuloException, AccumuloSecurityException, TableNotFoundException, IOException,
       NamespaceNotFoundException {
     reader = shellState.getReader();
+
+    boolean force = cl.hasOption(forceOpt);
 
     final String tableName = cl.getOptionValue(tableOpt.getOpt());
     if (tableName != null && !shellState.getAccumuloClient().tableOperations().exists(tableName)) {
@@ -115,7 +120,8 @@ public class ConfigCommand extends Command {
       }
     } else if (cl.hasOption(setOpt.getOpt())) {
       // set property on table
-      String property = cl.getOptionValue(setOpt.getOpt()), value = null;
+      String property = cl.getOptionValue(setOpt.getOpt());
+      String value;
       if (!property.contains("=")) {
         throw new BadArgumentException("Missing '=' operator in set operation.", fullCommand,
             fullCommand.indexOf(property));
@@ -124,6 +130,17 @@ public class ConfigCommand extends Command {
       property = pair[0];
       value = pair[1];
 
+      // check for deprecation
+      var theProp = Property.getPropertyByKey(property);
+      if (theProp != null && theProp.isDeprecated()) {
+        if (!force
+            && !shellState.confirm("Trying to set deprecated property `" + property + "` continue")
+                .orElse(false)) {
+          throw new BadArgumentException(
+              "Tried to set deprecated property and force not specified.", fullCommand,
+              fullCommand.indexOf(property));
+        }
+      }
       if (tableName != null) {
         if (!Property.isValidTablePropertyKey(property)) {
           throw new BadArgumentException("Invalid per-table property.", fullCommand,
@@ -154,16 +171,38 @@ public class ConfigCommand extends Command {
         Shell.log.debug("Successfully set system configuration option.");
       }
     } else {
+      boolean warned = false;
       // display properties
       final TreeMap<String,String> systemConfig = new TreeMap<>();
-      systemConfig
-          .putAll(shellState.getAccumuloClient().instanceOperations().getSystemConfiguration());
+      try {
+        systemConfig
+            .putAll(shellState.getAccumuloClient().instanceOperations().getSystemConfiguration());
+      } catch (AccumuloSecurityException e) {
+        if (e.getSecurityErrorCode() == PERMISSION_DENIED) {
+          Shell.log.warn(
+              "User unable to retrieve system configuration (requires System.SYSTEM permission)");
+          warned = true;
+        } else {
+          throw e;
+        }
+      }
 
       final String outputFile = cl.getOptionValue(outputFileOpt.getOpt());
       final PrintFile printFile = outputFile == null ? null : new PrintFile(outputFile);
 
       final TreeMap<String,String> siteConfig = new TreeMap<>();
-      siteConfig.putAll(shellState.getAccumuloClient().instanceOperations().getSiteConfiguration());
+      try {
+        siteConfig
+            .putAll(shellState.getAccumuloClient().instanceOperations().getSiteConfiguration());
+      } catch (AccumuloSecurityException e) {
+        if (e.getSecurityErrorCode() == PERMISSION_DENIED) {
+          Shell.log.warn(
+              "User unable to retrieve site configuration (requires System.SYSTEM permission)");
+          warned = true;
+        } else {
+          throw e;
+        }
+      }
 
       final TreeMap<String,String> defaults = new TreeMap<>();
       for (Entry<String,String> defaultEntry : DefaultConfiguration.getInstance()) {
@@ -172,18 +211,60 @@ public class ConfigCommand extends Command {
 
       final TreeMap<String,String> namespaceConfig = new TreeMap<>();
       if (tableName != null) {
-        String n = Namespaces.getNamespaceName(shellState.getContext(), Tables.getNamespaceId(
-            shellState.getContext(), Tables.getTableId(shellState.getContext(), tableName)));
-        shellState.getAccumuloClient().namespaceOperations().getConfiguration(n)
-            .forEach(namespaceConfig::put);
+        String n = Namespaces.getNamespaceName(shellState.getContext(),
+            shellState.getContext().getNamespaceId(shellState.getContext().getTableId(tableName)));
+        try {
+          namespaceConfig
+              .putAll(shellState.getAccumuloClient().namespaceOperations().getConfiguration(n));
+        } catch (AccumuloSecurityException e) {
+          if (e.getSecurityErrorCode() == PERMISSION_DENIED) {
+            Shell.log.warn(
+                "User unable to retrieve {} namespace configuration (requires Namespace.ALTER_NAMESPACE permission)",
+                StringUtils.isEmpty(n) ? "default" : n);
+            warned = true;
+          } else {
+            throw e;
+          }
+        }
       }
 
-      Map<String,String> acuconf =
-          shellState.getAccumuloClient().instanceOperations().getSystemConfiguration();
+      Map<String,String> acuconf = systemConfig;
+      if (acuconf.isEmpty()) {
+        acuconf = defaults;
+      }
+
       if (tableName != null) {
-        acuconf = shellState.getAccumuloClient().tableOperations().getConfiguration(tableName);
+        if (warned) {
+          Shell.log.warn(
+              "User does not have permission to see entire configuration heirarchy. Property values shown below may be set above the table level.");
+        }
+        try {
+          acuconf = shellState.getAccumuloClient().tableOperations().getConfiguration(tableName);
+        } catch (AccumuloException e) {
+          if (e.getCause() != null && e.getCause() instanceof AccumuloSecurityException) {
+            AccumuloSecurityException ase = (AccumuloSecurityException) e.getCause();
+            if (ase.getSecurityErrorCode() == PERMISSION_DENIED) {
+              Shell.log.error(
+                  "User unable to retrieve {} table configuration (requires Table.ALTER_TABLE permission)",
+                  tableName);
+            }
+          }
+          throw e;
+        }
       } else if (namespace != null) {
-        acuconf = shellState.getAccumuloClient().namespaceOperations().getConfiguration(namespace);
+        if (warned) {
+          Shell.log.warn(
+              "User does not have permission to see entire configuration heirarchy. Property values shown below may be set above the namespace level.");
+        }
+        try {
+          acuconf =
+              shellState.getAccumuloClient().namespaceOperations().getConfiguration(namespace);
+        } catch (AccumuloSecurityException e) {
+          Shell.log.error(
+              "User unable to retrieve {} namespace configuration (requires Namespace.ALTER_NAMESPACE permission)",
+              StringUtils.isEmpty(namespace) ? "default" : namespace);
+          throw e;
+        }
       }
       final Map<String,String> sortedConf = ImmutableSortedMap.copyOf(acuconf);
 
@@ -224,10 +305,10 @@ public class ConfigCommand extends Command {
         String nspVal = namespaceConfig.get(key);
         boolean printed = false;
 
-        if (dfault != null && key.toLowerCase().contains("password")) {
-          siteVal = sysVal = dfault = curVal = curVal.replaceAll(".", "*");
-        }
         if (sysVal != null) {
+          if (dfault != null && key.toLowerCase().contains("password")) {
+            siteVal = sysVal = dfault = curVal = curVal.replaceAll(".", "*");
+          }
           if (defaults.containsKey(key) && !Property.getPropertyByKey(key).isExperimental()) {
             printConfLine(output, "default", key, dfault);
             printed = true;
@@ -237,14 +318,20 @@ public class ConfigCommand extends Command {
                 siteVal == null ? "" : siteVal);
             printed = true;
           }
-          if (!siteConfig.containsKey(key) || !siteVal.equals(sysVal)) {
+          if (!siteConfig.containsKey(key) || !Objects.equals(siteVal, sysVal)) {
             printConfLine(output, "system", printed ? "   @override" : key, sysVal);
             printed = true;
           }
-
         }
         if (nspVal != null) {
-          if (!systemConfig.containsKey(key) || !sysVal.equals(nspVal)) {
+          // If the user can't see the system configuration, then print the default
+          // configuration value if the current namespace value is different from it.
+          if (sysVal == null && dfault != null && !dfault.equals(nspVal)
+              && !Property.getPropertyByKey(key).isExperimental()) {
+            printConfLine(output, "default", key, dfault);
+            printed = true;
+          }
+          if (!systemConfig.containsKey(key) || !Objects.equals(sysVal, nspVal)) {
             printConfLine(output, "namespace", printed ? "   @override" : key, nspVal);
             printed = true;
           }
@@ -252,8 +339,22 @@ public class ConfigCommand extends Command {
 
         // show per-table value only if it is different (overridden)
         if (tableName != null && !curVal.equals(nspVal)) {
+          // If the user can't see the system configuration, then print the default
+          // configuration value if the current table value is different from it.
+          if (nspVal == null && dfault != null && !dfault.equals(curVal)
+              && !Property.getPropertyByKey(key).isExperimental()) {
+            printConfLine(output, "default", key, dfault);
+            printed = true;
+          }
           printConfLine(output, "table", printed ? "   @override" : key, curVal);
         } else if (namespace != null && !curVal.equals(sysVal)) {
+          // If the user can't see the system configuration, then print the default
+          // configuration value if the current namespace value is different from it.
+          if (sysVal == null && dfault != null && !dfault.equals(curVal)
+              && !Property.getPropertyByKey(key).isExperimental()) {
+            printConfLine(output, "default", key, dfault);
+            printed = true;
+          }
           printConfLine(output, "namespace", printed ? "   @override" : key, curVal);
         }
       }
@@ -287,7 +388,7 @@ public class ConfigCommand extends Command {
       s2 += " " + Shell.repeat(".", COL2 - s2.length() - 1);
     }
     output.add(String.format("%-" + COL1 + "s | %-" + COL2 + "s | %s", s1, s2, s3.replace("\n",
-        "\n" + Shell.repeat(" ", COL1 + 1) + "|" + Shell.repeat(" ", COL2 + 2) + "|" + " ")));
+        "\n" + Shell.repeat(" ", COL1 + 1) + "|" + Shell.repeat(" ", COL2 + 2) + "| ")));
   }
 
   private void printConfFooter(List<String> output) {
@@ -312,6 +413,8 @@ public class ConfigCommand extends Command {
         "table to display/set/delete properties for");
     deleteOpt = new Option("d", "delete", true, "delete a per-table property");
     setOpt = new Option("s", "set", true, "set a per-table property");
+    forceOpt = new Option("force", "force", false,
+        "used with set to set a deprecated property without asking");
     filterOpt = new Option("f", "filter", true,
         "show only properties that contain this string in their name.");
     filterWithValuesOpt = new Option("fv", "filter-with-values", true,
@@ -342,6 +445,7 @@ public class ConfigCommand extends Command {
     o.addOptionGroup(og);
     o.addOption(disablePaginationOpt);
     o.addOption(outputFileOpt);
+    o.addOption(forceOpt);
 
     return o;
   }
@@ -350,4 +454,5 @@ public class ConfigCommand extends Command {
   public int numArgs() {
     return 0;
   }
+
 }

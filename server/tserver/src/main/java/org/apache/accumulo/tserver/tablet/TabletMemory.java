@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -39,7 +39,7 @@ class TabletMemory implements Closeable {
   private InMemoryMap deletingMemTable;
   private long nextSeq = 1L;
   private CommitSession commitSession;
-  private ServerContext context;
+  private final ServerContext context;
 
   TabletMemory(Tablet tablet) {
     this.tablet = tablet;
@@ -147,10 +147,11 @@ class TabletMemory implements Closeable {
 
   public void updateMemoryUsageStats() {
     long other = 0;
-    if (otherMemTable != null)
+    if (otherMemTable != null) {
       other = otherMemTable.estimatedSizeInBytes();
-    else if (deletingMemTable != null)
+    } else if (deletingMemTable != null) {
       other = deletingMemTable.estimatedSizeInBytes();
+    }
 
     tablet.updateMemoryUsageStats(memTable.estimatedSizeInBytes(), other);
   }
@@ -158,8 +159,9 @@ class TabletMemory implements Closeable {
   public List<MemoryIterator> getIterators(SamplerConfigurationImpl samplerConfig) {
     List<MemoryIterator> toReturn = new ArrayList<>(2);
     toReturn.add(memTable.skvIterator(samplerConfig));
-    if (otherMemTable != null)
+    if (otherMemTable != null) {
       toReturn.add(otherMemTable.skvIterator(samplerConfig));
+    }
     return toReturn;
   }
 
@@ -170,8 +172,9 @@ class TabletMemory implements Closeable {
   }
 
   public long getNumEntries() {
-    if (otherMemTable != null)
+    if (otherMemTable != null) {
       return memTable.getNumEntries() + otherMemTable.getNumEntries();
+    }
     return memTable.getNumEntries();
   }
 

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -41,8 +41,9 @@ public class NumericValueConstraint implements Constraint {
   private boolean isNumeric(byte[] bytes) {
     for (byte b : bytes) {
       boolean ok = (b >= '0' && b <= '9');
-      if (!ok)
+      if (!ok) {
         return false;
+      }
     }
 
     return true;
@@ -53,8 +54,9 @@ public class NumericValueConstraint implements Constraint {
     Collection<ColumnUpdate> updates = mutation.getUpdates();
 
     for (ColumnUpdate columnUpdate : updates) {
-      if (!isNumeric(columnUpdate.getValue()))
+      if (!isNumeric(columnUpdate.getValue())) {
         return VIOLATION_LIST;
+      }
     }
 
     return null;

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -48,12 +48,12 @@ public class VisMetricsGatherer
     implements MetricsGatherer<Map<String,ArrayList<VisibilityMetric>>> {
   private static final String KEY_HASH_ALGORITHM = "SHA-256";
 
-  protected Map<String,AtomicLongMap<String>> metric;
-  protected Map<String,AtomicLongMap<String>> blocks;
-  protected ArrayList<Long> numEntries;
-  protected ArrayList<Integer> numBlocks;
-  private ArrayList<String> inBlock;
-  protected ArrayList<String> localityGroups;
+  protected final Map<String,AtomicLongMap<String>> metric;
+  protected final Map<String,AtomicLongMap<String>> blocks;
+  protected final ArrayList<Long> numEntries;
+  protected final ArrayList<Integer> numBlocks;
+  private final ArrayList<String> inBlock;
+  protected final ArrayList<String> localityGroups;
   private int numLG;
   private Map<String,ArrayList<ByteSequence>> localityGroupCF;
 
@@ -78,10 +78,9 @@ public class VisMetricsGatherer
     ByteSequence cf = new ArrayByteSequence(oneCF.toString());
     for (Entry<String,ArrayList<ByteSequence>> entry : localityGroupCF.entrySet()) {
       if (entry.getValue().contains(cf)) {
-        if (entry.getKey() == null)
-          name = null;
-        else
+        if (entry.getKey() != null) {
           name = entry.getKey().toString();
+        }
         break;
       }
     }
@@ -99,8 +98,9 @@ public class VisMetricsGatherer
     String currLG = localityGroups.get(numLG - 1);
     if (metric.get(currLG).containsKey(myMetric)) {
       metric.get(currLG).getAndIncrement(myMetric);
-    } else
+    } else {
       metric.get(currLG).put(myMetric, 1);
+    }
 
     numEntries.set(numLG - 1, numEntries.get(numLG - 1) + 1);
 
@@ -125,13 +125,13 @@ public class VisMetricsGatherer
     for (int i = 0; i < numLG; i++) {
       String lGName = localityGroups.get(i);
       out.print("Locality Group: ");
-      if (lGName == null)
+      if (lGName == null) {
         out.println("<DEFAULT>");
-      else
+      } else {
         out.println(localityGroups.get(i));
+      }
       out.printf("%-27s", metricWord);
-      out.println("Number of keys" + "\t   " + "Percent of keys" + "\t" + "Number of blocks" + "\t"
-          + "Percent of blocks");
+      out.println("Number of keys\t   Percent of keys\tNumber of blocks\tPercent of blocks");
       for (Entry<String,Long> entry : metric.get(lGName).asMap().entrySet()) {
         if (hash) {
           String encodedKey = "";
@@ -144,8 +144,9 @@ public class VisMetricsGatherer
                 "Failed to convert key to " + KEY_HASH_ALGORITHM + " hash: " + e.getMessage());
           }
           out.printf("%-20s", encodedKey.substring(0, 8));
-        } else
+        } else {
           out.printf("%-20s", entry.getKey());
+        }
         out.print("\t\t" + entry.getValue() + "\t\t\t");
         out.printf("%.2f", ((double) entry.getValue() / numEntries.get(i)) * 100);
         out.print("%\t\t\t");

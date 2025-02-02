@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,10 +20,17 @@ package org.apache.accumulo.core.util;
 
 import java.util.regex.PatternSyntaxException;
 
+import org.apache.accumulo.access.InvalidAccessExpressionException;
+
 public final class BadArgumentException extends PatternSyntaxException {
   private static final long serialVersionUID = 1L;
 
   public BadArgumentException(String desc, String badarg, int index) {
     super(desc, badarg, index);
+  }
+
+  public BadArgumentException(InvalidAccessExpressionException e) {
+    super(e.getDescription(), e.getPattern(), e.getIndex());
+    super.initCause(e);
   }
 }

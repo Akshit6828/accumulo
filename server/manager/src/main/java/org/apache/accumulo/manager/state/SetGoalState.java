@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,13 +22,11 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.conf.SiteConfiguration;
+import org.apache.accumulo.core.fate.zookeeper.ZooUtil.NodeExistsPolicy;
 import org.apache.accumulo.core.manager.thrift.ManagerGoalState;
 import org.apache.accumulo.core.singletons.SingletonManager;
 import org.apache.accumulo.core.singletons.SingletonManager.Mode;
-import org.apache.accumulo.fate.zookeeper.ZooUtil.NodeExistsPolicy;
-import org.apache.accumulo.manager.upgrade.RenameMasterDirInZK;
 import org.apache.accumulo.server.ServerContext;
-import org.apache.accumulo.server.ServerUtil;
 import org.apache.accumulo.server.security.SecurityUtil;
 
 public class SetGoalState {
@@ -46,12 +44,12 @@ public class SetGoalState {
     try {
       var siteConfig = SiteConfiguration.auto();
       SecurityUtil.serverLogin(siteConfig);
-      var context = new ServerContext(siteConfig);
-      RenameMasterDirInZK.renameMasterDirInZK(context);
-      ServerUtil.waitForZookeeperAndHdfs(context);
-      context.getZooReaderWriter().putPersistentData(
-          context.getZooKeeperRoot() + Constants.ZMANAGER_GOAL_STATE, args[0].getBytes(UTF_8),
-          NodeExistsPolicy.OVERWRITE);
+      try (var context = new ServerContext(siteConfig)) {
+        context.waitForZookeeperAndHdfs();
+        context.getZooSession().asReaderWriter().putPersistentData(
+            context.getZooKeeperRoot() + Constants.ZMANAGER_GOAL_STATE, args[0].getBytes(UTF_8),
+            NodeExistsPolicy.OVERWRITE);
+      }
     } finally {
       SingletonManager.setMode(Mode.CLOSED);
     }

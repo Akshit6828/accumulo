@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,6 +18,9 @@
  */
 package org.apache.accumulo.monitor.rest.gc;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.apache.accumulo.core.gc.thrift.GCStatus;
 
 /**
@@ -27,28 +30,20 @@ import org.apache.accumulo.core.gc.thrift.GCStatus;
  */
 public class GarbageCollectorStatus {
 
-  private static final GarbageCollectorStatus EMPTY = new GarbageCollectorStatus();
-
   // variable names become JSON key
-  public GarbageCollection files = new GarbageCollection();
-  public GarbageCollection wals = new GarbageCollection();
-
-  public GarbageCollectorStatus() {}
+  public List<GarbageCollectorStats> stats = new ArrayList<>();
 
   /**
    * Groups gc status into files and wals
    *
-   * @param status
-   *          garbage collector status
+   * @param status garbage collector status
    */
   public GarbageCollectorStatus(GCStatus status) {
     if (status != null) {
-      files = new GarbageCollection(status.last, status.current);
-      wals = new GarbageCollection(status.lastLog, status.currentLog);
+      stats.add(new GarbageCollectorStats("Current GC", status.current));
+      stats.add(new GarbageCollectorStats("Last GC", status.last));
+      stats.add(new GarbageCollectorStats("Current WAL", status.currentLog));
+      stats.add(new GarbageCollectorStats("Last WAL", status.lastLog));
     }
-  }
-
-  public static GarbageCollectorStatus getEmpty() {
-    return EMPTY;
   }
 }

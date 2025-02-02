@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,9 +20,11 @@ package org.apache.accumulo.core.client.admin.compaction;
 
 import java.util.Collection;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.accumulo.core.client.PluginEnvironment;
 import org.apache.accumulo.core.data.TableId;
+import org.apache.accumulo.core.data.TabletId;
 
 /**
  * Enables dynamically overriding of per table properties used to create the output file for a
@@ -50,7 +52,35 @@ public interface CompactionConfigurer {
   public interface InputParameters {
     TableId getTableId();
 
+    /**
+     * @return the id of the tablet being compacted
+     * @since 3.0.0
+     */
+    TabletId getTabletId();
+
     public Collection<CompactableFile> getInputFiles();
+
+    /**
+     * For user and selector compactions:
+     * <ul>
+     * <li>Returns the selected set of files to be compacted.</li>
+     * <li>When getInputFiles() (inputFiles) and getSelectedFiles() (selectedFiles) are equal, then
+     * this is the final compaction.</li>
+     * <li>When they are not equal, this is an intermediate compaction.</li>
+     * <li>Intermediate compactions are compactions whose resultant RFile will be consumed by
+     * another compaction.</li>
+     * <li>inputFiles and selectedFiles can be compared using: <code>
+     * selectedFiles.equals(inputFiles instanceof Set ? inputFiles : Set.copyOf(inputFiles))
+     * </code></li>
+     * </ul>
+     * For system compactions:
+     * <ul>
+     * <li>There is no selected set of files so the empty set is returned.</li>
+     * </ul>
+     *
+     * @since 3.1
+     */
+    public Set<CompactableFile> getSelectedFiles();
 
     PluginEnvironment getEnvironment();
   }

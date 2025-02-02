@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -52,11 +52,11 @@ public class AccumuloRecordWriter implements RecordWriter<Text,Mutation> {
   private static final Class<AccumuloOutputFormat> CLASS = AccumuloOutputFormat.class;
   private static final Logger log = LoggerFactory.getLogger(AccumuloRecordWriter.class);
   private MultiTableBatchWriter mtbw = null;
-  private HashMap<Text,BatchWriter> bws;
-  private Text defaultTableName;
+  private final HashMap<Text,BatchWriter> bws;
+  private final Text defaultTableName;
 
-  private boolean simulate;
-  private boolean createTables;
+  private final boolean simulate;
+  private final boolean createTables;
 
   private long mutCount = 0;
   private long valCount = 0;
@@ -67,8 +67,9 @@ public class AccumuloRecordWriter implements RecordWriter<Text,Mutation> {
     this.simulate = OutputConfigurator.getSimulationMode(CLASS, job);
     this.createTables = OutputConfigurator.canCreateTables(CLASS, job);
 
-    if (simulate)
+    if (simulate) {
       log.info("Simulating output only. No writes to tables will occur");
+    }
 
     this.bws = new HashMap<>();
 
@@ -88,26 +89,30 @@ public class AccumuloRecordWriter implements RecordWriter<Text,Mutation> {
    */
   @Override
   public void write(Text table, Mutation mutation) throws IOException {
-    if (table == null || table.toString().isEmpty())
+    if (table == null || table.getLength() == 0) {
       table = this.defaultTableName;
+    }
 
-    if (!simulate && table == null)
+    if (!simulate && table == null) {
       throw new IOException("No table or default table specified. Try simulation mode next time");
+    }
 
     ++mutCount;
     valCount += mutation.size();
     printMutation(table, mutation);
 
-    if (simulate)
+    if (simulate) {
       return;
+    }
 
-    if (!bws.containsKey(table))
+    if (!bws.containsKey(table)) {
       try {
         addTable(table);
       } catch (final AccumuloSecurityException | AccumuloException e) {
         log.error("Could not add table '" + table + "'", e);
         throw new IOException(e);
       }
+    }
 
     try {
       bws.get(table).addMutation(mutation);
@@ -146,8 +151,9 @@ public class AccumuloRecordWriter implements RecordWriter<Text,Mutation> {
       throw e;
     }
 
-    if (bw != null)
+    if (bw != null) {
       bws.put(tableName, bw);
+    }
   }
 
   private int printMutation(Text table, Mutation m) {
@@ -167,10 +173,11 @@ public class AccumuloRecordWriter implements RecordWriter<Text,Mutation> {
   private String hexDump(byte[] ba) {
     StringBuilder sb = new StringBuilder();
     for (byte b : ba) {
-      if ((b > 0x20) && (b < 0x7e))
+      if ((b > 0x20) && (b < 0x7e)) {
         sb.append((char) b);
-      else
+      } else {
         sb.append(String.format("x%02x", b));
+      }
     }
     return sb.toString();
   }
@@ -178,8 +185,9 @@ public class AccumuloRecordWriter implements RecordWriter<Text,Mutation> {
   @Override
   public void close(Reporter reporter) throws IOException {
     log.debug("mutations written: " + mutCount + ", values written: " + valCount);
-    if (simulate)
+    if (simulate) {
       return;
+    }
 
     try {
       mtbw.close();

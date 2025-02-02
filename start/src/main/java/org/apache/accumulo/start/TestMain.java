@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -30,10 +30,12 @@ package org.apache.accumulo.start;
 public class TestMain {
   public static void main(String[] args) {
     if (args.length > 0) {
-      if (args[0].equals("success"))
+      if (args[0].equals("success")) {
         System.exit(0);
-      if (args[0].equals("throw"))
-        throw new RuntimeException("This is an exception");
+      }
+      if (args[0].equals("throw")) {
+        throw new IllegalStateException("This is an exception");
+      }
     }
     System.exit(-1);
   }

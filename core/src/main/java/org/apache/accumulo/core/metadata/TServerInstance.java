@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -22,8 +22,9 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.util.AddressUtil;
-import org.apache.accumulo.core.util.HostAndPort;
 import org.apache.hadoop.io.Text;
+
+import com.google.common.net.HostAndPort;
 
 /**
  * A tablet is assigned to a tablet server at the given address as long as it is alive and well.
@@ -61,17 +62,18 @@ public class TServerInstance implements Comparable<TServerInstance> {
   }
 
   public TServerInstance(String address, long session) {
-    this(AddressUtil.parseAddress(address, false), Long.toHexString(session));
+    this(AddressUtil.parseAddress(address), Long.toHexString(session));
   }
 
   public TServerInstance(Value address, Text session) {
-    this(AddressUtil.parseAddress(new String(address.get(), UTF_8), false), session.toString());
+    this(AddressUtil.parseAddress(new String(address.get(), UTF_8)), session.toString());
   }
 
   @Override
   public int compareTo(TServerInstance other) {
-    if (this == other)
+    if (this == other) {
       return 0;
+    }
     return this.getHostPortSession().compareTo(other.getHostPortSession());
   }
 

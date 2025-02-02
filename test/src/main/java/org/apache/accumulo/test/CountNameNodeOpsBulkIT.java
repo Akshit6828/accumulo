@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,8 +18,10 @@
  */
 package org.apache.accumulo.test;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
-import static org.junit.Assert.assertEquals;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.accumulo.core.util.LazySingletons.GSON;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.net.URL;
 import java.util.ArrayList;
@@ -31,20 +33,20 @@ import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.admin.NewTableConfiguration;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
 import org.apache.accumulo.core.conf.Property;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.file.FileOperations;
 import org.apache.accumulo.core.file.FileSKVWriter;
 import org.apache.accumulo.core.file.rfile.RFile;
 import org.apache.accumulo.core.manager.thrift.ManagerMonitorInfo;
+import org.apache.accumulo.core.metadata.UnreferencedTabletFile;
+import org.apache.accumulo.core.spi.crypto.NoCryptoServiceFactory;
 import org.apache.accumulo.minicluster.ServerType;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.accumulo.test.functional.ConfigurableMacBase;
@@ -53,9 +55,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
-
-import com.google.gson.Gson;
+import org.junit.jupiter.api.Test;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
@@ -67,7 +67,7 @@ public class CountNameNodeOpsBulkIT extends ConfigurableMacBase {
 
   @Override
   protected void configure(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
-    cfg.setNumTservers(1);
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(1);
     cfg.useMiniDFS(true);
   }
 
@@ -78,8 +78,7 @@ public class CountNameNodeOpsBulkIT extends ConfigurableMacBase {
     URL url = new URL(uri + "/jmx");
     log.debug("Fetching web page " + url);
     String jsonString = FunctionalTestUtils.readWebPage(url).body();
-    Gson gson = new Gson();
-    Map<?,?> jsonObject = gson.fromJson(jsonString, Map.class);
+    Map<?,?> jsonObject = GSON.get().fromJson(jsonString, Map.class);
     List<?> beans = (List<?>) jsonObject.get("beans");
     for (Object bean : beans) {
       Map<?,?> map = (Map<?,?>) bean;
@@ -104,6 +103,7 @@ public class CountNameNodeOpsBulkIT extends ConfigurableMacBase {
       Map<String,String> props = new HashMap<>();
       props.put(Property.TABLE_MAJC_RATIO.getKey(), "2000");
       props.put(Property.TABLE_FILE_MAX.getKey(), "2000");
+      props.put(Property.TABLE_FILE_PAUSE.getKey(), "2000");
       // splits to slow down bulk import
       SortedSet<Text> splits = new TreeSet<>();
       for (int i = 1; i < 0xf; i++) {
@@ -133,8 +133,10 @@ public class CountNameNodeOpsBulkIT extends ConfigurableMacBase {
           fs.mkdirs(files);
           for (int i1 = 0; i1 < 100; i1++) {
             FileSKVWriter writer = FileOperations.getInstance().newWriterBuilder()
-                .forFile(files + "/bulk_" + i1 + "." + RFile.EXTENSION, fs, fs.getConf(),
-                    CryptoServiceFactory.newDefaultInstance())
+                .forFile(
+                    UnreferencedTabletFile.of(fs,
+                        new Path(files + "/bulk_" + i1 + "." + RFile.EXTENSION)),
+                    fs, fs.getConf(), NoCryptoServiceFactory.NONE)
                 .withTableConfiguration(DefaultConfiguration.getInstance()).build();
             writer.startDefaultLocalityGroup();
             for (int j = 0x100; j < 0xfff; j += 3) {
@@ -163,15 +165,16 @@ public class CountNameNodeOpsBulkIT extends ConfigurableMacBase {
         err.get();
       }
       es.shutdown();
-      es.awaitTermination(2, TimeUnit.MINUTES);
+      es.awaitTermination(2, MINUTES);
       log.info(
           String.format("Completed in %.2f seconds", (System.currentTimeMillis() - now) / 1000.));
-      sleepUninterruptibly(30, TimeUnit.SECONDS);
+      Thread.sleep(SECONDS.toMillis(30));
       Map<?,?> map = getStats();
       map.forEach((k, v) -> {
         try {
-          if (v != null && Double.parseDouble(v.toString()) > 0.0)
+          if (v != null && Double.parseDouble(v.toString()) > 0.0) {
             log.debug("{}:{}", k, v);
+          }
         } catch (NumberFormatException e) {
           // only looking for numbers
         }
@@ -181,7 +184,7 @@ public class CountNameNodeOpsBulkIT extends ConfigurableMacBase {
       // counts for old bulk import:
       // Expected number of FileInfoOps was between 1000 and 2100
       // new bulk import is way better :)
-      assertEquals("unexpected number of FileInfoOps", 20, getFileInfoOpts);
+      assertEquals(20, getFileInfoOpts, "unexpected number of FileInfoOps");
     }
   }
 }

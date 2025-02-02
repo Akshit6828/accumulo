@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -199,8 +199,7 @@ public interface Summarizer {
      * table property {@code table.file.summary.maxSize}. The number of files that exceeded the
      * summary size is reported by {@link Summary.FileStatistics#getLarge()}.
      *
-     * @param sc
-     *          Emit statistics to this Object.
+     * @param sc Emit statistics to this Object.
      */
     void summarize(StatisticConsumer sc);
   }

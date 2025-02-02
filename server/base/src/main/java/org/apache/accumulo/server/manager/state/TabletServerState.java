@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,7 +23,7 @@ import java.util.HashSet;
 
 public enum TabletServerState {
   // not a valid state, reserved for internal use only
-  RESERVED((byte) (-1)),
+  RESERVED((byte) -1),
 
   // the following are normally functioning states
   NEW((byte) 0),
@@ -43,16 +43,17 @@ public enum TabletServerState {
 
   private byte id;
 
-  private static HashMap<Byte,TabletServerState> mapping;
-  private static HashSet<TabletServerState> badStates;
+  private static final HashMap<Byte,TabletServerState> mapping;
+  private static final HashSet<TabletServerState> badStates;
 
   static {
     mapping = new HashMap<>(TabletServerState.values().length);
     badStates = new HashSet<>();
     for (TabletServerState state : TabletServerState.values()) {
       mapping.put(state.id, state);
-      if (state.id > 99)
+      if (state.id > 99) {
         badStates.add(state);
+      }
     }
   }
 
@@ -65,8 +66,9 @@ public enum TabletServerState {
   }
 
   public static TabletServerState getStateById(byte id) {
-    if (mapping.containsKey(id))
+    if (mapping.containsKey(id)) {
       return mapping.get(id);
+    }
     throw new IndexOutOfBoundsException("No such state");
   }
 

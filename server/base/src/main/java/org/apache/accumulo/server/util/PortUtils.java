@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -39,15 +39,16 @@ public class PortUtils {
       } catch (IOException ioe) {
 
       } finally {
-        if (so != null)
+        if (so != null) {
           try {
             so.close();
           } catch (IOException e) {}
+        }
       }
 
       count++;
     }
 
-    throw new RuntimeException("Unable to find port");
+    throw new IllegalStateException("Unable to find port");
   }
 }

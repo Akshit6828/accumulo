@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,12 +18,12 @@
  */
 package org.apache.accumulo.core.client;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
+import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.clientImpl.IsolationException;
 import org.apache.accumulo.core.clientImpl.ScannerOptions;
@@ -45,17 +45,17 @@ public class IsolatedScanner extends ScannerOptions implements Scanner {
   private static class RowBufferingIterator implements Iterator<Entry<Key,Value>> {
 
     private Iterator<Entry<Key,Value>> source;
-    private RowBuffer buffer;
+    private final RowBuffer buffer;
     private Entry<Key,Value> nextRowStart;
     private Iterator<Entry<Key,Value>> rowIter;
     private ByteSequence lastRow = null;
-    private long timeout;
+    private final long timeout;
 
     private final Scanner scanner;
-    private ScannerOptions opts;
-    private Range range;
-    private int batchSize;
-    private long readaheadThreshold;
+    private final ScannerOptions opts;
+    private final Range range;
+    private final int batchSize;
+    private final long readaheadThreshold;
 
     private void readRow() {
 
@@ -95,9 +95,9 @@ public class IsolatedScanner extends ScannerOptions implements Scanner {
 
           nextRowStart = null;
 
-          if (lastRow == null)
+          if (lastRow == null) {
             seekRange = range;
-          else {
+          } else {
             Text lastRowText = new Text();
             lastRowText.set(lastRow.getBackingArray(), lastRow.offset(), lastRow.length());
             Key startKey = new Key(lastRowText).followingKey(PartialKey.ROW);
@@ -114,7 +114,7 @@ public class IsolatedScanner extends ScannerOptions implements Scanner {
           }
 
           // wait a moment before retrying
-          sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
+          sleepUninterruptibly(100, MILLISECONDS);
 
           source = newIterator(seekRange);
         }
@@ -125,13 +125,12 @@ public class IsolatedScanner extends ScannerOptions implements Scanner {
       synchronized (scanner) {
         scanner.enableIsolation();
         scanner.setBatchSize(batchSize);
-        scanner.setTimeout(timeout, TimeUnit.MILLISECONDS);
+        scanner.setTimeout(timeout, MILLISECONDS);
         scanner.setRange(r);
         scanner.setReadaheadThreshold(readaheadThreshold);
         setOptions((ScannerOptions) scanner, opts);
 
         return scanner.iterator();
-        // return new FaultyIterator(scanner.iterator());
       }
     }
 
@@ -196,7 +195,7 @@ public class IsolatedScanner extends ScannerOptions implements Scanner {
 
   public static class MemoryRowBuffer implements RowBuffer {
 
-    private ArrayList<Entry<Key,Value>> buffer = new ArrayList<>();
+    private final ArrayList<Entry<Key,Value>> buffer = new ArrayList<>();
 
     @Override
     public void add(Entry<Key,Value> entry) {
@@ -215,11 +214,11 @@ public class IsolatedScanner extends ScannerOptions implements Scanner {
 
   }
 
-  private Scanner scanner;
+  private final Scanner scanner;
   private Range range;
   private int batchSize;
   private long readaheadThreshold;
-  private RowBufferFactory bufferFactory;
+  private final RowBufferFactory bufferFactory;
 
   public IsolatedScanner(Scanner scanner) {
     this(scanner, new MemoryRowBufferFactory());
@@ -228,8 +227,8 @@ public class IsolatedScanner extends ScannerOptions implements Scanner {
   public IsolatedScanner(Scanner scanner, RowBufferFactory bufferFactory) {
     this.scanner = scanner;
     this.range = scanner.getRange();
-    this.timeOut = scanner.getTimeout(TimeUnit.MILLISECONDS);
-    this.batchTimeOut = scanner.getBatchTimeout(TimeUnit.MILLISECONDS);
+    this.retryTimeout = scanner.getTimeout(MILLISECONDS);
+    this.batchTimeout = scanner.getBatchTimeout(MILLISECONDS);
     this.batchSize = scanner.getBatchSize();
     this.readaheadThreshold = scanner.getReadaheadThreshold();
     this.bufferFactory = bufferFactory;
@@ -237,8 +236,8 @@ public class IsolatedScanner extends ScannerOptions implements Scanner {
 
   @Override
   public Iterator<Entry<Key,Value>> iterator() {
-    return new RowBufferingIterator(scanner, this, range, timeOut, batchSize, readaheadThreshold,
-        bufferFactory);
+    return new RowBufferingIterator(scanner, this, range, retryTimeout, batchSize,
+        readaheadThreshold, bufferFactory);
   }
 
   @Override

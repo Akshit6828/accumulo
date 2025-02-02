@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -78,8 +78,7 @@ public class ClusterUser {
    * May not yet be created in Accumulo.
    *
    * @return the correct {@link AuthenticationToken} to use with Accumulo for this user
-   * @throws IOException
-   *           if performing necessary login failed
+   * @throws IOException if performing necessary login failed
    */
   public AuthenticationToken getToken() throws IOException {
     if (password != null) {

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -31,11 +31,10 @@ import static org.apache.accumulo.core.clientImpl.lexicoder.ByteUtils.unescape;
  */
 public class ReverseLexicoder<T> extends AbstractLexicoder<T> {
 
-  private Lexicoder<T> lexicoder;
+  private final Lexicoder<T> lexicoder;
 
   /**
-   * @param lexicoder
-   *          The lexicoder who's sort order will be flipped.
+   * @param lexicoder The lexicoder who's sort order will be flipped.
    */
   public ReverseLexicoder(Lexicoder<T> lexicoder) {
     this.lexicoder = lexicoder;
@@ -46,8 +45,9 @@ public class ReverseLexicoder<T> extends AbstractLexicoder<T> {
     byte[] bytes = escape(lexicoder.encode(data));
     byte[] ret = new byte[bytes.length + 1];
 
-    for (int i = 0; i < bytes.length; i++)
+    for (int i = 0; i < bytes.length; i++) {
       ret[i] = (byte) (0xff - (0xff & bytes[i]));
+    }
 
     ret[bytes.length] = (byte) 0xff;
 

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -32,8 +32,8 @@ import org.apache.accumulo.core.iterators.ServerFilter;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 
 public class ColumnQualifierFilter extends ServerFilter {
-  private HashSet<ByteSequence> columnFamilies;
-  private HashMap<ByteSequence,HashSet<ByteSequence>> columnsQualifiers;
+  private final HashSet<ByteSequence> columnFamilies;
+  private final HashMap<ByteSequence,HashSet<ByteSequence>> columnsQualifiers;
 
   private ColumnQualifierFilter(SortedKeyValueIterator<Key,Value> iterator, Set<Column> columns) {
     super(iterator);
@@ -62,8 +62,9 @@ public class ColumnQualifierFilter extends ServerFilter {
 
   @Override
   public boolean accept(Key key, Value v) {
-    if (columnFamilies.contains(key.getColumnFamilyData()))
+    if (columnFamilies.contains(key.getColumnFamilyData())) {
       return true;
+    }
 
     HashSet<ByteSequence> cfset = columnsQualifiers.get(key.getColumnQualifierData());
     // ensure the column qualifier goes with a paired column family,

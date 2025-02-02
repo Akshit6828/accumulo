@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,12 +19,15 @@
 package org.apache.accumulo.manager.tableOps.tableImport;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.accumulo.core.Constants.IMPORT_MAPPINGS_FILE;
+import static org.apache.accumulo.manager.tableOps.tableExport.ExportTable.VERSION_2;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.zip.ZipEntry;
@@ -32,23 +35,28 @@ import java.util.zip.ZipInputStream;
 
 import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.client.BatchWriter;
+import org.apache.accumulo.core.client.admin.TabletAvailability;
 import org.apache.accumulo.core.clientImpl.AcceptableThriftTableOperationException;
+import org.apache.accumulo.core.clientImpl.TabletAvailabilityUtil;
 import org.apache.accumulo.core.clientImpl.thrift.TableOperation;
 import org.apache.accumulo.core.clientImpl.thrift.TableOperationExceptionType;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.Repo;
+import org.apache.accumulo.core.metadata.AccumuloTable;
+import org.apache.accumulo.core.metadata.StoredTabletFile;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.DataFileColumnFamily;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.ServerColumnFamily;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.TabletColumnFamily;
 import org.apache.accumulo.core.util.FastFormat;
-import org.apache.accumulo.fate.Repo;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tableOps.ManagerRepo;
 import org.apache.accumulo.server.fs.VolumeManager;
 import org.apache.accumulo.server.util.MetadataTableUtil;
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
 import org.slf4j.Logger;
@@ -67,8 +75,9 @@ class PopulateMetadataTable extends ManagerRepo {
 
   static void readMappingFile(VolumeManager fs, ImportedTableInfo tableInfo, String importDir,
       Map<String,String> fileNameMappings) throws Exception {
-    try (BufferedReader in = new BufferedReader(
-        new InputStreamReader(fs.open(new Path(importDir, "mappings.txt")), UTF_8))) {
+    try (var fsDis = fs.open(new Path(importDir, IMPORT_MAPPINGS_FILE));
+        var isr = new InputStreamReader(fsDis, UTF_8);
+        BufferedReader in = new BufferedReader(isr)) {
       String line, prev;
       while ((line = in.readLine()) != null) {
         String[] sa = line.split(":", 2);
@@ -86,14 +95,17 @@ class PopulateMetadataTable extends ManagerRepo {
   }
 
   @Override
-  public Repo<Manager> call(long tid, Manager manager) throws Exception {
+  public Repo<Manager> call(FateId fateId, Manager manager) throws Exception {
 
     Path path = new Path(tableInfo.exportFile);
 
     VolumeManager fs = manager.getVolumeManager();
 
-    try (BatchWriter mbw = manager.getContext().createBatchWriter(MetadataTable.NAME);
-        ZipInputStream zis = new ZipInputStream(fs.open(path))) {
+    try (
+        BatchWriter mbw =
+            manager.getContext().createBatchWriter(AccumuloTable.METADATA.tableName());
+        FSDataInputStream fsDataInputStream = fs.open(path);
+        ZipInputStream zis = new ZipInputStream(fsDataInputStream)) {
 
       Map<String,String> fileNameMappings = new HashMap<>();
       for (ImportedTableInfo.DirectoryMapping dm : tableInfo.directories) {
@@ -105,8 +117,11 @@ class PopulateMetadataTable extends ManagerRepo {
 
       ZipEntry zipEntry;
       while ((zipEntry = zis.getNextEntry()) != null) {
-        if (zipEntry.getName().equals(Constants.EXPORT_METADATA_FILE)) {
-          DataInputStream in = new DataInputStream(new BufferedInputStream(zis));
+        if (!zipEntry.getName().equals(Constants.EXPORT_METADATA_FILE)) {
+          continue;
+        }
+        try (BufferedInputStream bufferedInputStream = new BufferedInputStream(zis);
+            DataInputStream in = new DataInputStream(bufferedInputStream)) {
 
           Key key = new Key();
           Value val = new Value();
@@ -125,7 +140,17 @@ class PopulateMetadataTable extends ManagerRepo {
             Text cq;
 
             if (key.getColumnFamily().equals(DataFileColumnFamily.NAME)) {
-              String oldName = new Path(key.getColumnQualifier().toString()).getName();
+              StoredTabletFile exportedRef;
+              var dataFileCQ = key.getColumnQualifier().toString();
+              if (tableInfo.exportedVersion == null || tableInfo.exportedVersion < VERSION_2) {
+                // written without fenced range information (accumulo < 3.1), use default
+                // (null,null)
+                exportedRef = StoredTabletFile.of(new Path(dataFileCQ));
+              } else {
+                exportedRef = StoredTabletFile.of(key.getColumnQualifier());
+              }
+
+              String oldName = exportedRef.getFileName();
               String newName = fileNameMappings.get(oldName);
 
               if (newName == null) {
@@ -134,7 +159,9 @@ class PopulateMetadataTable extends ManagerRepo {
                     "File " + oldName + " does not exist in import dir");
               }
 
-              cq = new Text(newName);
+              // Copy over the range for the new file
+              cq = StoredTabletFile.of(URI.create(newName), exportedRef.getRange())
+                  .getMetadataText();
             } else {
               cq = key.getColumnQualifier();
             }
@@ -142,6 +169,9 @@ class PopulateMetadataTable extends ManagerRepo {
             if (m == null || !currentRow.equals(metadataRow)) {
 
               if (m != null) {
+                // add a default tablet availability
+                TabletColumnFamily.AVAILABILITY_COLUMN.put(m,
+                    TabletAvailabilityUtil.toValue(TabletAvailability.ONDEMAND));
                 mbw.addMutation(m);
               }
 
@@ -159,8 +189,13 @@ class PopulateMetadataTable extends ManagerRepo {
             m.put(key.getColumnFamily(), cq, val);
 
             if (endRow == null && TabletColumnFamily.PREV_ROW_COLUMN.hasColumns(key)) {
+
+              // add a default tablet availability
+              TabletColumnFamily.AVAILABILITY_COLUMN.put(m,
+                  TabletAvailabilityUtil.toValue(TabletAvailability.ONDEMAND));
+
               mbw.addMutation(m);
-              break; // its the last column in the last row
+              break; // it is the last column in the last row
             }
           }
           break;
@@ -177,7 +212,7 @@ class PopulateMetadataTable extends ManagerRepo {
   }
 
   @Override
-  public void undo(long tid, Manager environment) throws Exception {
+  public void undo(FateId fateId, Manager environment) throws Exception {
     MetadataTableUtil.deleteTable(tableInfo.tableId, false, environment.getContext(),
         environment.getManagerLock());
   }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,7 +20,8 @@ package org.apache.accumulo.manager.tableOps.tableExport;
 
 import org.apache.accumulo.core.data.NamespaceId;
 import org.apache.accumulo.core.data.TableId;
-import org.apache.accumulo.fate.Repo;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.Repo;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tableOps.ManagerRepo;
 import org.apache.accumulo.manager.tableOps.Utils;
@@ -40,21 +41,30 @@ public class ExportTable extends ManagerRepo {
   }
 
   @Override
-  public long isReady(long tid, Manager environment) throws Exception {
-    return Utils.reserveHdfsDirectory(environment, new Path(tableInfo.exportDir).toString(), tid);
+  public long isReady(FateId fateId, Manager environment) throws Exception {
+    return Utils.reserveHdfsDirectory(environment, new Path(tableInfo.exportDir).toString(),
+        fateId);
   }
 
   @Override
-  public Repo<Manager> call(long tid, Manager env) {
+  public Repo<Manager> call(FateId fateId, Manager env) {
     return new WriteExportFiles(tableInfo);
   }
 
   @Override
-  public void undo(long tid, Manager env) throws Exception {
-    Utils.unreserveHdfsDirectory(env, new Path(tableInfo.exportDir).toString(), tid);
+  public void undo(FateId fateId, Manager env) throws Exception {
+    Utils.unreserveHdfsDirectory(env, new Path(tableInfo.exportDir).toString(), fateId);
   }
 
-  public static final int VERSION = 1;
+  /**
+   * Defines export / version.
+   * <ul>
+   * <li>version 1 exported by Accumulo &lt; 3.1</li>
+   * <li>version 2 exported by Accumulo =&gt; 3.1 - uses file references with ranges.</li>
+   * </ul>
+   */
+  public static final int VERSION_2 = 2;
+  public static final int CURR_VERSION = VERSION_2;
 
   public static final String DATA_VERSION_PROP = "srcDataVersion";
   public static final String EXPORT_VERSION_PROP = "exportVersion";

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -125,10 +125,6 @@ struct TCMResult {
   2:TCMStatus status
 }
 
-struct MapFileInfo {
-  1:i64 estimatedSize
-}
-
 struct TCondition {
   1:binary cf
   2:binary cq
@@ -188,6 +184,4 @@ struct TSummaryRequest {
 typedef map<TKeyExtent, list<TConditionalMutation>> CMBatch
 
 typedef map<TKeyExtent, list<TMutation>> UpdateBatch
-
-typedef map<TKeyExtent, map<string, MapFileInfo>> TabletFiles
 

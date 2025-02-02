@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -21,11 +21,13 @@ package org.apache.accumulo.core.clientImpl;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.admin.ActiveScan;
 import org.apache.accumulo.core.client.admin.ScanState;
 import org.apache.accumulo.core.client.admin.ScanType;
+import org.apache.accumulo.core.client.admin.servers.ServerId;
 import org.apache.accumulo.core.data.Column;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.TabletId;
@@ -42,29 +44,30 @@ import org.apache.accumulo.core.security.Authorizations;
  */
 public class ActiveScanImpl extends ActiveScan {
 
-  private long scanId;
-  private String client;
-  private String tableName;
-  private long age;
-  private long idle;
-  private ScanType type;
-  private ScanState state;
-  private KeyExtent extent;
-  private List<Column> columns;
-  private List<String> ssiList;
-  private Map<String,Map<String,String>> ssio;
-  private String user;
-  private Authorizations authorizations;
+  private final long scanId;
+  private final String client;
+  private final String tableName;
+  private final long age;
+  private final long idle;
+  private final ScanType type;
+  private final ScanState state;
+  private final KeyExtent extent;
+  private final List<Column> columns;
+  private final List<String> ssiList;
+  private final Map<String,Map<String,String>> ssio;
+  private final String user;
+  private final Authorizations authorizations;
+  private final ServerId server;
 
   ActiveScanImpl(ClientContext context,
-      org.apache.accumulo.core.tabletserver.thrift.ActiveScan activeScan)
+      org.apache.accumulo.core.tabletscan.thrift.ActiveScan activeScan, ServerId server)
       throws TableNotFoundException {
     this.scanId = activeScan.scanId;
     this.client = activeScan.client;
     this.user = activeScan.user;
     this.age = activeScan.age;
     this.idle = activeScan.idleTime;
-    this.tableName = Tables.getTableName(context, TableId.of(activeScan.tableId));
+    this.tableName = context.getTableName(TableId.of(activeScan.tableId));
     this.type = ScanType.valueOf(activeScan.getType().name());
     this.state = ScanState.valueOf(activeScan.state.name());
     this.extent = KeyExtent.fromThrift(activeScan.extent);
@@ -72,14 +75,16 @@ public class ActiveScanImpl extends ActiveScan {
 
     this.columns = new ArrayList<>(activeScan.columns.size());
 
-    for (TColumn tcolumn : activeScan.columns)
+    for (TColumn tcolumn : activeScan.columns) {
       this.columns.add(new Column(tcolumn));
+    }
 
     this.ssiList = new ArrayList<>();
     for (IterInfo ii : activeScan.ssiList) {
       this.ssiList.add(ii.iterName + "=" + ii.priority + "," + ii.className);
     }
     this.ssio = activeScan.ssio;
+    this.server = Objects.requireNonNull(server);
   }
 
   @Override
@@ -150,5 +155,10 @@ public class ActiveScanImpl extends ActiveScan {
   @Override
   public long getIdleTime() {
     return idle;
+  }
+
+  @Override
+  public ServerId getServerId() {
+    return server;
   }
 }

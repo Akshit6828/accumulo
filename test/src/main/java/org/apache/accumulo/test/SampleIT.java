@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,19 +18,22 @@
  */
 package org.apache.accumulo.test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.apache.accumulo.test.util.FileMetadataUtil.countFiles;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
@@ -52,6 +55,7 @@ import org.apache.accumulo.core.client.sample.RowSampler;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.clientImpl.ClientContext;
 import org.apache.accumulo.core.clientImpl.OfflineScanner;
+import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
@@ -63,7 +67,9 @@ import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.iterators.WrappingIterator;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.harness.AccumuloClusterHarness;
-import org.junit.Test;
+import org.apache.accumulo.test.util.FileMetadataUtil;
+import org.apache.hadoop.io.Text;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.Iterables;
 
@@ -121,13 +127,74 @@ public class SampleIT extends AccumuloClusterHarness {
   }
 
   @Test
-  public void testBasic() throws Exception {
+  public void testSampleFencing() throws Exception {
 
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
       String tableName = getUniqueNames(1)[0];
       String clone = tableName + "_clone";
 
-      client.tableOperations().create(tableName, new NewTableConfiguration().enableSampling(SC1));
+      createTable(client, tableName, new NewTableConfiguration().enableSampling(SC1));
+
+      BatchWriter bw = client.createBatchWriter(tableName);
+
+      TreeMap<Key,Value> expected = new TreeMap<>();
+      writeData(bw, SC1, expected);
+      assertEquals(20, expected.size());
+
+      Scanner scanner = client.createScanner(tableName, Authorizations.EMPTY);
+      Scanner isoScanner =
+          new IsolatedScanner(client.createScanner(tableName, Authorizations.EMPTY));
+      Scanner csiScanner =
+          new ClientSideIteratorScanner(client.createScanner(tableName, Authorizations.EMPTY));
+      scanner.setSamplerConfiguration(SC1);
+      csiScanner.setSamplerConfiguration(SC1);
+      isoScanner.setSamplerConfiguration(SC1);
+      isoScanner.setBatchSize(10);
+
+      try (BatchScanner bScanner = client.createBatchScanner(tableName)) {
+        bScanner.setSamplerConfiguration(SC1);
+        bScanner.setRanges(Arrays.asList(new Range()));
+
+        check(expected, scanner, bScanner, isoScanner, csiScanner);
+
+        client.tableOperations().flush(tableName, null, null, true);
+
+        // Fence off the data to a Range that is a subset of the original data
+        Range fenced = new Range(new Text(String.format("r_%06d", 2999)), false,
+            new Text(String.format("r_%06d", 6000)), true);
+        FileMetadataUtil.splitFilesIntoRanges(getServerContext(), tableName, Set.of(fenced));
+        assertEquals(1, countFiles(getServerContext(), tableName));
+
+        // Build the map of expected values to be seen by filtering out keys not in the fenced range
+        TreeMap<Key,Value> fenceExpected =
+            expected.entrySet().stream().filter(entry -> fenced.contains(entry.getKey())).collect(
+                Collectors.toMap(Entry::getKey, Entry::getValue, (v1, v2) -> v1, TreeMap::new));
+
+        Scanner oScanner = newOfflineScanner(client, tableName, clone, SC1);
+
+        // verify only the correct values in the fenced range are seen
+        check(fenceExpected, scanner, bScanner, isoScanner, csiScanner, oScanner);
+      }
+    }
+  }
+
+  @Test
+  public void testBasic() throws Exception {
+    testBasic(Set.of());
+  }
+
+  @Test
+  public void testBasicWithFencedFiles() throws Exception {
+    testBasic(createRanges());
+  }
+
+  private void testBasic(Set<Range> fileRanges) throws Exception {
+
+    try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
+      String tableName = getUniqueNames(1)[0];
+      String clone = tableName + "_clone";
+
+      createTable(client, tableName, new NewTableConfiguration().enableSampling(SC1));
 
       BatchWriter bw = client.createBatchWriter(tableName);
 
@@ -152,6 +219,12 @@ public class SampleIT extends AccumuloClusterHarness {
         check(expected, scanner, bScanner, isoScanner, csiScanner);
 
         client.tableOperations().flush(tableName, null, null, true);
+
+        // Split files into ranged files if provided
+        if (!fileRanges.isEmpty()) {
+          FileMetadataUtil.splitFilesIntoRanges(getServerContext(), tableName, fileRanges);
+          assertEquals(fileRanges.size(), countFiles(getServerContext(), tableName));
+        }
 
         Scanner oScanner = newOfflineScanner(client, tableName, clone, SC1);
         check(expected, scanner, bScanner, isoScanner, csiScanner, oScanner);
@@ -293,11 +366,20 @@ public class SampleIT extends AccumuloClusterHarness {
 
   @Test
   public void testIterator() throws Exception {
+    testIterator(Set.of());
+  }
+
+  @Test
+  public void testIteratorFencedFiles() throws Exception {
+    testIterator(createRanges());
+  }
+
+  private void testIterator(Set<Range> fileRanges) throws Exception {
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
       String tableName = getUniqueNames(1)[0];
       String clone = tableName + "_clone";
 
-      client.tableOperations().create(tableName, new NewTableConfiguration().enableSampling(SC1));
+      createTable(client, tableName, new NewTableConfiguration().enableSampling(SC1));
 
       TreeMap<Key,Value> expected = new TreeMap<>();
       try (BatchWriter bw = client.createBatchWriter(tableName)) {
@@ -346,6 +428,12 @@ public class SampleIT extends AccumuloClusterHarness {
         // flush an rerun same test against files
         client.tableOperations().flush(tableName, null, null, true);
 
+        // Split files into ranged files if provided
+        if (!fileRanges.isEmpty()) {
+          FileMetadataUtil.splitFilesIntoRanges(getServerContext(), tableName, fileRanges);
+          assertEquals(fileRanges.size(), countFiles(getServerContext(), tableName));
+        }
+
         oScanner = newOfflineScanner(client, tableName, clone, null);
         oScanner.addScanIterator(new IteratorSetting(100, IteratorThatUsesSample.class));
         scanners = Arrays.asList(scanner, isoScanner, bScanner, csiScanner, oScanner);
@@ -369,13 +457,9 @@ public class SampleIT extends AccumuloClusterHarness {
         scanners = Arrays.asList(scanner, isoScanner, bScanner, csiScanner, oScanner);
 
         for (ScannerBase s : scanners) {
-          try {
-            countEntries(s);
-            fail("Expected SampleNotPresentException, but it did not happen : "
-                + s.getClass().getSimpleName());
-          } catch (SampleNotPresentException e) {
-
-          }
+          assertThrows(SampleNotPresentException.class, () -> countEntries(s),
+              "Expected SampleNotPresentException, but it did not happen : "
+                  + s.getClass().getSimpleName());
         }
       } finally {
         if (scanner != null) {
@@ -405,12 +489,21 @@ public class SampleIT extends AccumuloClusterHarness {
 
   @Test
   public void testSampleNotPresent() throws Exception {
+    testSampleNotPresent(Set.of());
+  }
+
+  @Test
+  public void testSampleNotPresentFencedFiles() throws Exception {
+    testSampleNotPresent(createRanges());
+  }
+
+  private void testSampleNotPresent(Set<Range> fileRanges) throws Exception {
 
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
       String tableName = getUniqueNames(1)[0];
       String clone = tableName + "_clone";
 
-      client.tableOperations().create(tableName);
+      createTable(client, tableName, new NewTableConfiguration());
 
       TreeMap<Key,Value> expected = new TreeMap<>();
       try (BatchWriter bw = client.createBatchWriter(tableName)) {
@@ -429,12 +522,17 @@ public class SampleIT extends AccumuloClusterHarness {
 
         client.tableOperations().flush(tableName, null, null, true);
 
+        // Split files into ranged files if provided
+        if (!fileRanges.isEmpty()) {
+          FileMetadataUtil.splitFilesIntoRanges(getServerContext(), tableName, fileRanges);
+          assertEquals(fileRanges.size(), countFiles(getServerContext(), tableName));
+        }
+
         Scanner oScanner = newOfflineScanner(client, tableName, clone, SC1);
         assertSampleNotPresent(SC1, scanner, isoScanner, bScanner, csiScanner, oScanner);
 
         // configure sampling, however there exist an rfile w/o sample data... so should still see
         // sample not present exception
-
         updateSamplingConfig(client, tableName, SC1);
 
         // create clone with new config
@@ -487,20 +585,12 @@ public class SampleIT extends AccumuloClusterHarness {
 
       scanner.setSamplerConfiguration(sc);
 
-      try {
-        for (Entry<Key,Value> entry : scanner) {
-          entry.getKey();
-        }
-        fail("Expected SampleNotPresentException, but it did not happen : "
-            + scanner.getClass().getSimpleName());
-      } catch (SampleNotPresentException e) {
-
-      }
+      final String message = "Expected SampleNotPresentException, but it did not happen : "
+          + scanner.getClass().getSimpleName();
+      assertThrows(SampleNotPresentException.class, () -> scanner.iterator().next(), message);
 
       scanner.clearSamplerConfiguration();
-      for (Entry<Key,Value> entry : scanner) {
-        entry.getKey();
-      }
+      scanner.forEach((k, v) -> {});
 
       if (csc == null) {
         scanner.clearSamplerConfiguration();
@@ -517,8 +607,34 @@ public class SampleIT extends AccumuloClusterHarness {
       for (Entry<Key,Value> entry : s) {
         actual.put(entry.getKey(), entry.getValue());
       }
-      assertEquals(String.format("Saw %d instead of %d entries using %s", actual.size(),
-          expected.size(), s.getClass().getSimpleName()), expected, actual);
+      assertEquals(expected, actual, String.format("Saw %d instead of %d entries using %s",
+          actual.size(), expected.size(), s.getClass().getSimpleName()));
     }
+  }
+
+  private Set<Range> createRanges() {
+    Set<Range> ranges = new HashSet<>();
+
+    int splits = 10;
+
+    for (int i = 0; i < splits; i++) {
+      Text start = i > 0 ? new Text(String.format("r_%06d", i * 1000)) : null;
+      Text end = i < splits - 1 ? new Text(String.format("r_%06d", (i + 1) * 1000)) : null;
+      ranges.add(new Range(start, false, end, true));
+    }
+
+    return ranges;
+  }
+
+  // Create a table and disable compactions. This is important to prevent intermittent
+  // failures when testing if sampling is configured or not. Some of the tests first
+  // assert sampling is not available, then configures sampling and tests it still isn't
+  // available before triggering a compaction to confirm it is now available. Intermittent
+  // GCs can make these tests non-deterministic when there are a lot of files created
+  // during the fencing tests.
+  private void createTable(AccumuloClient client, String tableName, NewTableConfiguration ntc)
+      throws Exception {
+    ntc.setProperties(Map.of(Property.TABLE_MAJC_RATIO.getKey(), "9999"));
+    client.tableOperations().create(tableName, ntc);
   }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -34,7 +34,7 @@ import org.apache.accumulo.core.client.IteratorSetting;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.security.tokens.AuthenticationToken;
 import org.apache.accumulo.core.clientImpl.ClientInfo;
-import org.apache.accumulo.core.clientImpl.TabletLocator;
+import org.apache.accumulo.core.clientImpl.ClientTabletCache;
 import org.apache.accumulo.core.data.ByteSequence;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
@@ -147,18 +147,24 @@ public class BatchWriterIterator extends WrappingIterator {
   private void parseOptions(Map<String,String> options) {
     this.originalOptions = new HashMap<>(options);
 
-    if (options.containsKey(OPT_numEntriesToWritePerEntry))
+    if (options.containsKey(OPT_numEntriesToWritePerEntry)) {
       numEntriesToWritePerEntry = Integer.parseInt(options.get(OPT_numEntriesToWritePerEntry));
-    if (options.containsKey(OPT_sleepAfterFirstWrite))
+    }
+    if (options.containsKey(OPT_sleepAfterFirstWrite)) {
       sleepAfterFirstWrite = Integer.parseInt(options.get(OPT_sleepAfterFirstWrite));
-    if (options.containsKey(OPT_batchWriterTimeout))
+    }
+    if (options.containsKey(OPT_batchWriterTimeout)) {
       batchWriterTimeout = Long.parseLong(options.get(OPT_batchWriterTimeout));
-    if (options.containsKey(OPT_batchWriterMaxMemory))
+    }
+    if (options.containsKey(OPT_batchWriterMaxMemory)) {
       batchWriterMaxMemory = Long.parseLong(options.get(OPT_batchWriterMaxMemory));
-    if (options.containsKey(OPT_clearCacheAfterFirstWrite))
+    }
+    if (options.containsKey(OPT_clearCacheAfterFirstWrite)) {
       clearCacheAfterFirstWrite = Boolean.parseBoolean(options.get(OPT_clearCacheAfterFirstWrite));
-    if (options.containsKey(OPT_splitAfterFirstWrite))
+    }
+    if (options.containsKey(OPT_splitAfterFirstWrite)) {
       splitAfterFirstWrite = Boolean.parseBoolean(options.get(OPT_splitAfterFirstWrite));
+    }
 
     instanceName = options.get(INSTANCENAME);
     tableName = options.get(TABLENAME);
@@ -210,17 +216,19 @@ public class BatchWriterIterator extends WrappingIterator {
 
         if (firstWrite) {
           batchWriter.flush();
-          if (clearCacheAfterFirstWrite)
-            TabletLocator.clearLocators();
+          if (clearCacheAfterFirstWrite) {
+            ClientTabletCache.clearInstances();
+          }
           if (splitAfterFirstWrite) {
             SortedSet<Text> splits = new TreeSet<>();
             splits.add(new Text(row));
             accumuloClient.tableOperations().addSplits(tableName, splits);
           }
-          if (sleepAfterFirstWrite > 0)
+          if (sleepAfterFirstWrite > 0) {
             try {
               Thread.sleep(sleepAfterFirstWrite);
             } catch (InterruptedException ignored) {}
+          }
           firstWrite = false;
         }
       }
@@ -237,16 +245,18 @@ public class BatchWriterIterator extends WrappingIterator {
   @Override
   public void next() throws IOException {
     super.next();
-    if (hasTop())
+    if (hasTop()) {
       processNext();
+    }
   }
 
   @Override
   public void seek(Range range, Collection<ByteSequence> columnFamilies, boolean inclusive)
       throws IOException {
     super.seek(range, columnFamilies, inclusive);
-    if (hasTop())
+    if (hasTop()) {
       processNext();
+    }
   }
 
   @Override

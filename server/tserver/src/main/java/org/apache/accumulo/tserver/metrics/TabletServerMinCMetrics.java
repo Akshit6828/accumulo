@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,28 +18,37 @@
  */
 package org.apache.accumulo.tserver.metrics;
 
-import org.apache.hadoop.metrics2.lib.MetricsRegistry;
-import org.apache.hadoop.metrics2.lib.MutableStat;
+import static org.apache.accumulo.core.metrics.Metric.MINC_QUEUED;
+import static org.apache.accumulo.core.metrics.Metric.MINC_RUNNING;
 
-public class TabletServerMinCMetrics extends TServerMetrics {
+import java.time.Duration;
 
-  private final MutableStat activeMinc;
-  private final MutableStat queuedMinc;
+import org.apache.accumulo.core.metrics.MetricsProducer;
+import org.apache.accumulo.server.metrics.NoopMetrics;
 
-  public TabletServerMinCMetrics() {
-    super("MinorCompactions");
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
-    MetricsRegistry registry = super.getRegistry();
-    activeMinc = registry.newStat("minc", "Minor compactions", "Ops", "Count", true);
-    queuedMinc = registry.newStat("queue", "Queued minor compactions", "Ops", "Count", true);
-  }
+public class TabletServerMinCMetrics implements MetricsProducer {
+
+  private Timer activeMinc = NoopMetrics.useNoopTimer();
+  private Timer queuedMinc = NoopMetrics.useNoopTimer();
 
   public void addActive(long value) {
-    activeMinc.add(value);
+    activeMinc.record(Duration.ofMillis(value));
   }
 
   public void addQueued(long value) {
-    queuedMinc.add(value);
+    queuedMinc.record(Duration.ofMillis(value));
+  }
+
+  @Override
+  public void registerMetrics(MeterRegistry registry) {
+    activeMinc = Timer.builder(MINC_RUNNING.getName()).description(MINC_RUNNING.getDescription())
+        .register(registry);
+
+    queuedMinc = Timer.builder(MINC_QUEUED.getName()).description(MINC_QUEUED.getDescription())
+        .register(registry);
   }
 
 }

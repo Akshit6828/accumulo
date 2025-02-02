@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -50,6 +50,7 @@ public class UpdateSession extends Session {
   public long flushTime = 0;
   public long queuedMutationSize = 0;
   public final Durability durability;
+  public Exception unhandledException = null;
 
   public UpdateSession(TservConstraintEnv env, TCredentials credentials, Durability durability) {
     super(credentials);

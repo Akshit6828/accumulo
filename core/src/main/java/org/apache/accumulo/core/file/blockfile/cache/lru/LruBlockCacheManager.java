@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -24,6 +24,7 @@ import org.apache.accumulo.core.spi.cache.CacheType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@Deprecated(since = "3.1.0")
 public class LruBlockCacheManager extends BlockCacheManager {
 
   private static final Logger LOG = LoggerFactory.getLogger(LruBlockCacheManager.class);
@@ -32,6 +33,7 @@ public class LruBlockCacheManager extends BlockCacheManager {
   protected BlockCache createCache(Configuration conf, CacheType type) {
     LruBlockCacheConfiguration cc = new LruBlockCacheConfiguration(conf, type);
     LOG.info("Creating {} cache with configuration {}", type, cc);
+    LOG.warn("This cache implementation is deprecated and will be remove in future releases.");
     return new LruBlockCache(cc);
   }
 

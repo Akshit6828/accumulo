@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,16 +20,15 @@ package org.apache.accumulo.core.util;
 
 import java.util.Base64;
 
-import org.apache.hadoop.io.Text;
-
 public class Encoding {
 
-  public static String encodeAsBase64FileName(Text data) {
-    String encodedRow = Base64.getUrlEncoder().encodeToString(TextUtil.getBytes(data));
+  public static String encodeAsBase64FileName(byte[] data) {
+    String encodedRow = Base64.getUrlEncoder().encodeToString(data);
 
     int index = encodedRow.length() - 1;
-    while (index >= 0 && encodedRow.charAt(index) == '=')
+    while (index >= 0 && encodedRow.charAt(index) == '=') {
       index--;
+    }
 
     encodedRow = encodedRow.substring(0, index + 1);
     return encodedRow;

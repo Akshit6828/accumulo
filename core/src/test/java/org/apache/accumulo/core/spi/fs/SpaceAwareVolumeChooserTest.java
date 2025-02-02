@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,20 +18,18 @@
  */
 package org.apache.accumulo.core.spi.fs;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import java.io.IOException;
 import java.util.Set;
 
 import org.apache.accumulo.core.spi.common.ServiceEnvironment;
 import org.apache.accumulo.core.spi.common.ServiceEnvironment.Configuration;
 import org.apache.accumulo.core.spi.fs.VolumeChooserEnvironment.Scope;
 import org.easymock.EasyMock;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
-import com.google.common.util.concurrent.UncheckedExecutionException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class SpaceAwareVolumeChooserTest {
 
@@ -53,7 +51,7 @@ public class SpaceAwareVolumeChooserTest {
   int vol1Count = 0;
   int vol2Count = 0;
 
-  @Before
+  @BeforeEach
   public void beforeTest() {
     serviceEnv = EasyMock.createMock(ServiceEnvironment.class);
     sysConfig = EasyMock.createMock(Configuration.class);
@@ -61,7 +59,7 @@ public class SpaceAwareVolumeChooserTest {
   }
 
   private void testSpecificSetup(long percentage1, long percentage2, String cacheDuration,
-      int timesToCallPreferredVolumeChooser, boolean anyTimes) throws IOException {
+      int timesToCallPreferredVolumeChooser, boolean anyTimes) {
     int max = iterations + 1;
     int min = 1;
     int updatePropertyMax = timesToCallPreferredVolumeChooser + iterations;
@@ -87,7 +85,7 @@ public class SpaceAwareVolumeChooserTest {
     EasyMock.replay(serviceEnv, sysConfig, chooserEnv);
   }
 
-  @After
+  @AfterEach
   public void afterTest() {
 
     EasyMock.verify(serviceEnv, sysConfig, chooserEnv);
@@ -98,81 +96,81 @@ public class SpaceAwareVolumeChooserTest {
   }
 
   @Test
-  public void testEvenWeightsWithCaching() throws IOException {
+  public void testEvenWeightsWithCaching() {
 
     testSpecificSetup(10L, 10L, null, iterations, false);
 
     makeChoices();
 
-    assertEquals(iterations / 2, vol1Count, iterations / 10);
-    assertEquals(iterations / 2, vol2Count, iterations / 10);
+    assertEquals(iterations / 2.0, vol1Count, iterations / 10.0);
+    assertEquals(iterations / 2.0, vol2Count, iterations / 10.0);
 
   }
 
   @Test
-  public void testEvenWeightsNoCaching() throws IOException {
+  public void testEvenWeightsNoCaching() {
 
     testSpecificSetup(10L, 10L, "0", iterations, true);
 
     makeChoices();
 
-    assertEquals(iterations / 2, vol1Count, iterations / 10);
-    assertEquals(iterations / 2, vol2Count, iterations / 10);
+    assertEquals(iterations / 2.0, vol1Count, iterations / 10.0);
+    assertEquals(iterations / 2.0, vol2Count, iterations / 10.0);
 
-  }
-
-  @Test(expected = UncheckedExecutionException.class)
-  public void testNoFreeSpace() throws IOException {
-
-    testSpecificSetup(0L, 0L, null, 1, false);
-
-    makeChoices();
   }
 
   @Test
-  public void testNinetyTen() throws IOException {
+  public void testNoFreeSpace() {
+    testSpecificSetup(0L, 0L, null, 1, false);
+    assertThrows(IllegalStateException.class, this::makeChoices);
+  }
+
+  @Test
+  public void testNinetyTen() {
 
     testSpecificSetup(90L, 10L, null, iterations, false);
 
     makeChoices();
 
-    assertEquals(iterations * .9, vol1Count, iterations / 10);
-    assertEquals(iterations * .1, vol2Count, iterations / 10);
+    assertEquals(iterations * .9, vol1Count, iterations / 10.0);
+    assertEquals(iterations * .1, vol2Count, iterations / 10.0);
 
   }
 
   @Test
-  public void testTenNinety() throws IOException {
+  public void testTenNinety() {
 
     testSpecificSetup(10L, 90L, null, iterations, false);
 
     makeChoices();
 
-    assertEquals(iterations * .1, vol1Count, iterations / 10);
-    assertEquals(iterations * .9, vol2Count, iterations / 10);
+    assertEquals(iterations * .1, vol1Count, iterations / 10.0);
+    assertEquals(iterations * .9, vol2Count, iterations / 10.0);
 
   }
 
   @Test
-  public void testWithNoCaching() throws IOException {
+  public void testWithNoCaching() {
 
     testSpecificSetup(10L, 90L, "0", iterations, true);
 
     makeChoices();
 
-    assertEquals(iterations * .1, vol1Count, iterations / 10);
-    assertEquals(iterations * .9, vol2Count, iterations / 10);
+    assertEquals(iterations * .1, vol1Count, iterations / 10.0);
+    assertEquals(iterations * .9, vol2Count, iterations / 10.0);
 
   }
 
   private void makeChoices() {
     SpaceAwareVolumeChooser chooser = new SpaceAwareVolumeChooser() {
       @Override
-      protected double getFreeSpace(String uri) throws IOException {
-        if (uri.equals(volumeOne))
+      protected double getFreeSpace(String uri) {
+        if (uri.equals(volumeOne)) {
           return free1;
-        if (uri.equals(volumeTwo))
+        }
+        if (uri.equals(volumeTwo)) {
           return free2;
+        }
         throw new IllegalArgumentException();
       }
     };

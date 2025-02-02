@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
@@ -54,10 +55,8 @@ public interface AuthenticationToken extends Writable, Destroyable, Cloneable {
      * The specified tokenType will be instantiated, and used to deserialize the decoded bytes. The
      * resulting object will then be returned to the caller.
      *
-     * @param tokenType
-     *          the token class to use to deserialize the bytes
-     * @param tokenBytes
-     *          the token-specific serialized bytes
+     * @param tokenType the token class to use to deserialize the bytes
+     * @param tokenBytes the token-specific serialized bytes
      * @return an {@link AuthenticationToken} instance of the type specified by tokenType
      * @see #serialize(AuthenticationToken)
      */
@@ -89,21 +88,17 @@ public interface AuthenticationToken extends Writable, Destroyable, Cloneable {
      * An alternate version of {@link #deserialize(Class, byte[])} that accepts a token class name
      * rather than a token class.
      *
-     * @param tokenClassName
-     *          the fully-qualified class name to be returned
+     * @param tokenClassName the fully-qualified class name to be returned
      * @see #serialize(AuthenticationToken)
      */
     public static AuthenticationToken deserialize(String tokenClassName, byte[] tokenBytes) {
-      Class<? extends AuthenticationToken> tokenType = null;
       try {
         @SuppressWarnings("unchecked")
-        Class<? extends AuthenticationToken> tmpTokenType =
-            (Class<? extends AuthenticationToken>) Class.forName(tokenClassName);
-        tokenType = tmpTokenType;
+        var tokenType = (Class<? extends AuthenticationToken>) Class.forName(tokenClassName);
+        return deserialize(tokenType, tokenBytes);
       } catch (ClassNotFoundException e) {
         throw new IllegalArgumentException("Class not available " + tokenClassName, e);
       }
-      return deserialize(tokenType, tokenBytes);
     }
 
     /**
@@ -112,44 +107,37 @@ public interface AuthenticationToken extends Writable, Destroyable, Cloneable {
      * The provided {@link AuthenticationToken} will be serialized to bytes by its own
      * implementation and returned to the caller.
      *
-     * @param token
-     *          the token to serialize
+     * @param token the token to serialize
      * @return a serialized representation of the provided {@link AuthenticationToken}
      * @see #deserialize(Class, byte[])
      */
     public static byte[] serialize(AuthenticationToken token) {
-      ByteArrayOutputStream baos = new ByteArrayOutputStream();
-      DataOutputStream out = new DataOutputStream(baos);
-      try {
+      try (var baos = new ByteArrayOutputStream(); var out = new DataOutputStream(baos)) {
         token.write(out);
+        return baos.toByteArray();
       } catch (IOException e) {
-        throw new RuntimeException("Bug found in serialization code", e);
+        throw new UncheckedIOException("Bug found in serialization code", e);
       }
-      byte[] bytes = baos.toByteArray();
-      try {
-        out.close();
-      } catch (IOException e) {
-        throw new IllegalStateException("Shouldn't happen with ByteArrayOutputStream", e);
-      }
-      return bytes;
     }
   }
 
   class Properties implements Destroyable, Map<String,char[]> {
 
     private boolean destroyed = false;
-    private HashMap<String,char[]> map = new HashMap<>();
+    private final HashMap<String,char[]> map = new HashMap<>();
 
     private void checkDestroyed() {
-      if (destroyed)
+      if (destroyed) {
         throw new IllegalStateException();
+      }
     }
 
     public char[] put(String key, CharSequence value) {
       checkDestroyed();
       char[] toPut = new char[value.length()];
-      for (int i = 0; i < value.length(); i++)
+      for (int i = 0; i < value.length(); i++) {
         toPut[i] = value.charAt(i);
+      }
       return map.put(key, toPut);
     }
 
@@ -253,8 +241,9 @@ public interface AuthenticationToken extends Writable, Destroyable, Cloneable {
   }
 
   class TokenProperty implements Comparable<TokenProperty> {
-    private String key, description;
-    private boolean masked;
+    private final String key;
+    private final String description;
+    private final boolean masked;
 
     public TokenProperty(String name, String description, boolean mask) {
       this.key = name;
@@ -286,8 +275,9 @@ public interface AuthenticationToken extends Writable, Destroyable, Cloneable {
 
     @Override
     public boolean equals(Object o) {
-      if (o instanceof TokenProperty)
+      if (o instanceof TokenProperty) {
         return ((TokenProperty) o).key.equals(key);
+      }
       return false;
     }
 

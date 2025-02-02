@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -36,10 +36,8 @@ import java.util.TreeMap;
 
 import org.apache.accumulo.core.crypto.CryptoEnvironmentImpl;
 import org.apache.accumulo.core.crypto.CryptoUtils;
-import org.apache.accumulo.core.file.rfile.bcfile.Compression.Algorithm;
 import org.apache.accumulo.core.file.rfile.bcfile.Utils.Version;
 import org.apache.accumulo.core.file.streams.BoundedRangeFileInputStream;
-import org.apache.accumulo.core.file.streams.RateLimitedOutputStream;
 import org.apache.accumulo.core.file.streams.SeekableDataInputStream;
 import org.apache.accumulo.core.spi.crypto.CryptoEnvironment;
 import org.apache.accumulo.core.spi.crypto.CryptoEnvironment.Scope;
@@ -48,7 +46,6 @@ import org.apache.accumulo.core.spi.crypto.FileDecrypter;
 import org.apache.accumulo.core.spi.crypto.FileEncrypter;
 import org.apache.accumulo.core.spi.crypto.NoFileDecrypter;
 import org.apache.accumulo.core.spi.crypto.NoFileEncrypter;
-import org.apache.accumulo.core.util.ratelimit.RateLimiter;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -105,7 +102,7 @@ public final class BCFile {
    * BCFile writer, the entry point for creating a new BCFile.
    */
   public static class Writer implements Closeable {
-    private final RateLimitedOutputStream out;
+    private final FSDataOutputStream out;
     private final Configuration conf;
     private FileEncrypter encrypter;
     private CryptoEnvironmentImpl cryptoEnvironment;
@@ -129,21 +126,21 @@ public final class BCFile {
      * Intermediate class that maintain the state of a Writable Compression Block.
      */
     private static final class WBlockState {
-      private final Algorithm compressAlgo;
+      private final CompressionAlgorithm compressAlgo;
       private Compressor compressor; // !null only if using native
       // Hadoop compression
-      private final RateLimitedOutputStream fsOut;
+      private final FSDataOutputStream fsOut;
       private final OutputStream cipherOut;
       private final long posStart;
       private final SimpleBufferedOutputStream fsBufferedOutput;
       private OutputStream out;
 
-      public WBlockState(Algorithm compressionAlgo, RateLimitedOutputStream fsOut,
+      public WBlockState(CompressionAlgorithm compressionAlgo, FSDataOutputStream fsOut,
           BytesWritable fsOutputBuffer, Configuration conf, FileEncrypter encrypter)
           throws IOException {
         this.compressAlgo = compressionAlgo;
         this.fsOut = fsOut;
-        this.posStart = fsOut.position();
+        this.posStart = fsOut.getPos();
 
         fsOutputBuffer.setCapacity(getFSOutputBufferSize(conf));
 
@@ -175,7 +172,7 @@ public final class BCFile {
        * @return The current byte offset in underlying file.
        */
       long getCurrentPos() {
-        return fsOut.position() + fsBufferedOutput.size();
+        return fsOut.getPos() + fsBufferedOutput.size();
       }
 
       long getStartPos() {
@@ -230,10 +227,8 @@ public final class BCFile {
       /**
        * Constructor
        *
-       * @param metaBlockRegister
-       *          the block register, which is called when the block is closed.
-       * @param wbs
-       *          The writable compression block state.
+       * @param metaBlockRegister the block register, which is called when the block is closed.
+       * @param wbs The writable compression block state.
        */
       BlockAppender(MetaBlockRegister metaBlockRegister, WBlockState wbs) {
         super(wbs.getOutputStream());
@@ -294,9 +289,10 @@ public final class BCFile {
         try {
           ++errorCount;
           wBlkState.finish();
-          if (metaBlockRegister != null)
+          if (metaBlockRegister != null) {
             metaBlockRegister.register(getRawSize(), wBlkState.getStartPos(),
                 wBlkState.getCurrentPos());
+          }
           --errorCount;
         } finally {
           closed = true;
@@ -308,25 +304,24 @@ public final class BCFile {
     /**
      * Constructor
      *
-     * @param fout
-     *          FS output stream.
-     * @param compressionName
-     *          Name of the compression algorithm, which will be used for all data blocks.
+     * @param fout FS output stream.
+     * @param compressionName Name of the compression algorithm, which will be used for all data
+     *        blocks.
      * @see Compression#getSupportedAlgorithms
      */
-    public Writer(FSDataOutputStream fout, RateLimiter writeLimiter, String compressionName,
-        Configuration conf, CryptoService cryptoService) throws IOException {
+    public Writer(FSDataOutputStream fout, String compressionName, Configuration conf,
+        CryptoService cryptoService) throws IOException {
       if (fout.getPos() != 0) {
         throw new IOException("Output file not at zero offset.");
       }
 
-      this.out = new RateLimitedOutputStream(fout, writeLimiter);
+      this.out = fout;
       this.conf = conf;
       dataIndex = new DataIndex(compressionName);
       metaIndex = new MetaIndex();
       fsOutputBuffer = new BytesWritable();
       Magic.write(this.out);
-      this.cryptoEnvironment = new CryptoEnvironmentImpl(Scope.RFILE, null);
+      this.cryptoEnvironment = new CryptoEnvironmentImpl(Scope.TABLE, null, null);
       this.encrypter = cryptoService.getFileEncrypter(this.cryptoEnvironment);
     }
 
@@ -352,10 +347,10 @@ public final class BCFile {
             dataIndex.write(appender);
           }
 
-          long offsetIndexMeta = out.position();
+          long offsetIndexMeta = out.getPos();
           metaIndex.write(out);
 
-          long offsetCryptoParameter = out.position();
+          long offsetCryptoParameter = out.getPos();
           byte[] cryptoParams = this.encrypter.getDecryptionParameters();
           out.writeInt(cryptoParams.length);
           out.write(cryptoParams);
@@ -365,7 +360,7 @@ public final class BCFile {
           API_VERSION_3.write(out);
           Magic.write(out);
           out.flush();
-          length = out.position();
+          length = out.getPos();
           out.close();
         }
       } finally {
@@ -373,11 +368,11 @@ public final class BCFile {
       }
     }
 
-    private Algorithm getDefaultCompressionAlgorithm() {
+    private CompressionAlgorithm getDefaultCompressionAlgorithm() {
       return dataIndex.getDefaultCompressionAlgorithm();
     }
 
-    private BlockAppender prepareMetaBlock(String name, Algorithm compressAlgo)
+    private BlockAppender prepareMetaBlock(String name, CompressionAlgorithm compressAlgo)
         throws IOException, MetaBlockAlreadyExists {
       if (blkInProgress) {
         throw new IllegalStateException("Cannot create Meta Block until previous block is closed.");
@@ -401,11 +396,9 @@ public final class BCFile {
      * be one BlockAppender stream active at any time. Regular Blocks may not be created after the
      * first Meta Blocks. The caller must call BlockAppender.close() to conclude the block creation.
      *
-     * @param name
-     *          The name of the Meta Block. The name must not conflict with existing Meta Blocks.
+     * @param name The name of the Meta Block. The name must not conflict with existing Meta Blocks.
      * @return The BlockAppender stream
-     * @throws MetaBlockAlreadyExists
-     *           If the meta block with the name already exists.
+     * @throws MetaBlockAlreadyExists If the meta block with the name already exists.
      */
     public BlockAppender prepareMetaBlock(String name) throws IOException, MetaBlockAlreadyExists {
       return prepareMetaBlock(name, getDefaultCompressionAlgorithm());
@@ -439,9 +432,9 @@ public final class BCFile {
      */
     private class MetaBlockRegister {
       private final String name;
-      private final Algorithm compressAlgo;
+      private final CompressionAlgorithm compressAlgo;
 
-      MetaBlockRegister(String name, Algorithm compressAlgo) {
+      MetaBlockRegister(String name, CompressionAlgorithm compressAlgo) {
         this.name = name;
         this.compressAlgo = compressAlgo;
       }
@@ -470,15 +463,15 @@ public final class BCFile {
      * Intermediate class that maintain the state of a Readable Compression Block.
      */
     private static final class RBlockState {
-      private final Algorithm compressAlgo;
+      private final CompressionAlgorithm compressAlgo;
       private Decompressor decompressor;
       private final BlockRegion region;
       private final InputStream in;
       private volatile boolean closed;
 
-      public <InputStreamType extends InputStream & Seekable> RBlockState(Algorithm compressionAlgo,
-          InputStreamType fsin, BlockRegion region, Configuration conf, FileDecrypter decrypter)
-          throws IOException {
+      public <InputStreamType extends InputStream & Seekable> RBlockState(
+          CompressionAlgorithm compressionAlgo, InputStreamType fsin, BlockRegion region,
+          Configuration conf, FileDecrypter decrypter) throws IOException {
         this.compressAlgo = compressionAlgo;
         this.region = region;
         this.decompressor = compressionAlgo.getDecompressor();
@@ -610,7 +603,7 @@ public final class BCFile {
       // Do a version check - API_VERSION_2 used experimental crypto parameters, no longer supported
       if (!version.compatibleWith(BCFile.API_VERSION_3)
           && !version.compatibleWith(BCFile.API_VERSION_1)) {
-        throw new IOException("Unsupported BCFile Version found: " + version.toString() + ". "
+        throw new IOException("Unsupported BCFile Version found: " + version + ". "
             + "Only support " + API_VERSION_1 + " or " + API_VERSION_3);
       }
 
@@ -642,7 +635,7 @@ public final class BCFile {
         // read crypto parameters and get decrypter
         this.in.seek(offsetCryptoParameters);
         decryptionParams = CryptoUtils.readParams(this.in);
-        cryptoEnvironment = new CryptoEnvironmentImpl(Scope.RFILE, decryptionParams);
+        cryptoEnvironment = new CryptoEnvironmentImpl(Scope.TABLE, null, decryptionParams);
         this.decrypter = cryptoService.getFileDecrypter(cryptoEnvironment);
       }
 
@@ -666,7 +659,7 @@ public final class BCFile {
       dataIndex = new DataIndex(dis);
 
       decryptionParams = CryptoUtils.readParams(dis);
-      CryptoEnvironmentImpl env = new CryptoEnvironmentImpl(Scope.RFILE, decryptionParams);
+      CryptoEnvironmentImpl env = new CryptoEnvironmentImpl(Scope.TABLE, null, decryptionParams);
       this.decrypter = cryptoService.getFileDecrypter(env);
     }
 
@@ -690,11 +683,9 @@ public final class BCFile {
     /**
      * Stream access to a Meta Block.
      *
-     * @param name
-     *          meta block name
+     * @param name meta block name
      * @return BlockReader input stream for reading the meta block.
-     * @throws MetaBlockDoesNotExist
-     *           The Meta Block with the given name does not exist.
+     * @throws MetaBlockDoesNotExist The Meta Block with the given name does not exist.
      */
     public BlockReader getMetaBlock(String name) throws IOException, MetaBlockDoesNotExist {
       MetaIndexEntry imeBCIndex = metaIndex.getMetaByName(name);
@@ -718,8 +709,7 @@ public final class BCFile {
     /**
      * Stream access to a Data Block.
      *
-     * @param blockIndex
-     *          0-based data block index.
+     * @param blockIndex 0-based data block index.
      * @return BlockReader input stream for reading the data block.
      */
     public BlockReader getDataBlock(int blockIndex) throws IOException {
@@ -747,7 +737,7 @@ public final class BCFile {
       return dataIndex.getBlockRegionList().get(blockIndex).getRawSize();
     }
 
-    private BlockReader createReader(Algorithm compressAlgo, BlockRegion region)
+    private BlockReader createReader(CompressionAlgorithm compressAlgo, BlockRegion region)
         throws IOException {
       RBlockState rbs = new RBlockState(compressAlgo, in, region, conf, decrypter);
       return new BlockReader(rbs);
@@ -799,7 +789,7 @@ public final class BCFile {
    */
   static final class MetaIndexEntry {
     private final String metaName;
-    private final Algorithm compressionAlgorithm;
+    private final CompressionAlgorithm compressionAlgorithm;
     private static final String defaultPrefix = "data:";
 
     private final BlockRegion region;
@@ -816,7 +806,8 @@ public final class BCFile {
       region = new BlockRegion(in);
     }
 
-    public MetaIndexEntry(String metaName, Algorithm compressionAlgorithm, BlockRegion region) {
+    public MetaIndexEntry(String metaName, CompressionAlgorithm compressionAlgorithm,
+        BlockRegion region) {
       this.metaName = metaName;
       this.compressionAlgorithm = compressionAlgorithm;
       this.region = region;
@@ -826,7 +817,7 @@ public final class BCFile {
       return metaName;
     }
 
-    public Algorithm getCompressionAlgorithm() {
+    public CompressionAlgorithm getCompressionAlgorithm() {
       return compressionAlgorithm;
     }
 
@@ -848,7 +839,7 @@ public final class BCFile {
   static class DataIndex {
     static final String BLOCK_NAME = "BCFile.index";
 
-    private final Algorithm defaultCompressionAlgorithm;
+    private final CompressionAlgorithm defaultCompressionAlgorithm;
 
     // for data blocks, each entry specifies a block's offset, compressed size
     // and raw size
@@ -874,7 +865,7 @@ public final class BCFile {
       listRegions = new ArrayList<>();
     }
 
-    public Algorithm getDefaultCompressionAlgorithm() {
+    public CompressionAlgorithm getDefaultCompressionAlgorithm() {
       return defaultCompressionAlgorithm;
     }
 

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -31,12 +31,9 @@ public class TableExistsException extends Exception {
   private static final long serialVersionUID = 1L;
 
   /**
-   * @param tableId
-   *          the internal id of the table that exists
-   * @param tableName
-   *          the visible name of the table that exists
-   * @param description
-   *          the specific reason why it failed
+   * @param tableId the internal id of the table that exists
+   * @param tableName the visible name of the table that exists
+   * @param description the specific reason why it failed
    */
   public TableExistsException(String tableId, String tableName, String description) {
     super("Table" + (tableName != null && !tableName.isEmpty() ? " " + tableName : "")
@@ -45,14 +42,10 @@ public class TableExistsException extends Exception {
   }
 
   /**
-   * @param tableId
-   *          the internal id of the table that exists
-   * @param tableName
-   *          the visible name of the table that exists
-   * @param description
-   *          the specific reason why it failed
-   * @param cause
-   *          the exception that caused this failure
+   * @param tableId the internal id of the table that exists
+   * @param tableName the visible name of the table that exists
+   * @param description the specific reason why it failed
+   * @param cause the exception that caused this failure
    */
   public TableExistsException(String tableId, String tableName, String description,
       Throwable cause) {
@@ -61,8 +54,7 @@ public class TableExistsException extends Exception {
   }
 
   /**
-   * @param e
-   *          constructs an exception from a thrift exception
+   * @param e constructs an exception from a thrift exception
    */
   public TableExistsException(ThriftTableOperationException e) {
     this(e.getTableId(), e.getTableName(), e.getDescription(), e);

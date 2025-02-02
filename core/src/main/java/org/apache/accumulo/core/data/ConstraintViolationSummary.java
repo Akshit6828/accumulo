@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,29 +18,28 @@
  */
 package org.apache.accumulo.core.data;
 
+import java.io.Serializable;
+
 import org.apache.accumulo.core.dataImpl.thrift.TConstraintViolationSummary;
 
 /**
  * A summary of constraint violations across some number of mutations.
  */
-public class ConstraintViolationSummary {
+public class ConstraintViolationSummary implements Serializable {
 
-  public String constrainClass;
-  public short violationCode;
-  public String violationDescription;
+  private static final long serialVersionUID = 1L;
+  public final String constrainClass;
+  public final short violationCode;
+  public final String violationDescription;
   public long numberOfViolatingMutations;
 
   /**
    * Creates a new summary.
    *
-   * @param constrainClass
-   *          class of constraint that was violated
-   * @param violationCode
-   *          violation code
-   * @param violationDescription
-   *          description of violation
-   * @param numberOfViolatingMutations
-   *          number of mutations that produced this particular violation
+   * @param constrainClass class of constraint that was violated
+   * @param violationCode violation code
+   * @param violationDescription description of violation
+   * @param numberOfViolatingMutations number of mutations that produced this particular violation
    */
   public ConstraintViolationSummary(String constrainClass, short violationCode,
       String violationDescription, long numberOfViolatingMutations) {
@@ -53,8 +52,7 @@ public class ConstraintViolationSummary {
   /**
    * Creates a new summary from Thrift.
    *
-   * @param tcvs
-   *          Thrift summary
+   * @param tcvs Thrift summary
    */
   public ConstraintViolationSummary(TConstraintViolationSummary tcvs) {
     this(tcvs.constrainClass, tcvs.violationCode, tcvs.violationDescription,

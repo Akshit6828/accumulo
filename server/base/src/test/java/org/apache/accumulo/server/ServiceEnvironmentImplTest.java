@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,62 +18,66 @@
  */
 package org.apache.accumulo.server;
 
+import static org.easymock.EasyMock.anyObject;
 import static org.easymock.EasyMock.createMock;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
 import static org.easymock.EasyMock.verify;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Map;
 
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.Property;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.apache.accumulo.core.util.cache.Caches;
+import org.junit.jupiter.api.Test;
 
 public class ServiceEnvironmentImplTest {
-  private ServerContext srvCtx;
-  private AccumuloConfiguration acfg;
-  private ServiceEnvironmentImpl serviceEnvironment;
-
-  @Before
-  public void setUp() {
-    srvCtx = createMock(ServerContext.class);
-    acfg = createMock(AccumuloConfiguration.class);
-    expect(srvCtx.getConfiguration()).andReturn(acfg);
-    replay(srvCtx);
-    serviceEnvironment = new ServiceEnvironmentImpl(srvCtx);
-  }
-
-  @After
-  public void verifyMocks() {
-    verify(srvCtx, acfg);
-  }
 
   @Test
   public void getWithRecognizedPrefixTest() {
+
     String prefix = Property.RPC_PREFIX.getKey();
     Map<String,String> expectedPropertyMap = Map.of("rpc.javax.net.ssl.keyStoreType", "jks");
+
+    ServerContext context = createMock(ServerContext.class);
+    AccumuloConfiguration acfg = createMock(AccumuloConfiguration.class);
+    expect(acfg.newDeriver(anyObject())).andReturn(Map::of).anyTimes();
     expect(acfg.getAllPropertiesWithPrefix(Property.RPC_PREFIX)).andReturn(expectedPropertyMap);
-    replay(acfg);
+    expect(context.getConfiguration()).andReturn(acfg);
+    expect(context.getCaches()).andReturn(Caches.getInstance()).anyTimes();
+    replay(context, acfg);
+
+    var serviceEnvironment = new ServiceEnvironmentImpl(context);
 
     Map<String,String> returnedProperties =
         serviceEnvironment.getConfiguration().getWithPrefix(prefix);
 
     assertEquals(expectedPropertyMap, returnedProperties);
+
+    verify(context, acfg);
   }
 
   @Test
   public void getWithUnrecognizedPrefixTest() {
     String prefix = "a.b";
     Map<String,String> expectedPropertyMap = Map.of("a.b.favorite.license", "apache");
+
+    ServerContext context = createMock(ServerContext.class);
+    AccumuloConfiguration acfg = createMock(AccumuloConfiguration.class);
+    expect(acfg.newDeriver(anyObject())).andReturn(Map::of).anyTimes();
     expect(acfg.spliterator()).andReturn(expectedPropertyMap.entrySet().spliterator());
-    replay(acfg);
+    expect(context.getConfiguration()).andReturn(acfg);
+    expect(context.getCaches()).andReturn(Caches.getInstance()).anyTimes();
+    replay(context, acfg);
+
+    var serviceEnvironment = new ServiceEnvironmentImpl(context);
 
     Map<String,String> returnedProperties =
         serviceEnvironment.getConfiguration().getWithPrefix(prefix);
 
     assertEquals(expectedPropertyMap, returnedProperties);
+
+    verify(context, acfg);
   }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -20,7 +20,7 @@ package org.apache.accumulo.harness;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.net.InetAddress;
@@ -60,10 +60,10 @@ public class TestingKdc {
 
   public static File computeKdcDir() {
     File targetDir = new File(System.getProperty("user.dir"), "target");
-    if (!targetDir.exists())
+    if (!targetDir.exists()) {
       assertTrue(targetDir.mkdirs());
-    assertTrue("Could not find Maven target directory: " + targetDir,
-        targetDir.exists() && targetDir.isDirectory());
+    }
+    assertTrue(targetDir.isDirectory(), "Could not find Maven target directory: " + targetDir);
 
     // Create the directories: target/kerberos/minikdc
     File kdcDir = new File(new File(targetDir, "kerberos"), "minikdc");
@@ -75,8 +75,8 @@ public class TestingKdc {
 
   public static File computeKeytabDir() {
     File targetDir = new File(System.getProperty("user.dir"), "target");
-    assertTrue("Could not find Maven target directory: " + targetDir,
-        targetDir.exists() && targetDir.isDirectory());
+    assertTrue(targetDir.exists() && targetDir.isDirectory(),
+        "Could not find Maven target directory: " + targetDir);
 
     // Create the directories: target/kerberos/keytabs
     File keytabDir = new File(new File(targetDir, "kerberos"), "keytabs");
@@ -183,8 +183,7 @@ public class TestingKdc {
   /**
    * The {@link ClusterUser} corresponding to the given offset. Represents an unprivileged user.
    *
-   * @param offset
-   *          The offset to fetch credentials for, valid through {@link #NUM_USERS}
+   * @param offset The offset to fetch credentials for, valid through {@link #NUM_USERS}
    */
   public ClusterUser getClientPrincipal(int offset) {
     checkArgument(started, "Client principal is not initialized, is the KDC started?");
@@ -218,8 +217,7 @@ public class TestingKdc {
   /**
    * Qualify a username (only the primary from the kerberos principal) with the proper realm
    *
-   * @param primary
-   *          The primary or primary and instance
+   * @param primary The primary or primary and instance
    */
   public String qualifyUser(String primary) {
     return String.format("%s@%s.%s", primary, getOrgName(), getOrgDomain());

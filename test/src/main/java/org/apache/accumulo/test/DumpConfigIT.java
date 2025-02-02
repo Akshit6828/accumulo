@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,36 +18,35 @@
  */
 package org.apache.accumulo.test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.time.Duration;
 import java.util.Collections;
 
 import org.apache.accumulo.core.conf.Property;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.accumulo.server.util.Admin;
 import org.apache.accumulo.test.functional.ConfigurableMacBase;
 import org.apache.accumulo.test.functional.FunctionalTestUtils;
 import org.apache.hadoop.conf.Configuration;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 public class DumpConfigIT extends ConfigurableMacBase {
 
-  @Rule
-  public TemporaryFolder tempFolder =
-      new TemporaryFolder(new File(System.getProperty("user.dir"), "target"));
+  @TempDir
+  private static File tempDir;
 
   @Override
-  public int defaultTimeoutSeconds() {
-    return 2 * 60;
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(2);
   }
 
   @Override
@@ -59,7 +58,8 @@ public class DumpConfigIT extends ConfigurableMacBase {
       justification = "user.dir is suitable test input")
   @Test
   public void test() throws Exception {
-    File folder = tempFolder.newFolder();
+    File folder = new File(tempDir, testName() + "/");
+    assertTrue(folder.isDirectory() || folder.mkdir(), "failed to create dir: " + folder);
     File siteFileBackup = new File(folder, "accumulo.properties.bak");
     assertFalse(siteFileBackup.exists());
     assertEquals(0, exec(Admin.class, "dumpConfig", "-a", "-d", folder.getPath()).waitFor());
@@ -67,13 +67,15 @@ public class DumpConfigIT extends ConfigurableMacBase {
     String site = FunctionalTestUtils.readAll(new FileInputStream(siteFileBackup));
     assertTrue(site.contains(Property.TABLE_FILE_BLOCK_SIZE.getKey()));
     assertTrue(site.contains("1234567"));
-    String meta = FunctionalTestUtils
-        .readAll(new FileInputStream(new File(folder, MetadataTable.NAME + ".cfg")));
+    String meta = FunctionalTestUtils.readAll(
+        new FileInputStream(new File(folder, AccumuloTable.METADATA.tableName() + ".cfg")));
     assertTrue(meta.contains(Property.TABLE_FILE_REPLICATION.getKey()));
     String systemPerm =
         FunctionalTestUtils.readAll(new FileInputStream(new File(folder, "root_user.cfg")));
     assertTrue(systemPerm.contains("grant System.ALTER_USER -s -u root"));
-    assertTrue(systemPerm.contains("grant Table.READ -t " + MetadataTable.NAME + " -u root"));
-    assertFalse(systemPerm.contains("grant Table.DROP -t " + MetadataTable.NAME + " -u root"));
+    assertTrue(systemPerm
+        .contains("grant Table.READ -t " + AccumuloTable.METADATA.tableName() + " -u root"));
+    assertFalse(systemPerm
+        .contains("grant Table.DROP -t " + AccumuloTable.METADATA.tableName() + " -u root"));
   }
 }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -30,7 +30,7 @@ import org.apache.accumulo.core.iteratorsImpl.system.InterruptibleIterator;
 
 class PartialMutationSkippingIterator extends SkippingIterator implements InterruptibleIterator {
 
-  private int kvCount;
+  private final int kvCount;
 
   public PartialMutationSkippingIterator(SortedKeyValueIterator<Key,Value> source, int maxKVCount) {
     setSource(source);
@@ -39,8 +39,9 @@ class PartialMutationSkippingIterator extends SkippingIterator implements Interr
 
   @Override
   protected void consume() throws IOException {
-    while (getSource().hasTop() && ((MemKey) getSource().getTopKey()).getKVCount() > kvCount)
+    while (getSource().hasTop() && ((MemKey) getSource().getTopKey()).getKVCount() > kvCount) {
       getSource().next();
+    }
   }
 
   @Override

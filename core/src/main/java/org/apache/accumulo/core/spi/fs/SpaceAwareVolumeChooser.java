@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,14 +18,16 @@
  */
 package org.apache.accumulo.core.spi.fs;
 
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+
 import java.io.IOException;
 import java.util.NavigableMap;
-import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 
+import org.apache.accumulo.core.util.cache.Caches;
+import org.apache.accumulo.core.util.cache.Caches.CacheName;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -34,13 +36,11 @@ import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
+import com.github.benmanes.caffeine.cache.LoadingCache;
 
 /**
  * A {@link PreferredVolumeChooser} that takes remaining HDFS space into account when making a
- * volume choice rather than a simpler round robin. The list of volumes to use can be limited using
+ * volume choice rather than a simpler round-robin. The list of volumes to use can be limited using
  * the same properties as {@link PreferredVolumeChooser}
  *
  * @since 2.1.0
@@ -50,12 +50,12 @@ public class SpaceAwareVolumeChooser extends PreferredVolumeChooser {
   public static final String RECOMPUTE_INTERVAL = "spaceaware.volume.chooser.recompute.interval";
 
   // Default time to wait in ms. Defaults to 5 min
-  private long defaultComputationCacheDuration = 300000;
+  private final long defaultComputationCacheDuration = 300000;
   private LoadingCache<Set<String>,WeightedRandomCollection> choiceCache = null;
 
   private static final Logger log = LoggerFactory.getLogger(SpaceAwareVolumeChooser.class);
 
-  private Configuration conf = new Configuration();
+  private final Configuration conf = new Configuration();
 
   protected double getFreeSpace(String uri) throws IOException {
     FileSystem pathFs = new Path(uri).getFileSystem(conf);
@@ -65,11 +65,7 @@ public class SpaceAwareVolumeChooser extends PreferredVolumeChooser {
 
   @Override
   public String choose(VolumeChooserEnvironment env, Set<String> options) {
-    try {
-      return getCache(env).get(getPreferredVolumes(env, options)).next();
-    } catch (ExecutionException e) {
-      throw new IllegalStateException("Execution exception when attempting to cache choice", e);
-    }
+    return getCache(env).get(getPreferredVolumes(env, options)).next();
   }
 
   private synchronized LoadingCache<Set<String>,WeightedRandomCollection>
@@ -81,14 +77,9 @@ public class SpaceAwareVolumeChooser extends PreferredVolumeChooser {
       long computationCacheDuration = StringUtils.isNotBlank(propertyValue)
           ? Long.parseLong(propertyValue) : defaultComputationCacheDuration;
 
-      choiceCache = CacheBuilder.newBuilder()
-          .expireAfterWrite(computationCacheDuration, TimeUnit.MILLISECONDS)
-          .build(new CacheLoader<>() {
-            @Override
-            public WeightedRandomCollection load(Set<String> key) {
-              return new WeightedRandomCollection(key, env, random);
-            }
-          });
+      choiceCache = Caches.getInstance().createNewBuilder(CacheName.SPACE_AWARE_VOLUME_CHOICE, true)
+          .expireAfterWrite(computationCacheDuration, MILLISECONDS)
+          .build(key -> new WeightedRandomCollection(key, env));
     }
 
     return choiceCache;
@@ -96,12 +87,9 @@ public class SpaceAwareVolumeChooser extends PreferredVolumeChooser {
 
   private class WeightedRandomCollection {
     private final NavigableMap<Double,String> map = new TreeMap<>();
-    private final Random random;
     private double total = 0;
 
-    public WeightedRandomCollection(Set<String> options, VolumeChooserEnvironment env,
-        Random random) {
-      this.random = random;
+    private WeightedRandomCollection(Set<String> options, VolumeChooserEnvironment env) {
 
       if (options.size() < 1) {
         throw new IllegalStateException("Options was empty! No valid volumes to choose from.");
@@ -135,7 +123,7 @@ public class SpaceAwareVolumeChooser extends PreferredVolumeChooser {
     }
 
     public String next() {
-      double value = random.nextDouble() * total;
+      double value = RANDOM.get().nextDouble() * total;
       return map.higherEntry(value).getValue();
     }
   }

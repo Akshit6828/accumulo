@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -17,6 +17,10 @@
  * under the License.
  */
 package org.apache.accumulo.shell.commands;
+
+import static org.apache.accumulo.shell.commands.ListScansCommand.getServerOptValue;
+import static org.apache.accumulo.shell.commands.ListScansCommand.rgRegexPredicate;
+import static org.apache.accumulo.shell.commands.ListScansCommand.serverRegexPredicate;
 
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -30,12 +34,12 @@ import org.apache.commons.cli.Options;
 
 public class ListCompactionsCommand extends Command {
 
-  private Option tserverOption, disablePaginationOpt, filterOption;
+  private Option serverOpt, tserverOption, rgOpt, disablePaginationOpt, filterOption;
 
   @Override
   public String description() {
     return "lists what compactions are currently running in accumulo. See the"
-        + " accumulo.core.client.admin.ActiveCompaciton javadoc for more information"
+        + " accumulo.core.client.admin.ActiveCompaction javadoc for more information"
         + " about columns.";
   }
 
@@ -51,11 +55,14 @@ public class ListCompactionsCommand extends Command {
 
     Stream<String> activeCompactionStream;
 
-    if (cl.hasOption(tserverOption.getOpt())) {
-      activeCompactionStream = ActiveCompactionHelper
-          .activeCompactionsForServer(cl.getOptionValue(tserverOption.getOpt()), instanceOps);
+    String serverValue = getServerOptValue(cl, serverOpt, tserverOption);
+    if (serverValue != null || cl.hasOption(rgOpt)) {
+      final var serverPredicate = serverRegexPredicate(serverValue);
+      final var rgPredicate = rgRegexPredicate(cl.getOptionValue(rgOpt));
+      activeCompactionStream =
+          ActiveCompactionHelper.activeCompactions(instanceOps, rgPredicate, serverPredicate);
     } else {
-      activeCompactionStream = ActiveCompactionHelper.stream(instanceOps);
+      activeCompactionStream = ActiveCompactionHelper.activeCompactions(instanceOps);
     }
 
     if (cl.hasOption(filterOption.getOpt())) {
@@ -85,9 +92,21 @@ public class ListCompactionsCommand extends Command {
     filterOption = new Option("f", "filter", true, "show only compactions that match the regex");
     opts.addOption(filterOption);
 
-    tserverOption = new Option("ts", "tabletServer", true, "tablet server to list compactions for");
+    serverOpt = new Option("s", "server", true,
+        "tablet/compactor server regex to list compactions for. Regex will match against strings like <host>:<port>");
+    serverOpt.setArgName("tablet/compactor server regex");
+    opts.addOption(serverOpt);
+
+    // Leaving here for backwards compatibility, same as serverOpt
+    tserverOption = new Option("ts", "tabletServer", true,
+        "tablet/compactor server regex to list compactions for");
     tserverOption.setArgName("tablet server");
     opts.addOption(tserverOption);
+
+    rgOpt = new Option("rg", "resourceGroup", true,
+        "tablet/compactor server resource group regex to list compactions for");
+    rgOpt.setArgName("resource group");
+    opts.addOption(rgOpt);
 
     disablePaginationOpt = new Option("np", "no-pagination", false, "disable pagination of output");
     opts.addOption(disablePaginationOpt);

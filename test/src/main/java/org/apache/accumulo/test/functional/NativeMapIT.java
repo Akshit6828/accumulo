@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,23 +19,25 @@
 package org.apache.accumulo.test.functional;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+import static org.apache.accumulo.harness.AccumuloITBase.SUNNY_DAY;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.File;
 import java.io.IOException;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
-import java.util.Random;
 import java.util.TreeMap;
 
 import org.apache.accumulo.core.Constants;
@@ -43,14 +45,14 @@ import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.util.Pair;
-import org.apache.accumulo.test.categories.SunnyDayTests;
 import org.apache.accumulo.tserver.NativeMap;
+import org.apache.accumulo.tserver.memory.NativeMapLoader;
 import org.apache.hadoop.io.Text;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
-@Category(SunnyDayTests.class)
+@Tag(SUNNY_DAY)
 public class NativeMapIT {
 
   private Key newKey(int r) {
@@ -76,10 +78,9 @@ public class NativeMapIT {
         + "/accumulo-native-" + Constants.VERSION);
   }
 
-  @BeforeClass
+  @BeforeAll
   public static void setUp() {
-    System.setProperty("accumulo.native.lib.path", nativeMapLocation().getAbsolutePath());
-    assertTrue(NativeMap.isLoaded());
+    NativeMapLoader.loadForTest(List.of(nativeMapLocation()), () -> fail("Can't load native maps"));
   }
 
   private void verifyIterator(int start, int end, int valueOffset,
@@ -268,47 +269,15 @@ public class NativeMapIT {
 
     nm.delete();
 
-    try {
-      nm.put(newKey(1), newValue(1));
-      fail();
-    } catch (IllegalStateException e) {
+    final Key key1 = newKey(1);
+    final Value value1 = newValue(1);
 
-    }
-
-    try {
-      nm.get(newKey(1));
-      fail();
-    } catch (IllegalStateException e) {
-
-    }
-
-    try {
-      nm.iterator();
-      fail();
-    } catch (IllegalStateException e) {
-
-    }
-
-    try {
-      nm.iterator(newKey(1));
-      fail();
-    } catch (IllegalStateException e) {
-
-    }
-
-    try {
-      nm.size();
-      fail();
-    } catch (IllegalStateException e) {
-
-    }
-
-    try {
-      iter.next();
-      fail();
-    } catch (IllegalStateException e) {
-
-    }
+    assertThrows(IllegalStateException.class, () -> nm.put(key1, value1));
+    assertThrows(IllegalStateException.class, () -> nm.get(key1));
+    assertThrows(IllegalStateException.class, () -> nm.iterator(key1));
+    assertThrows(IllegalStateException.class, nm::iterator);
+    assertThrows(IllegalStateException.class, nm::size);
+    assertThrows(IllegalStateException.class, iter::next);
 
   }
 
@@ -319,13 +288,7 @@ public class NativeMapIT {
     insertAndVerify(nm, 1, 10, 0);
 
     nm.delete();
-
-    try {
-      nm.delete();
-      fail();
-    } catch (IllegalStateException e) {
-
-    }
+    assertThrows(IllegalStateException.class, nm::delete);
   }
 
   @Test
@@ -366,24 +329,14 @@ public class NativeMapIT {
 
     Iterator<Entry<Key,Value>> iter = nm.iterator();
 
-    try {
-      iter.next();
-      fail();
-    } catch (NoSuchElementException e) {
-
-    }
+    assertThrows(NoSuchElementException.class, iter::next);
 
     insertAndVerify(nm, 1, 1, 0);
 
     iter = nm.iterator();
     iter.next();
 
-    try {
-      iter.next();
-      fail();
-    } catch (NoSuchElementException e) {
-
-    }
+    assertThrows(NoSuchElementException.class, iter::next);
 
     nm.delete();
   }
@@ -457,11 +410,11 @@ public class NativeMapIT {
   }
 
   // random length random field
-  private static byte[] getRandomBytes(Random r, int maxLen) {
-    int len = r.nextInt(maxLen);
+  private static byte[] getRandomBytes(int maxLen) {
+    int len = RANDOM.get().nextInt(maxLen);
 
     byte[] f = new byte[len];
-    r.nextBytes(f);
+    RANDOM.get().nextBytes(f);
 
     return f;
   }
@@ -473,15 +426,13 @@ public class NativeMapIT {
     // insert things with varying field sizes and value sizes
 
     // generate random data
-    Random r = new SecureRandom();
-
     ArrayList<Pair<Key,Value>> testData = new ArrayList<>();
 
     for (int i = 0; i < 100000; i++) {
 
-      Key k = new Key(getRandomBytes(r, 97), getRandomBytes(r, 13), getRandomBytes(r, 31),
-          getRandomBytes(r, 11), (r.nextLong() & 0x7fffffffffffffffL), false, false);
-      Value v = new Value(getRandomBytes(r, 511));
+      Key k = new Key(getRandomBytes(97), getRandomBytes(13), getRandomBytes(31),
+          getRandomBytes(11), (RANDOM.get().nextLong() & 0x7fffffffffffffffL), false, false);
+      Value v = new Value(getRandomBytes(511));
 
       testData.add(new Pair<>(k, v));
     }
@@ -504,26 +455,30 @@ public class NativeMapIT {
         Entry<Key,Value> e = iter1.next();
         Pair<Key,Value> p = iter2.next();
 
-        if (!e.getKey().equals(p.getFirst()))
+        if (!e.getKey().equals(p.getFirst())) {
           throw new RuntimeException("Keys not equal");
+        }
 
-        if (!e.getValue().equals(p.getSecond()))
+        if (!e.getValue().equals(p.getSecond())) {
           throw new RuntimeException("Values not equal");
+        }
       }
 
-      if (iter1.hasNext())
+      if (iter1.hasNext()) {
         throw new RuntimeException("Not all of native map consumed");
+      }
 
-      if (iter2.hasNext())
+      if (iter2.hasNext()) {
         throw new RuntimeException("Not all of test data consumed");
+      }
 
       System.out.println("test 11 nm mem " + nm.getMemoryUsed());
 
       // insert data again w/ different value
-      Collections.shuffle(testData, r);
+      Collections.shuffle(testData, RANDOM.get());
       // insert unsorted data
       for (Pair<Key,Value> pair : testData) {
-        pair.getSecond().set(getRandomBytes(r, 511));
+        pair.getSecond().set(getRandomBytes(511));
         nm.put(pair.getFirst(), pair.getSecond());
       }
     }
@@ -592,6 +547,14 @@ public class NativeMapIT {
 
     assertEquals(0, nm.size());
     assertEquals(0, nm.getMemoryUsed());
+
+    var iter1 = nm.iterator();
+    assertFalse(iter1.hasNext());
+    assertThrows(NoSuchElementException.class, () -> iter1.next());
+
+    var iter2 = nm.iterator(new Key("abc"));
+    assertFalse(iter2.hasNext());
+    assertThrows(NoSuchElementException.class, () -> iter2.next());
 
     nm.delete();
   }

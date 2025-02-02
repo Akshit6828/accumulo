@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -49,8 +49,9 @@ public class Violations {
 
     @Override
     public boolean equals(Object o) {
-      if (o instanceof CVSKey)
+      if (o instanceof CVSKey) {
         return equals((CVSKey) o);
+      }
       return false;
     }
 
@@ -61,7 +62,7 @@ public class Violations {
 
   public static final Violations EMPTY = new Violations(Collections.emptyMap());
 
-  private Map<CVSKey,ConstraintViolationSummary> cvsmap;
+  private final Map<CVSKey,ConstraintViolationSummary> cvsmap;
 
   /**
    * Creates a new empty object.
@@ -96,8 +97,7 @@ public class Violations {
   /**
    * Adds a violation. If a matching violation was already added, then its count is increased.
    *
-   * @param cvs
-   *          summary of violation
+   * @param cvs summary of violation
    */
   public void add(ConstraintViolationSummary cvs) {
     CVSKey cvsk = new CVSKey(cvs);
@@ -107,8 +107,7 @@ public class Violations {
   /**
    * Adds all violations from the given object to this one.
    *
-   * @param violations
-   *          violations to add
+   * @param violations violations to add
    */
   public void add(Violations violations) {
     Set<Entry<CVSKey,ConstraintViolationSummary>> es = violations.cvsmap.entrySet();
@@ -122,8 +121,7 @@ public class Violations {
   /**
    * Adds a list of violations.
    *
-   * @param cvsList
-   *          list of violation summaries
+   * @param cvsList list of violation summaries
    */
   public void add(List<ConstraintViolationSummary> cvsList) {
     for (ConstraintViolationSummary constraintViolationSummary : cvsList) {

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,46 +18,43 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.apache.accumulo.fate.util.UtilWaitThread.sleepUninterruptibly;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
+import java.time.Duration;
 import java.util.Map.Entry;
 import java.util.SortedSet;
 import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.accumulo.core.client.Accumulo;
 import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.admin.NewTableConfiguration;
+import org.apache.accumulo.core.client.admin.TabletAvailability;
 import org.apache.accumulo.core.clientImpl.ClientContext;
-import org.apache.accumulo.core.clientImpl.ManagerClient;
-import org.apache.accumulo.core.clientImpl.thrift.ThriftNotActiveServiceException;
 import org.apache.accumulo.core.conf.Property;
-import org.apache.accumulo.core.manager.thrift.ManagerClientService.Client;
 import org.apache.accumulo.core.manager.thrift.ManagerMonitorInfo;
-import org.apache.accumulo.core.master.thrift.TableInfo;
-import org.apache.accumulo.core.master.thrift.TabletServerStatus;
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.RootTable;
+import org.apache.accumulo.core.manager.thrift.TableInfo;
+import org.apache.accumulo.core.manager.thrift.TabletServerStatus;
+import org.apache.accumulo.core.metadata.AccumuloTable;
+import org.apache.accumulo.core.rpc.clients.ThriftClientTypes;
 import org.apache.accumulo.core.trace.TraceUtil;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class MetadataMaxFilesIT extends ConfigurableMacBase {
 
   @Override
-  public void configure(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
-    cfg.setProperty(Property.TSERV_MAJC_DELAY, "1");
-    cfg.setProperty(Property.TSERV_SCAN_MAX_OPENFILES, "10");
-    cfg.setProperty(Property.TSERV_ASSIGNMENT_MAXCONCURRENT, "100");
-    hadoopCoreSite.set("fs.file.impl", RawLocalFileSystem.class.getName());
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(5);
   }
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 5 * 60;
+  public void configure(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
+    cfg.setProperty(Property.TSERV_SCAN_MAX_OPENFILES, "10");
+    cfg.setProperty(Property.TSERV_ASSIGNMENT_MAXCONCURRENT, "100");
+    hadoopCoreSite.set("fs.file.impl", RawLocalFileSystem.class.getName());
   }
 
   @Test
@@ -67,48 +64,39 @@ public class MetadataMaxFilesIT extends ConfigurableMacBase {
       for (int i = 0; i < 1000; i++) {
         splits.add(new Text(String.format("%03d", i)));
       }
-      c.tableOperations().setProperty(MetadataTable.NAME, Property.TABLE_SPLIT_THRESHOLD.getKey(),
-          "10000");
+      c.tableOperations().setProperty(AccumuloTable.METADATA.tableName(),
+          Property.TABLE_SPLIT_THRESHOLD.getKey(), "10000");
       // propagation time
-      sleepUninterruptibly(5, TimeUnit.SECONDS);
+      Thread.sleep(SECONDS.toMillis(5));
       for (int i = 0; i < 2; i++) {
         String tableName = "table" + i;
         log.info("Creating {} with splits", tableName);
-        NewTableConfiguration ntc = new NewTableConfiguration().withSplits(splits);
+        NewTableConfiguration ntc = new NewTableConfiguration().withSplits(splits)
+            .withInitialTabletAvailability(TabletAvailability.HOSTED);
         c.tableOperations().create(tableName, ntc);
         log.info("flushing");
-        c.tableOperations().flush(MetadataTable.NAME, null, null, true);
-        c.tableOperations().flush(RootTable.NAME, null, null, true);
+        c.tableOperations().flush(AccumuloTable.METADATA.tableName(), null, null, true);
+        c.tableOperations().flush(AccumuloTable.ROOT.tableName(), null, null, true);
       }
 
       while (true) {
-        ManagerMonitorInfo stats;
-        Client client = null;
-        try {
-          ClientContext context = (ClientContext) c;
-          client = ManagerClient.getConnectionWithRetry(context);
-          log.info("Fetching stats");
-          stats = client.getManagerStats(TraceUtil.traceInfo(), context.rpcCreds());
-        } catch (ThriftNotActiveServiceException e) {
-          // Let it loop, fetching a new location
-          sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
-          continue;
-        } finally {
-          if (client != null)
-            ManagerClient.close(client);
-        }
+        ClientContext context = (ClientContext) c;
+        ManagerMonitorInfo stats = ThriftClientTypes.MANAGER.execute(context,
+            client -> client.getManagerStats(TraceUtil.traceInfo(), context.rpcCreds()));
         int tablets = 0;
         for (TabletServerStatus tserver : stats.tServerInfo) {
           for (Entry<String,TableInfo> entry : tserver.tableMap.entrySet()) {
-            if (entry.getKey().startsWith("!") || entry.getKey().startsWith("+"))
+            if (entry.getKey().startsWith("!") || entry.getKey().startsWith("+")) {
               continue;
+            }
             tablets += entry.getValue().onlineTablets;
           }
         }
         log.info("Online tablets " + tablets);
-        if (tablets == 2002)
+        if (tablets == 2002) {
           break;
-        sleepUninterruptibly(1, TimeUnit.SECONDS);
+        }
+        Thread.sleep(SECONDS.toMillis(1));
       }
     }
   }

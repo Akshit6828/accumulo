@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -27,7 +27,6 @@ import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.iterators.SortedKeyIterator;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.util.format.FormatterConfig;
-import org.apache.accumulo.core.util.interpret.ScanInterpreter;
 import org.apache.accumulo.shell.Shell;
 import org.apache.accumulo.shell.format.DeleterFormatter;
 import org.apache.commons.cli.CommandLine;
@@ -42,8 +41,6 @@ public class DeleteManyCommand extends ScanCommand {
       throws Exception {
     final String tableName = OptUtil.getTableOpt(cl, shellState);
 
-    final ScanInterpreter interpeter = getInterpreter(cl, tableName, shellState);
-
     // handle first argument, if present, the authorizations list to
     // scan with
     final Authorizations auths = getAuths(cl, shellState);
@@ -56,12 +53,12 @@ public class DeleteManyCommand extends ScanCommand {
     addScanIterators(shellState, cl, scanner, tableName);
 
     // handle remaining optional arguments
-    scanner.setRange(getRange(cl, interpeter));
+    scanner.setRange(getRange(cl));
 
     scanner.setTimeout(getTimeout(cl), TimeUnit.MILLISECONDS);
 
     // handle columns
-    fetchColumns(cl, scanner, interpeter);
+    fetchColumns(cl, scanner);
 
     // output / delete the records
     final BatchWriter writer = shellState.getAccumuloClient().createBatchWriter(tableName,

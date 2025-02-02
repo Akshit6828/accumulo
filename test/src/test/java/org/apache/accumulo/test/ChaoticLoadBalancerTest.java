@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,7 @@
  */
 package org.apache.accumulo.test;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.TabletId;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
@@ -39,14 +40,15 @@ import org.apache.accumulo.core.manager.balancer.BalanceParamsImpl;
 import org.apache.accumulo.core.manager.balancer.TServerStatusImpl;
 import org.apache.accumulo.core.manager.balancer.TabletServerIdImpl;
 import org.apache.accumulo.core.manager.balancer.TabletStatisticsImpl;
-import org.apache.accumulo.core.master.thrift.TableInfo;
+import org.apache.accumulo.core.manager.thrift.TableInfo;
+import org.apache.accumulo.core.metadata.schema.Ample.DataLevel;
 import org.apache.accumulo.core.spi.balancer.data.TServerStatus;
 import org.apache.accumulo.core.spi.balancer.data.TabletMigration;
 import org.apache.accumulo.core.spi.balancer.data.TabletServerId;
 import org.apache.accumulo.core.spi.balancer.data.TabletStatistics;
 import org.apache.accumulo.core.tabletserver.thrift.TabletStats;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ChaoticLoadBalancerTest {
 
@@ -54,14 +56,15 @@ public class ChaoticLoadBalancerTest {
     List<TabletId> tablets = new ArrayList<>();
 
     TServerStatus getStatus() {
-      org.apache.accumulo.core.master.thrift.TabletServerStatus thriftStatus =
-          new org.apache.accumulo.core.master.thrift.TabletServerStatus();
+      org.apache.accumulo.core.manager.thrift.TabletServerStatus thriftStatus =
+          new org.apache.accumulo.core.manager.thrift.TabletServerStatus();
       thriftStatus.tableMap = new HashMap<>();
       for (TabletId extent : tablets) {
         TableId table = extent.getTable();
         TableInfo info = thriftStatus.tableMap.get(table.canonical());
-        if (info == null)
+        if (info == null) {
           thriftStatus.tableMap.put(table.canonical(), info = new TableInfo());
+        }
         info.onlineTablets++;
         info.recs = info.onlineTablets;
         info.ingestRate = 123.;
@@ -83,7 +86,7 @@ public class ChaoticLoadBalancerTest {
         if (tabletId.getTable().equals(table)) {
           KeyExtent extent =
               new KeyExtent(tabletId.getTable(), tabletId.getEndRow(), tabletId.getPrevEndRow());
-          TabletStats tstats = new TabletStats(extent.toThrift(), null, null, null, 0L, 0., 0., 0);
+          TabletStats tstats = new TabletStats(extent.toThrift(), null, 0L, 0., 0.);
           result.add(new TabletStatisticsImpl(tstats));
         }
       }
@@ -114,8 +117,9 @@ public class ChaoticLoadBalancerTest {
     TestChaoticLoadBalancer balancer = new TestChaoticLoadBalancer();
 
     Map<TabletId,TabletServerId> assignments = new HashMap<>();
-    balancer.getAssignments(
-        new AssignmentParamsImpl(getAssignments(servers), metadataTable, assignments));
+    balancer.getAssignments(new AssignmentParamsImpl(getAssignments(servers),
+        Map.of(Constants.DEFAULT_RESOURCE_GROUP_NAME, servers.keySet()), metadataTable,
+        assignments));
 
     assertEquals(assignments.size(), metadataTable.size());
   }
@@ -156,7 +160,10 @@ public class ChaoticLoadBalancerTest {
     // amount, or even expected amount
     List<TabletMigration> migrationsOut = new ArrayList<>();
     while (!migrationsOut.isEmpty()) {
-      balancer.balance(new BalanceParamsImpl(getAssignments(servers), migrations, migrationsOut));
+      SortedMap<TabletServerId,TServerStatus> current = getAssignments(servers);
+      balancer.balance(new BalanceParamsImpl(current,
+          Map.of(Constants.DEFAULT_RESOURCE_GROUP_NAME, current.keySet()), migrations,
+          migrationsOut, DataLevel.USER));
     }
   }
 
@@ -165,8 +172,9 @@ public class ChaoticLoadBalancerTest {
   }
 
   private static Text toText(String value) {
-    if (value != null)
+    if (value != null) {
       return new Text(value);
+    }
     return null;
   }
 

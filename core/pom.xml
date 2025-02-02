@@ -9,7 +9,7 @@
     "License"); you may not use this file except in compliance
     with the License.  You may obtain a copy of the License at
 
-      http://www.apache.org/licenses/LICENSE-2.0
+      https://www.apache.org/licenses/LICENSE-2.0
 
     Unless required by applicable law or agreed to in writing,
     software distributed under the License is distributed on an
@@ -24,7 +24,7 @@
   <parent>
     <groupId>org.apache.accumulo</groupId>
     <artifactId>accumulo-project</artifactId>
-    <version>2.1.0-SNAPSHOT</version>
+    <version>4.0.0-SNAPSHOT</version>
   </parent>
   <artifactId>accumulo-core</artifactId>
   <name>Apache Accumulo Core</name>
@@ -33,6 +33,10 @@
     <dependency>
       <groupId>com.beust</groupId>
       <artifactId>jcommander</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
     </dependency>
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
@@ -58,16 +62,28 @@
       </exclusions>
     </dependency>
     <dependency>
-      <groupId>com.google.protobuf</groupId>
-      <artifactId>protobuf-java</artifactId>
-    </dependency>
-    <dependency>
       <groupId>commons-io</groupId>
       <artifactId>commons-io</artifactId>
     </dependency>
     <dependency>
       <groupId>commons-logging</groupId>
       <artifactId>commons-logging</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-context</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.accumulo</groupId>
+      <artifactId>accumulo-access</artifactId>
     </dependency>
     <dependency>
       <groupId>org.apache.accumulo</groupId>
@@ -90,48 +106,36 @@
       <artifactId>commons-math3</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.apache.datasketches</groupId>
+      <artifactId>datasketches-java</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.apache.hadoop</groupId>
       <artifactId>hadoop-client-api</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.apache.htrace</groupId>
-      <artifactId>htrace-core</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.logging.log4j</groupId>
-      <artifactId>log4j-1.2-api</artifactId>
-    </dependency>
-    <dependency>
       <groupId>org.apache.thrift</groupId>
       <artifactId>libthrift</artifactId>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.httpcomponents</groupId>
-          <artifactId>httpcore</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.apache.zookeeper</groupId>
       <artifactId>zookeeper</artifactId>
-      <exclusions>
-        <exclusion>
-          <groupId>io.netty</groupId>
-          <artifactId>netty</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.apache.zookeeper</groupId>
       <artifactId>zookeeper-jute</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.jline</groupId>
-      <artifactId>jline</artifactId>
+      <groupId>org.checkerframework</groupId>
+      <artifactId>checker-qual</artifactId>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
     </dependency>
     <dependency>
       <groupId>org.apache.hadoop</groupId>
@@ -139,8 +143,9 @@
       <scope>runtime</scope>
     </dependency>
     <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
+      <!-- used by log4j-api; needed here for compile time linting only; we don't actually use it -->
+      <groupId>biz.aQute.bnd</groupId>
+      <artifactId>biz.aQute.bnd.annotation</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -149,13 +154,39 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- legacy log4j is still used by hadoop-client-minicluster -->
       <groupId>org.apache.logging.log4j</groupId>
-      <artifactId>log4j-slf4j-impl</artifactId>
+      <artifactId>log4j-1.2-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-slf4j2-impl</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.easymock</groupId>
       <artifactId>easymock</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-params</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -176,12 +207,16 @@
           <groupId>com.mycila</groupId>
           <artifactId>license-maven-plugin</artifactId>
           <configuration>
-            <excludes>
-              <exclude>src/main/java/org/apache/accumulo/core/bloomfilter/*.java</exclude>
-              <exclude>src/main/java/org/apache/accumulo/core/util/HostAndPort.java</exclude>
-              <exclude>src/test/resources/*.jceks</exclude>
-              <exclude>src/test/resources/org/apache/accumulo/core/file/rfile/*.rf</exclude>
-            </excludes>
+            <licenseSets>
+              <licenseSet>
+                <header>${rootlocation}/src/build/license-header.txt</header>
+                <excludes>
+                  <exclude>src/main/java/org/apache/accumulo/core/bloomfilter/*.java</exclude>
+                  <exclude>src/main/java/org/apache/accumulo/core/util/HostAndPort.java</exclude>
+                  <exclude>src/test/resources/*.jceks</exclude>
+                </excludes>
+              </licenseSet>
+            </licenseSets>
           </configuration>
         </plugin>
         <plugin>
@@ -191,48 +226,8 @@
             <excludes>
               <exclude>src/main/java/org/apache/accumulo/core/bloomfilter/*.java</exclude>
               <exclude>src/test/resources/*.jceks</exclude>
-              <exclude>src/test/resources/org/apache/accumulo/core/file/rfile/*.rf</exclude>
             </excludes>
           </configuration>
-        </plugin>
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-surefire-plugin</artifactId>
-          <configuration>
-            <!-- Tests that cannot run with reuseForks=true -->
-            <excludes>
-              <exclude>**/InternerTest.java</exclude>
-              <exclude>**/NamespaceIdTest.java</exclude>
-              <exclude>**/TableIdTest.java</exclude>
-              <exclude>**/HadoopCredentialProviderTest.java</exclude>
-              <exclude>**/IdleRatioScanPrioritizerTest.java</exclude>
-              <exclude>**/TestCfCqSlice.java</exclude>
-              <exclude>**/TestCfCqSliceSeekingFilter.java</exclude>
-              <exclude>**/core/constraints/DefaultKeySizeConstraintTest.java</exclude>
-            </excludes>
-          </configuration>
-          <executions>
-            <execution>
-              <id>reuseForks-false-tests</id>
-              <goals>
-                <goal>test</goal>
-              </goals>
-              <configuration>
-                <reuseForks>false</reuseForks>
-                <excludes combine.self="override" />
-                <includes>
-                  <include>**/InternerTest.java</include>
-                  <include>**/NamespaceIdTest.java</include>
-                  <include>**/TableIdTest.java</include>
-                  <include>**/HadoopCredentialProviderTest.java</include>
-                  <include>**/IdleRatioScanPrioritizerTest.java</include>
-                  <include>**/TestCfCqSlice.java</include>
-                  <include>**/TestCfCqSliceSeekingFilter.java</include>
-                  <exclude>**/core/constraints/DefaultKeySizeConstraintTest.java</exclude>
-                </includes>
-              </configuration>
-            </execution>
-          </executions>
         </plugin>
       </plugins>
     </pluginManagement>
@@ -282,6 +277,8 @@
                 <allow>javax[.]security[.]auth[.]DestroyFailedException</allow>
                 <!-- allow questionable Hadoop exceptions for mapreduce -->
                 <allow>org[.]apache[.]hadoop[.]mapred[.](FileAlreadyExistsException|InvalidJobConfException)</allow>
+                <!-- allow the following types from the visibility API -->
+                <allow>org[.]apache[.]accumulo[.]access[.].*</allow>
               </allows>
             </configuration>
           </execution>
@@ -297,6 +294,8 @@
               </includes>
               <excludes />
               <allows>
+                <allow>io[.]micrometer[.]core[.]instrument[.]MeterRegistry</allow>
+                <allow>io[.]opentelemetry[.]api[.]OpenTelemetry</allow>
                 <allow>org[.]apache[.]hadoop[.]io[.]Text</allow>
                 <allow>org[.]apache[.]accumulo[.]core[.]client[.].*</allow>
                 <allow>org[.]apache[.]accumulo[.]core[.]data[.].*</allow>
@@ -357,9 +356,8 @@
             </goals>
             <phase>prepare-package</phase>
             <configuration>
-              <executable>mkdir</executable>
+              <executable>${basedir}/src/main/scripts/mkdirs.sh</executable>
               <arguments>
-                <argument>-p</argument>
                 <argument>${project.build.directory}/generated-docs</argument>
               </arguments>
             </configuration>
@@ -375,7 +373,7 @@
               <classpathScope>test</classpathScope>
               <arguments>
                 <argument>--generate-markdown</argument>
-                <argument>${project.build.directory}/generated-docs/server-properties.md</argument>
+                <argument>${project.build.directory}/generated-docs/server-properties3.md</argument>
               </arguments>
             </configuration>
           </execution>
@@ -390,7 +388,22 @@
               <classpathScope>test</classpathScope>
               <arguments>
                 <argument>--generate-markdown</argument>
-                <argument>${project.build.directory}/generated-docs/client-properties.md</argument>
+                <argument>${project.build.directory}/generated-docs/client-properties3.md</argument>
+              </arguments>
+            </configuration>
+          </execution>
+          <execution>
+            <id>metrics-markdown</id>
+            <goals>
+              <goal>java</goal>
+            </goals>
+            <phase>package</phase>
+            <configuration>
+              <mainClass>org.apache.accumulo.core.metrics.MetricsDocGen</mainClass>
+              <classpathScope>test</classpathScope>
+              <arguments>
+                <argument>--generate-markdown</argument>
+                <argument>${project.build.directory}/generated-docs/metrics3.md</argument>
               </arguments>
             </configuration>
           </execution>
@@ -420,6 +433,65 @@
             </executions>
           </plugin>
         </plugins>
+      </build>
+    </profile>
+    <profile>
+      <!-- profile for running second execution of surefire without reusing forks -->
+      <!-- on by default, but disable with '-P !reuseForksFalse' or '-Dtest=SomeTest' -->
+      <id>reuseForksFalse</id>
+      <activation>
+        <property>
+          <name>!test</name>
+        </property>
+      </activation>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-surefire-plugin</artifactId>
+              <configuration>
+                <!-- Tests that cannot run with reuseForks=true -->
+                <excludes>
+                  <exclude>**/InternerTest.java</exclude>
+                  <exclude>**/NamespaceIdTest.java</exclude>
+                  <exclude>**/TableIdTest.java</exclude>
+                  <exclude>**/HadoopCredentialProviderTest.java</exclude>
+                  <exclude>**/IdleRatioScanPrioritizerTest.java</exclude>
+                  <exclude>**/TestCfCqSlice.java</exclude>
+                  <exclude>**/TestCfCqSliceSeekingFilter.java</exclude>
+                  <exclude>**/core/constraints/DefaultKeySizeConstraintTest.java</exclude>
+                  <exclude>**/core/rpc/SaslConnectionParamsTest.java</exclude>
+                  <exclude>**/core/clientImpl/ThriftTransportKeyTest.java</exclude>
+                </excludes>
+              </configuration>
+              <executions>
+                <execution>
+                  <id>reuseForks-false-tests</id>
+                  <goals>
+                    <goal>test</goal>
+                  </goals>
+                  <configuration>
+                    <reuseForks>false</reuseForks>
+                    <excludes combine.self="override" />
+                    <includes combine.self="override">
+                      <include>**/InternerTest.java</include>
+                      <include>**/NamespaceIdTest.java</include>
+                      <include>**/TableIdTest.java</include>
+                      <include>**/HadoopCredentialProviderTest.java</include>
+                      <include>**/IdleRatioScanPrioritizerTest.java</include>
+                      <include>**/TestCfCqSlice.java</include>
+                      <include>**/TestCfCqSliceSeekingFilter.java</include>
+                      <include>**/core/constraints/DefaultKeySizeConstraintTest.java</include>
+                      <include>**/core/rpc/SaslConnectionParamsTest.java</include>
+                      <include>**/core/clientImpl/ThriftTransportKeyTest.java</include>
+                    </includes>
+                  </configuration>
+                </execution>
+              </executions>
+            </plugin>
+          </plugins>
+        </pluginManagement>
       </build>
     </profile>
   </profiles>

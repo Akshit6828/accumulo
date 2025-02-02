@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,10 +18,10 @@
  */
 package org.apache.accumulo.core.spi.balancer;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,6 +33,7 @@ import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.TabletId;
 import org.apache.accumulo.core.dataImpl.KeyExtent;
@@ -41,15 +42,16 @@ import org.apache.accumulo.core.manager.balancer.BalanceParamsImpl;
 import org.apache.accumulo.core.manager.balancer.TServerStatusImpl;
 import org.apache.accumulo.core.manager.balancer.TabletServerIdImpl;
 import org.apache.accumulo.core.manager.balancer.TabletStatisticsImpl;
-import org.apache.accumulo.core.master.thrift.TableInfo;
+import org.apache.accumulo.core.manager.thrift.TableInfo;
+import org.apache.accumulo.core.metadata.schema.Ample.DataLevel;
 import org.apache.accumulo.core.spi.balancer.data.TServerStatus;
 import org.apache.accumulo.core.spi.balancer.data.TabletMigration;
 import org.apache.accumulo.core.spi.balancer.data.TabletServerId;
 import org.apache.accumulo.core.spi.balancer.data.TabletStatistics;
 import org.apache.accumulo.core.tabletserver.thrift.TabletStats;
 import org.apache.hadoop.io.Text;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class SimpleLoadBalancerTest {
 
@@ -57,13 +59,14 @@ public class SimpleLoadBalancerTest {
     List<TabletId> tablets = new ArrayList<>();
 
     TServerStatus getStatus() {
-      org.apache.accumulo.core.master.thrift.TabletServerStatus result =
-          new org.apache.accumulo.core.master.thrift.TabletServerStatus();
+      org.apache.accumulo.core.manager.thrift.TabletServerStatus result =
+          new org.apache.accumulo.core.manager.thrift.TabletServerStatus();
       result.tableMap = new HashMap<>();
       for (TabletId tabletId : tablets) {
         TableInfo info = result.tableMap.get(tabletId.getTable().canonical());
-        if (info == null)
+        if (info == null) {
           result.tableMap.put(tabletId.getTable().canonical(), info = new TableInfo());
+        }
         info.onlineTablets++;
         info.recs = info.onlineTablets;
         info.ingestRate = 123.;
@@ -85,8 +88,7 @@ public class SimpleLoadBalancerTest {
       for (TabletId tabletId : servers.get(tserver).tablets) {
         if (tabletId.getTable().equals(tableId)) {
           KeyExtent extent = new KeyExtent(tableId, tabletId.getEndRow(), tabletId.getPrevEndRow());
-          TabletStats stats =
-              new TabletStats(new TabletStats(extent.toThrift(), null, null, null, 0L, 0., 0., 0));
+          TabletStats stats = new TabletStats(new TabletStats(extent.toThrift(), null, 0L, 0., 0.));
           result.add(new TabletStatisticsImpl(stats));
         }
       }
@@ -94,7 +96,7 @@ public class SimpleLoadBalancerTest {
     }
   }
 
-  @Before
+  @BeforeEach
   public void setUp() {
     last.clear();
     servers.clear();
@@ -201,12 +203,17 @@ public class SimpleLoadBalancerTest {
     // balance until we can't balance no more!
     while (true) {
       List<TabletMigration> migrationsOut = new ArrayList<>();
-      balancer.balance(new BalanceParamsImpl(getAssignments(servers), migrations, migrationsOut));
-      if (migrationsOut.isEmpty())
+      SortedMap<TabletServerId,TServerStatus> tservers = getAssignments(servers);
+      balancer.balance(new BalanceParamsImpl(tservers,
+          Map.of(Constants.DEFAULT_RESOURCE_GROUP_NAME, tservers.keySet()), migrations,
+          migrationsOut, DataLevel.USER));
+      if (migrationsOut.isEmpty()) {
         break;
+      }
       for (TabletMigration migration : migrationsOut) {
-        if (servers.get(migration.getOldTabletServer()).tablets.remove(migration.getTablet()))
+        if (servers.get(migration.getOldTabletServer()).tablets.remove(migration.getTablet())) {
           moved++;
+        }
         servers.get(migration.getNewTabletServer()).tablets.add(migration.getTablet());
       }
     }
@@ -241,12 +248,17 @@ public class SimpleLoadBalancerTest {
     // balance until we can't balance no more!
     while (true) {
       List<TabletMigration> migrationsOut = new ArrayList<>();
-      balancer.balance(new BalanceParamsImpl(getAssignments(servers), migrations, migrationsOut));
-      if (migrationsOut.isEmpty())
+      SortedMap<TabletServerId,TServerStatus> tservers = getAssignments(servers);
+      balancer.balance(new BalanceParamsImpl(tservers,
+          Map.of(Constants.DEFAULT_RESOURCE_GROUP_NAME, tservers.keySet()), migrations,
+          migrationsOut, DataLevel.USER));
+      if (migrationsOut.isEmpty()) {
         break;
+      }
       for (TabletMigration migration : migrationsOut) {
-        if (servers.get(migration.getOldTabletServer()).tablets.remove(migration.getTablet()))
+        if (servers.get(migration.getOldTabletServer()).tablets.remove(migration.getTablet())) {
           moved++;
+        }
         last.remove(migration.getTablet());
         servers.get(migration.getNewTabletServer()).tablets.add(migration.getTablet());
         last.put(migration.getTablet(), migration.getNewTabletServer());
@@ -262,12 +274,14 @@ public class SimpleLoadBalancerTest {
     int average = metadataTable.size() / servers.size();
     for (FakeTServer server : servers.values()) {
       int diff = server.tablets.size() - average;
-      if (diff < 0)
+      if (diff < 0) {
         fail("average number of tablets is " + average + " but a server has "
             + server.tablets.size());
-      if (diff > 1)
+      }
+      if (diff > 1) {
         fail("average number of tablets is " + average + " but a server has "
             + server.tablets.size());
+      }
     }
 
     if (expectedCounts != null) {
@@ -288,8 +302,9 @@ public class SimpleLoadBalancerTest {
   }
 
   private static Text toText(String value) {
-    if (value != null)
+    if (value != null) {
       return new Text(value);
+    }
     return null;
   }
 

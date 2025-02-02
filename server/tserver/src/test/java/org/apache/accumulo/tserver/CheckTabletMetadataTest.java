@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,9 +18,11 @@
  */
 package org.apache.accumulo.tserver;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.accumulo.tserver.AssignmentHandler.checkTabletMetadata;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.EnumSet;
 import java.util.TreeMap;
@@ -38,7 +40,7 @@ import org.apache.accumulo.core.metadata.schema.TabletMetadata;
 import org.apache.accumulo.core.metadata.schema.TabletMetadata.ColumnType;
 import org.apache.accumulo.core.util.ColumnFQ;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class CheckTabletMetadataTest {
 
@@ -64,8 +66,8 @@ public class CheckTabletMetadataTest {
   private static void assertFail(TreeMap<Key,Value> tabletMeta, KeyExtent ke, TServerInstance tsi) {
     try {
       TabletMetadata tm = TabletMetadata.convertRow(tabletMeta.entrySet().iterator(),
-          EnumSet.allOf(ColumnType.class), true);
-      assertFalse(TabletServer.checkTabletMetadata(ke, tsi, tm));
+          EnumSet.allOf(ColumnType.class), true, false);
+      assertFalse(checkTabletMetadata(ke, tsi, tm));
     } catch (Exception e) {
       e.printStackTrace();
     }
@@ -77,8 +79,8 @@ public class CheckTabletMetadataTest {
     assertNotNull(copy.remove(keyToDelete));
     try {
       TabletMetadata tm = TabletMetadata.convertRow(copy.entrySet().iterator(),
-          EnumSet.allOf(ColumnType.class), true);
-      assertFalse(TabletServer.checkTabletMetadata(ke, tsi, tm));
+          EnumSet.allOf(ColumnType.class), true, false);
+      assertFalse(checkTabletMetadata(ke, tsi, tm));
     } catch (Exception e) {
       e.printStackTrace();
     }
@@ -93,15 +95,15 @@ public class CheckTabletMetadataTest {
 
     put(tabletMeta, "1<", TabletColumnFamily.PREV_ROW_COLUMN,
         TabletColumnFamily.encodePrevEndRow(null).get());
-    put(tabletMeta, "1<", ServerColumnFamily.DIRECTORY_COLUMN, "t1".getBytes());
-    put(tabletMeta, "1<", ServerColumnFamily.TIME_COLUMN, "M0".getBytes());
+    put(tabletMeta, "1<", ServerColumnFamily.DIRECTORY_COLUMN, "t1".getBytes(UTF_8));
+    put(tabletMeta, "1<", ServerColumnFamily.TIME_COLUMN, "M0".getBytes(UTF_8));
     put(tabletMeta, "1<", FutureLocationColumnFamily.NAME, "4", "127.0.0.1:9997");
 
     TServerInstance tsi = new TServerInstance("127.0.0.1:9997", 4);
 
     TabletMetadata tm = TabletMetadata.convertRow(tabletMeta.entrySet().iterator(),
-        EnumSet.allOf(ColumnType.class), true);
-    assertTrue(TabletServer.checkTabletMetadata(ke, tsi, tm));
+        EnumSet.allOf(ColumnType.class), true, false);
+    assertTrue(checkTabletMetadata(ke, tsi, tm));
 
     assertFail(tabletMeta, ke, new TServerInstance("127.0.0.1:9998", 4));
     assertFail(tabletMeta, ke, new TServerInstance("127.0.0.1:9998", 5));

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -25,23 +25,30 @@ import java.security.Security;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.net.HostAndPort;
+
 public class AddressUtil {
 
   private static final Logger log = LoggerFactory.getLogger(AddressUtil.class);
 
-  public static HostAndPort parseAddress(String address, boolean ignoreMissingPort)
-      throws NumberFormatException {
-    address = address.replace('+', ':');
-    HostAndPort hap = HostAndPort.fromString(address);
-    if (!ignoreMissingPort && !hap.hasPort())
+  public static HostAndPort parseAddress(final String address) throws NumberFormatException {
+    String normalized = normalizePortSeparator(address);
+    HostAndPort hap = HostAndPort.fromString(normalized);
+    if (!hap.hasPort()) {
       throw new IllegalArgumentException(
           "Address was expected to contain port. address=" + address);
+    }
 
     return hap;
   }
 
-  public static HostAndPort parseAddress(String address, int defaultPort) {
-    return parseAddress(address, true).withDefaultPort(defaultPort);
+  public static HostAndPort parseAddress(final String address, final int defaultPort) {
+    String normalized = normalizePortSeparator(address);
+    return HostAndPort.fromString(normalized).withDefaultPort(defaultPort);
+  }
+
+  private static String normalizePortSeparator(final String address) {
+    return address.replace('+', ':');
   }
 
   /**
@@ -49,19 +56,18 @@ public class AddressUtil {
    * security property 'networkaddress.cache.negative.ttl'. Should that fail returns the default
    * value used in the Oracle JVM 1.4+, which is 10 seconds.
    *
-   * @param originalException
-   *          the host lookup that is the source of needing this lookup. maybe be null.
+   * @param originalException the host lookup that is the source of needing this lookup. maybe be
+   *        null.
    * @return positive integer number of seconds
    * @see InetAddress
-   * @throws IllegalArgumentException
-   *           if dns failures are cached forever
+   * @throws IllegalArgumentException if dns failures are cached forever
    */
   public static int getAddressCacheNegativeTtl(UnknownHostException originalException) {
     int negativeTtl = 10;
     try {
       negativeTtl = Integer.parseInt(Security.getProperty("networkaddress.cache.negative.ttl"));
     } catch (NumberFormatException exception) {
-      log.warn("Failed to get JVM negative DNS respones cache TTL due to format problem "
+      log.warn("Failed to get JVM negative DNS response cache TTL due to format problem "
           + "(e.g. this JVM might not have the property). "
           + "Falling back to default based on Oracle JVM 1.4+ (10s)", exception);
     } catch (SecurityException exception) {
@@ -70,7 +76,7 @@ public class AddressUtil {
     }
     if (negativeTtl == -1) {
       log.error(
-          "JVM negative DNS repsonse cache TTL is set to 'forever' and host lookup failed. "
+          "JVM negative DNS response cache TTL is set to 'forever' and host lookup failed. "
               + "TTL can be changed with security property "
               + "'networkaddress.cache.negative.ttl', see java.net.InetAddress.",
           originalException);

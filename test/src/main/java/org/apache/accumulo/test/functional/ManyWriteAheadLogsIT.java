@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,14 +18,13 @@
  */
 package org.apache.accumulo.test.functional;
 
-import static org.junit.Assert.assertTrue;
+import static org.apache.accumulo.core.util.LazySingletons.RANDOM;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Random;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -45,17 +44,14 @@ import org.apache.accumulo.server.log.WalStateManager.WalState;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.io.Text;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class ManyWriteAheadLogsIT extends AccumuloClusterHarness {
 
   private static final Logger log = LoggerFactory.getLogger(ManyWriteAheadLogsIT.class);
-
-  private String majcDelay, walSize;
 
   @Override
   public void configureMiniCluster(MiniAccumuloConfigImpl cfg, Configuration hadoopCoreSite) {
@@ -64,47 +60,24 @@ public class ManyWriteAheadLogsIT extends AccumuloClusterHarness {
     cfg.setProperty(Property.GC_CYCLE_DELAY, "1");
     cfg.setProperty(Property.GC_CYCLE_START, "1");
     cfg.setProperty(Property.MANAGER_RECOVERY_DELAY, "1s");
-    cfg.setProperty(Property.TSERV_MAJC_DELAY, "1");
     cfg.setProperty(Property.INSTANCE_ZK_TIMEOUT, "15s");
     // idle compactions may addess the problem this test is creating, however they will not prevent
     // lots of closed WALs for all write patterns. This test ensures code that directly handles many
     // tablets referencing many different WALs is working.
-    cfg.setProperty(Property.TABLE_MINC_COMPACT_IDLETIME, "1h");
-    cfg.setNumTservers(1);
+    cfg.setProperty(Property.TABLE_MINC_COMPACT_MAXAGE, "1h");
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(1);
     hadoopCoreSite.set("fs.file.impl", RawLocalFileSystem.class.getName());
   }
 
-  @Override
-  protected int defaultTimeoutSeconds() {
-    return 10 * 60;
-  }
-
-  @Before
+  @BeforeEach
   public void alterConfig() throws Exception {
     if (getClusterType() == ClusterType.MINI) {
       return;
     }
     try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
       InstanceOperations iops = client.instanceOperations();
-      Map<String,String> conf = iops.getSystemConfiguration();
-      majcDelay = conf.get(Property.TSERV_MAJC_DELAY.getKey());
-      walSize = conf.get(Property.TSERV_WAL_MAX_SIZE.getKey());
-      iops.setProperty(Property.TSERV_MAJC_DELAY.getKey(), "1");
       iops.setProperty(Property.TSERV_WAL_MAX_SIZE.getKey(), "1M");
 
-      getClusterControl().stopAllServers(ServerType.TABLET_SERVER);
-      getClusterControl().startAllServers(ServerType.TABLET_SERVER);
-    }
-  }
-
-  @After
-  public void resetConfig() throws Exception {
-    if (majcDelay != null) {
-      try (AccumuloClient client = Accumulo.newClient().from(getClientProps()).build()) {
-        InstanceOperations iops = client.instanceOperations();
-        iops.setProperty(Property.TSERV_MAJC_DELAY.getKey(), majcDelay);
-        iops.setProperty(Property.TSERV_WAL_MAX_SIZE.getKey(), walSize);
-      }
       getClusterControl().stopAllServers(ServerType.TABLET_SERVER);
       getClusterControl().startAllServers(ServerType.TABLET_SERVER);
     }
@@ -122,7 +95,7 @@ public class ManyWriteAheadLogsIT extends AccumuloClusterHarness {
       splits.add(new Text(String.format("%05x", i * 100)));
     }
 
-    ServerContext ctx = getServerContext();
+    ServerContext context = getServerContext();
 
     try (AccumuloClient c = Accumulo.newClient().from(getClientProps()).build()) {
       String[] tableNames = getUniqueNames(2);
@@ -135,11 +108,9 @@ public class ManyWriteAheadLogsIT extends AccumuloClusterHarness {
 
       c.tableOperations().create(rollWALsTable);
 
-      Random rand = new SecureRandom();
-
       Set<String> allWalsSeen = new HashSet<>();
 
-      addOpenWals(ctx, allWalsSeen);
+      addOpenWals(context, allWalsSeen);
 
       // This test creates the table manyWALsTable with a lot of tablets and writes a little bit to
       // each tablet. In between writing a little bit to each tablet a lot of data is written to
@@ -160,7 +131,7 @@ public class ManyWriteAheadLogsIT extends AccumuloClusterHarness {
           for (int j = 0; j < 10; j++) {
             int row = startRow + j;
             Mutation m = new Mutation(String.format("%05x", row));
-            rand.nextBytes(val);
+            RANDOM.get().nextBytes(val);
             m.put("f", "q", "v");
 
             manyWALsWriter.addMutation(m);
@@ -170,7 +141,7 @@ public class ManyWriteAheadLogsIT extends AccumuloClusterHarness {
           // write a lot of data to second table to forces the logs to roll
           for (int j = 0; j < 1000; j++) {
             Mutation m = new Mutation(String.format("%03d", j));
-            rand.nextBytes(val);
+            RANDOM.get().nextBytes(val);
 
             m.put("f", "q", Base64.getEncoder().encodeToString(val));
 
@@ -181,19 +152,19 @@ public class ManyWriteAheadLogsIT extends AccumuloClusterHarness {
 
           // keep track of the open WALs as the test runs. Should see a lot of open WALs over the
           // lifetime of the test, but never a lot at any one time.
-          addOpenWals(ctx, allWalsSeen);
+          addOpenWals(context, allWalsSeen);
         }
       }
 
-      assertTrue("Number of WALs seen was less than expected " + allWalsSeen.size(),
-          allWalsSeen.size() >= 50);
+      assertTrue(allWalsSeen.size() >= 50,
+          "Number of WALs seen was less than expected " + allWalsSeen.size());
 
       // the total number of closed write ahead logs should get small
-      int closedLogs = countClosedWals(ctx);
+      int closedLogs = countClosedWals(context);
       while (closedLogs > 3) {
         log.debug("Waiting for wals to shrink " + closedLogs);
         Thread.sleep(250);
-        closedLogs = countClosedWals(ctx);
+        closedLogs = countClosedWals(context);
       }
     }
   }
@@ -221,13 +192,14 @@ public class ManyWriteAheadLogsIT extends AccumuloClusterHarness {
 
       if (!foundWal) {
         Thread.sleep(50);
-        if (attempts % 50 == 0)
+        if (attempts % 50 == 0) {
           log.debug("No open WALs found in {} attempts.", attempts);
+        }
       }
     }
 
     log.debug("It took {} attempt(s) to find {} open WALs", attempts, open);
-    assertTrue("Open WALs not in expected range " + open, open > 0 && open < 4);
+    assertTrue(open > 0 && open < 4, "Open WALs not in expected range " + open);
   }
 
   private int countClosedWals(ServerContext c) throws Exception {

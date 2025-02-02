@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,8 @@
  */
 package org.apache.accumulo.manager.tableOps.clone;
 
-import org.apache.accumulo.fate.Repo;
+import org.apache.accumulo.core.fate.FateId;
+import org.apache.accumulo.core.fate.Repo;
 import org.apache.accumulo.manager.Manager;
 import org.apache.accumulo.manager.tableOps.ManagerRepo;
 import org.apache.accumulo.server.util.MetadataTableUtil;
@@ -27,19 +28,19 @@ import org.slf4j.LoggerFactory;
 class CloneMetadata extends ManagerRepo {
 
   private static final long serialVersionUID = 1L;
-  private CloneInfo cloneInfo;
+  private final CloneInfo cloneInfo;
 
   public CloneMetadata(CloneInfo cloneInfo) {
     this.cloneInfo = cloneInfo;
   }
 
   @Override
-  public long isReady(long tid, Manager environment) {
+  public long isReady(FateId fateId, Manager environment) {
     return 0;
   }
 
   @Override
-  public Repo<Manager> call(long tid, Manager environment) throws Exception {
+  public Repo<Manager> call(FateId fateId, Manager environment) throws Exception {
     LoggerFactory.getLogger(CloneMetadata.class)
         .info(String.format("Cloning %s with tableId %s from srcTableId %s", cloneInfo.tableName,
             cloneInfo.tableId, cloneInfo.srcTableId));
@@ -52,7 +53,7 @@ class CloneMetadata extends ManagerRepo {
   }
 
   @Override
-  public void undo(long tid, Manager environment) throws Exception {
+  public void undo(FateId fateId, Manager environment) throws Exception {
     MetadataTableUtil.deleteTable(cloneInfo.tableId, false, environment.getContext(),
         environment.getManagerLock());
   }

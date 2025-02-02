@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,7 +18,13 @@
  */
 package org.apache.accumulo.core.conf;
 
+import static org.apache.accumulo.core.conf.Property.GENERAL_ARBITRARY_PROP_PREFIX;
+import static org.apache.accumulo.core.conf.Property.INSTANCE_CRYPTO_PREFIX;
+import static org.apache.accumulo.core.conf.Property.TABLE_CRYPTO_PREFIX;
+
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -35,10 +41,12 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import org.apache.accumulo.core.conf.PropertyType.PortRange;
-import org.apache.accumulo.core.spi.scan.SimpleScanDispatcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,45 +69,83 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
   }
 
   private volatile EnumMap<Property,PrefixProps> cachedPrefixProps = new EnumMap<>(Property.class);
-  private Lock prefixCacheUpdateLock = new ReentrantLock();
+  private final Lock prefixCacheUpdateLock = new ReentrantLock();
 
   private static final Logger log = LoggerFactory.getLogger(AccumuloConfiguration.class);
+
+  private static final List<Property> DURATION_PROPS = Arrays.stream(Property.values())
+      .filter(property -> property.getType() == PropertyType.TIMEDURATION)
+      .collect(Collectors.toUnmodifiableList());
+
+  private final Deriver<EnumMap<Property,Duration>> durationDeriver = newDeriver(conf -> {
+    EnumMap<Property,Duration> durations = new EnumMap<>(Property.class);
+    for (Property prop : DURATION_PROPS) {
+      var value = conf.get(prop);
+      if (value != null) {
+        try {
+          var durationMillis = ConfigurationTypeHelper.getTimeInMillis(value);
+          durations.put(prop, Duration.ofMillis(durationMillis));
+        } catch (RuntimeException e) {
+          log.error("Failed to parse duration for {}={}", prop, value, e);
+        }
+      }
+    }
+    log.trace("recomputed durations {}", durations);
+    return durations;
+  });
 
   /**
    * Gets a property value from this configuration.
    *
    * <p>
-   * Note: this is inefficient, but convenient on occasion. For retrieving multiple properties, use
-   * {@link #getProperties(Map, Predicate)} with a custom filter.
+   * Note: this is inefficient for values that are not a {@link Property}. For retrieving multiple
+   * properties, use {@link #getProperties(Map, Predicate)} with a custom filter.
    *
-   * @param property
-   *          property to get
+   * @param property property to get
    * @return property value
    */
   public String get(String property) {
-    Map<String,String> propMap = new HashMap<>(1);
-    getProperties(propMap, key -> Objects.equals(property, key));
-    return propMap.get(property);
+    Property p = Property.getPropertyByKey(property);
+    if (p != null) {
+      return get(p);
+    } else {
+      Map<String,String> propMap = new HashMap<>(1);
+      getProperties(propMap, key -> Objects.equals(property, key));
+      return propMap.get(property);
+    }
   }
 
   /**
    * Gets a property value from this configuration.
    *
-   * @param property
-   *          property to get
+   * @param property property to get
    * @return property value
    */
   public abstract String get(Property property);
 
   /**
-   * Given a property and a deprecated property determine which one to use base on which one is set.
+   * Given a property that is not deprecated and an ordered list of deprecated properties, determine
+   * which one to use based on which is set by the user in the configuration. If the non-deprecated
+   * property is set, use that. Otherwise, use the first deprecated property that is set. If no
+   * deprecated properties are set, use the non-deprecated property by default, even though it is
+   * not set (since it is not set, it will resolve to its default value). Since the deprecated
+   * properties are checked in order, newer properties should be on the left, replacing older
+   * properties on the right, so if a newer property is set, it will be selected over any older
+   * property that may also be set.
    */
-  public Property resolve(Property property, Property deprecatedProperty) {
-    if (isPropertySet(property, true) || !isPropertySet(deprecatedProperty, true)) {
-      return property;
-    } else {
-      return deprecatedProperty;
+  public Property resolve(Property property, Property... deprecated) {
+    if (property.isDeprecated()) {
+      throw new IllegalArgumentException("Unexpected deprecated " + property.name());
     }
+    for (Property p : deprecated) {
+      if (!p.isDeprecated()) {
+        var notDeprecated = Stream.of(deprecated).filter(Predicate.not(Property::isDeprecated))
+            .map(Property::name).collect(Collectors.toList());
+        throw new IllegalArgumentException("Unexpected non-deprecated " + notDeprecated);
+      }
+    }
+    return isPropertySet(property) ? property
+        : Stream.of(deprecated).filter(this::isPropertySet).findFirst().orElse(property);
   }
 
   /**
@@ -107,10 +153,8 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
    * configuration which pass the given filter, and those supplied from the parent configuration
    * which are not included from here.
    *
-   * @param props
-   *          properties object to populate
-   * @param filter
-   *          filter for accepting properties from this configuration
+   * @param props properties object to populate
+   * @param filter filter for accepting properties from this configuration
    */
   public abstract void getProperties(Map<String,String> props, Predicate<String> filter);
 
@@ -149,18 +193,18 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
   /**
    * Gets all properties under the given prefix in this configuration.
    *
-   * @param property
-   *          prefix property, must be of type PropertyType.PREFIX
+   * @param property prefix property, must be of type PropertyType.PREFIX
    * @return a map of property keys to values
-   * @throws IllegalArgumentException
-   *           if property is not a prefix
+   * @throws IllegalArgumentException if property is not a prefix
    */
   public Map<String,String> getAllPropertiesWithPrefix(Property property) {
     checkType(property, PropertyType.PREFIX);
 
     PrefixProps prefixProps = cachedPrefixProps.get(property);
 
-    if (prefixProps == null || prefixProps.updateCount != getUpdateCount()) {
+    long currentCount = getUpdateCount();
+
+    if (prefixProps == null || prefixProps.updateCount != currentCount) {
       prefixCacheUpdateLock.lock();
       try {
         // Very important that update count is read before getting properties. Also only read it
@@ -207,15 +251,21 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
     return builder.build();
   }
 
+  public Map<String,String> getAllCryptoProperties() {
+    Map<String,String> allProps = new HashMap<>();
+    allProps.putAll(getAllPropertiesWithPrefix(INSTANCE_CRYPTO_PREFIX));
+    allProps.putAll(getAllPropertiesWithPrefix(GENERAL_ARBITRARY_PROP_PREFIX));
+    allProps.putAll(getAllPropertiesWithPrefix(TABLE_CRYPTO_PREFIX));
+    return allProps;
+  }
+
   /**
    * Gets a property of type {@link PropertyType#BYTES} or {@link PropertyType#MEMORY}, interpreting
    * the value properly.
    *
-   * @param property
-   *          Property to get
+   * @param property Property to get
    * @return property value
-   * @throws IllegalArgumentException
-   *           if the property is of the wrong type
+   * @throws IllegalArgumentException if the property is of the wrong type
    */
   public long getAsBytes(Property property) {
     String memString = get(property);
@@ -231,27 +281,33 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
   /**
    * Gets a property of type {@link PropertyType#TIMEDURATION}, interpreting the value properly.
    *
-   * @param property
-   *          property to get
+   * @param property property to get
+   * @throws IllegalArgumentException if the property is of the wrong type
+   */
+  public Duration getDuration(Property property) {
+    checkType(property, PropertyType.TIMEDURATION);
+    return Objects.requireNonNull(durationDeriver.derive().get(property), () -> "Property "
+        + property.getKey() + " is not set or its value did not parse correctly.");
+  }
+
+  /**
+   * Gets a property of type {@link PropertyType#TIMEDURATION}, interpreting the value properly.
+   *
+   * @param property property to get
    * @return property value
-   * @throws IllegalArgumentException
-   *           if the property is of the wrong type
+   * @throws IllegalArgumentException if the property is of the wrong type
    */
   public long getTimeInMillis(Property property) {
-    checkType(property, PropertyType.TIMEDURATION);
-
-    return ConfigurationTypeHelper.getTimeInMillis(get(property));
+    return getDuration(property).toMillis();
   }
 
   /**
    * Gets a property of type {@link PropertyType#BOOLEAN}, interpreting the value properly (using
    * <code>Boolean.parseBoolean()</code>).
    *
-   * @param property
-   *          property to get
+   * @param property property to get
    * @return property value
-   * @throws IllegalArgumentException
-   *           if the property is of the wrong type
+   * @throws IllegalArgumentException if the property is of the wrong type
    */
   public boolean getBoolean(Property property) {
     checkType(property, PropertyType.BOOLEAN);
@@ -261,11 +317,9 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
   /**
    * Gets a property of type {@link PropertyType#FRACTION}, interpreting the value properly.
    *
-   * @param property
-   *          property to get
+   * @param property property to get
    * @return property value
-   * @throws IllegalArgumentException
-   *           if the property is of the wrong type
+   * @throws IllegalArgumentException if the property is of the wrong type
    */
   public double getFraction(Property property) {
     checkType(property, PropertyType.FRACTION);
@@ -278,11 +332,9 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
    * integer within the range of non-privileged ports). Consider using
    * {@link #getPortStream(Property)}, if an array is not needed.
    *
-   * @param property
-   *          property to get
+   * @param property property to get
    * @return property value
-   * @throws IllegalArgumentException
-   *           if the property is of the wrong type
+   * @throws IllegalArgumentException if the property is of the wrong type
    */
   public int[] getPort(Property property) {
     return getPortStream(property).toArray();
@@ -317,11 +369,9 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
    * Gets a property of type {@link PropertyType#COUNT}, interpreting the value properly (as an
    * integer).
    *
-   * @param property
-   *          property to get
+   * @param property property to get
    * @return property value
-   * @throws IllegalArgumentException
-   *           if the property is of the wrong type
+   * @throws IllegalArgumentException if the property is of the wrong type
    */
   public int getCount(Property property) {
     checkType(property, PropertyType.COUNT);
@@ -333,11 +383,9 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
   /**
    * Gets a property of type {@link PropertyType#PATH}.
    *
-   * @param property
-   *          property to get
+   * @param property property to get
    * @return property value
-   * @throws IllegalArgumentException
-   *           if the property is of the wrong type
+   * @throws IllegalArgumentException if the property is of the wrong type
    */
   public String getPath(Property property) {
     checkType(property, PropertyType.PATH);
@@ -378,73 +426,48 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
     public final OptionalInt priority;
     public final Optional<String> prioritizerClass;
     public final Map<String,String> prioritizerOpts;
+    public final boolean isScanServer;
 
     public ScanExecutorConfig(String name, int maxThreads, OptionalInt priority,
-        Optional<String> comparatorFactory, Map<String,String> comparatorFactoryOpts) {
+        Optional<String> comparatorFactory, Map<String,String> comparatorFactoryOpts,
+        boolean isScanServer) {
       this.name = name;
       this.maxThreads = maxThreads;
       this.priority = priority;
       this.prioritizerClass = comparatorFactory;
       this.prioritizerOpts = comparatorFactoryOpts;
+      this.isScanServer = isScanServer;
     }
 
     /**
      * Re-reads the max threads from the configuration that created this class
      */
     public int getCurrentMaxThreads() {
-      Integer depThreads = getDeprecatedScanThreads(name);
-      if (depThreads != null) {
-        return depThreads;
+      if (isScanServer) {
+        String prop =
+            Property.SSERV_SCAN_EXECUTORS_PREFIX.getKey() + name + "." + SCAN_EXEC_THREADS;
+        String val = getAllPropertiesWithPrefix(Property.SSERV_SCAN_EXECUTORS_PREFIX).get(prop);
+        return Integer.parseInt(val);
+      } else {
+        String prop =
+            Property.TSERV_SCAN_EXECUTORS_PREFIX.getKey() + name + "." + SCAN_EXEC_THREADS;
+        String val = getAllPropertiesWithPrefix(Property.TSERV_SCAN_EXECUTORS_PREFIX).get(prop);
+        return Integer.parseInt(val);
       }
-
-      String prop = Property.TSERV_SCAN_EXECUTORS_PREFIX.getKey() + name + "." + SCAN_EXEC_THREADS;
-      String val = getAllPropertiesWithPrefix(Property.TSERV_SCAN_EXECUTORS_PREFIX).get(prop);
-      return Integer.parseInt(val);
     }
   }
 
-  public boolean isPropertySet(Property prop, boolean cacheAndWatch) {
-    throw new UnsupportedOperationException();
-  }
-
-  // deprecation property warning could get spammy in tserver so only warn once
-  boolean depPropWarned = false;
-
-  @SuppressWarnings("deprecation")
-  Integer getDeprecatedScanThreads(String name) {
-
-    Property prop;
-    Property deprecatedProp;
-
-    if (name.equals(SimpleScanDispatcher.DEFAULT_SCAN_EXECUTOR_NAME)) {
-      prop = Property.TSERV_SCAN_EXECUTORS_DEFAULT_THREADS;
-      deprecatedProp = Property.TSERV_READ_AHEAD_MAXCONCURRENT;
-    } else if (name.equals("meta")) {
-      prop = Property.TSERV_SCAN_EXECUTORS_META_THREADS;
-      deprecatedProp = Property.TSERV_METADATA_READ_AHEAD_MAXCONCURRENT;
-    } else {
-      return null;
-    }
-
-    if (!isPropertySet(prop, true) && isPropertySet(deprecatedProp, true)) {
-      if (!depPropWarned) {
-        depPropWarned = true;
-        log.warn("Property {} is deprecated, use {} instead.", deprecatedProp.getKey(),
-            prop.getKey());
-      }
-      return Integer.valueOf(get(deprecatedProp));
-    } else if (isPropertySet(prop, true) && isPropertySet(deprecatedProp, true) && !depPropWarned) {
-      depPropWarned = true;
-      log.warn("Deprecated property {} ignored because {} is set", deprecatedProp.getKey(),
-          prop.getKey());
-    }
-
-    return null;
-  }
+  /**
+   * @param prop Property to check
+   * @return true if the given property has explicitly been set by a user, false otherwise; for
+   *         runtime-fixed properties, this returns true only if the property was set by the user
+   *         when the property's value was first read and entered a fixed state
+   */
+  public abstract boolean isPropertySet(Property prop);
 
   private static class RefCount<T> {
-    T obj;
-    long count;
+    final T obj;
+    final long count;
 
     RefCount(long c, T r) {
       this.count = c;
@@ -464,7 +487,7 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
     /**
      * This method was written with the goal of avoiding thread contention and minimizing
      * recomputation. Configuration can be accessed frequently by many threads. Ideally, threads
-     * working on unrelated task would not impeded each other because of accessing config.
+     * working on unrelated tasks would not impede each other because of accessing config.
      *
      * To avoid thread contention, synchronization and needless calls to compare and set were
      * avoided. For example if 100 threads are all calling compare and set in a loop this could
@@ -480,6 +503,12 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
 
       if (rc == null || rc.count != uc) {
         T newObj = converter.apply(AccumuloConfiguration.this);
+
+        if (newObj == null) {
+          // The converter should not return a null value and the Deriver
+          // should not store and return a null value.
+          throw new IllegalStateException("Deriver returned a null value");
+        }
 
         // very important to record the update count that was obtained before recomputing.
         RefCount<T> nrc = new RefCount<>(uc, newObj);
@@ -515,11 +544,11 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
    * Enables deriving an object from configuration and automatically deriving a new object any time
    * configuration changes.
    *
-   * @param converter
-   *          This functions is used to create an object from configuration. A reference to this
-   *          function will be kept and called by the returned deriver.
+   * @param converter This functions is used to create an object from configuration. A reference to
+   *        this function will be kept and called by the returned deriver.
    * @return The returned supplier will automatically re-derive the object any time this
    *         configuration changes. When configuration is not changing, the same object is returned.
+   * @throws IllegalStateException When a null return value is returned by the converter.
    *
    */
   public <T> Deriver<T> newDeriver(Function<AccumuloConfiguration,T> converter) {
@@ -531,17 +560,18 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
   private static final String SCAN_EXEC_PRIORITIZER = "prioritizer";
   private static final String SCAN_EXEC_PRIORITIZER_OPTS = "prioritizer.opts.";
 
-  public Collection<ScanExecutorConfig> getScanExecutors() {
+  public Collection<ScanExecutorConfig> getScanExecutors(boolean isScanServer) {
+
+    Property prefix =
+        isScanServer ? Property.SSERV_SCAN_EXECUTORS_PREFIX : Property.TSERV_SCAN_EXECUTORS_PREFIX;
 
     Map<String,Map<String,String>> propsByName = new HashMap<>();
 
     List<ScanExecutorConfig> scanResources = new ArrayList<>();
 
-    for (Entry<String,String> entry : getAllPropertiesWithPrefix(
-        Property.TSERV_SCAN_EXECUTORS_PREFIX).entrySet()) {
+    for (Entry<String,String> entry : getAllPropertiesWithPrefix(prefix).entrySet()) {
 
-      String suffix =
-          entry.getKey().substring(Property.TSERV_SCAN_EXECUTORS_PREFIX.getKey().length());
+      String suffix = entry.getKey().substring(prefix.getKey().length());
       String[] tokens = suffix.split("\\.", 2);
       String name = tokens[0];
 
@@ -560,12 +590,7 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
         String val = subEntry.getValue();
 
         if (opt.equals(SCAN_EXEC_THREADS)) {
-          Integer depThreads = getDeprecatedScanThreads(name);
-          if (depThreads == null) {
-            threads = Integer.parseInt(val);
-          } else {
-            threads = depThreads;
-          }
+          threads = Integer.parseInt(val);
         } else if (opt.equals(SCAN_EXEC_PRIORITY)) {
           prio = Integer.parseInt(val);
         } else if (opt.equals(SCAN_EXEC_PRIORITIZER)) {
@@ -577,7 +602,7 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
           }
           prioritizerOpts.put(key, val);
         } else {
-          throw new IllegalStateException("Unkown scan executor option : " + opt);
+          throw new IllegalStateException("Unknown scan executor option : " + opt);
         }
       }
 
@@ -586,7 +611,7 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
 
       scanResources.add(new ScanExecutorConfig(name, threads,
           prio == null ? OptionalInt.empty() : OptionalInt.of(prio),
-          Optional.ofNullable(prioritizerClass), prioritizerOpts));
+          Optional.ofNullable(prioritizerClass), prioritizerOpts, isScanServer));
     }
 
     return scanResources;
@@ -597,4 +622,17 @@ public abstract class AccumuloConfiguration implements Iterable<Entry<String,Str
    * this configuration.
    */
   public void invalidateCache() {}
+
+  /**
+   * get a parent configuration or null if it does not exist.
+   *
+   * @since 2.1.0
+   */
+  public AccumuloConfiguration getParent() {
+    return null;
+  }
+
+  public Stream<Entry<String,String>> stream() {
+    return StreamSupport.stream(this.spliterator(), false);
+  }
 }

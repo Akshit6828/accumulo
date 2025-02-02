@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,6 +19,7 @@
 package org.apache.accumulo.core.client;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.accumulo.core.conf.ClientProperty.BATCH_WRITER_LATENCY_MAX;
 import static org.apache.accumulo.core.conf.ClientProperty.BATCH_WRITER_MEMORY_MAX;
 import static org.apache.accumulo.core.conf.ClientProperty.BATCH_WRITER_THREADS_MAX;
@@ -65,10 +66,11 @@ public class BatchWriterConfig implements Writable {
   private static long getDefaultTimeout() {
     long defVal =
         ConfigurationTypeHelper.getTimeInMillis(BATCH_WRITER_TIMEOUT_MAX.getDefaultValue());
-    if (defVal == 0L)
+    if (defVal == 0L) {
       return Long.MAX_VALUE;
-    else
+    } else {
       return defVal;
+    }
   }
 
   /**
@@ -80,15 +82,14 @@ public class BatchWriterConfig implements Writable {
    * <p>
    * <b>Default:</b> 50M
    *
-   * @param maxMemory
-   *          max size in bytes
-   * @throws IllegalArgumentException
-   *           if {@code maxMemory} is less than 0
+   * @param maxMemory max size in bytes
+   * @throws IllegalArgumentException if {@code maxMemory} is less than 0
    * @return {@code this} to allow chaining of set methods
    */
   public BatchWriterConfig setMaxMemory(long maxMemory) {
-    if (maxMemory < 0)
+    if (maxMemory < 0) {
       throw new IllegalArgumentException("Max memory must be non-negative.");
+    }
     this.maxMemory = maxMemory;
     return this;
   }
@@ -106,24 +107,23 @@ public class BatchWriterConfig implements Writable {
    * <p>
    * <b>Default:</b> 120 seconds
    *
-   * @param maxLatency
-   *          the maximum latency, in the unit specified by the value of {@code timeUnit}
-   * @param timeUnit
-   *          determines how {@code maxLatency} will be interpreted
-   * @throws IllegalArgumentException
-   *           if {@code maxLatency} is less than 0
+   * @param maxLatency the maximum latency, in the unit specified by the value of {@code timeUnit}
+   * @param timeUnit determines how {@code maxLatency} will be interpreted
+   * @throws IllegalArgumentException if {@code maxLatency} is less than 0
    * @return {@code this} to allow chaining of set methods
    */
   public BatchWriterConfig setMaxLatency(long maxLatency, TimeUnit timeUnit) {
-    if (maxLatency < 0)
+    if (maxLatency < 0) {
       throw new IllegalArgumentException("Negative max latency not allowed " + maxLatency);
+    }
 
-    if (maxLatency == 0)
+    if (maxLatency == 0) {
       this.maxLatency = Long.MAX_VALUE;
-    else
+    } else {
       // make small, positive values that truncate to 0 when converted use the minimum millis
       // instead
       this.maxLatency = Math.max(1, timeUnit.toMillis(maxLatency));
+    }
     return this;
   }
 
@@ -141,24 +141,23 @@ public class BatchWriterConfig implements Writable {
    * <p>
    * <b>Default:</b> {@link Long#MAX_VALUE} (no timeout)
    *
-   * @param timeout
-   *          the timeout, in the unit specified by the value of {@code timeUnit}
-   * @param timeUnit
-   *          determines how {@code timeout} will be interpreted
-   * @throws IllegalArgumentException
-   *           if {@code timeout} is less than 0
+   * @param timeout the timeout, in the unit specified by the value of {@code timeUnit}
+   * @param timeUnit determines how {@code timeout} will be interpreted
+   * @throws IllegalArgumentException if {@code timeout} is less than 0
    * @return {@code this} to allow chaining of set methods
    */
   public BatchWriterConfig setTimeout(long timeout, TimeUnit timeUnit) {
-    if (timeout < 0)
+    if (timeout < 0) {
       throw new IllegalArgumentException("Negative timeout not allowed " + timeout);
+    }
 
-    if (timeout == 0)
+    if (timeout == 0) {
       this.timeout = Long.MAX_VALUE;
-    else
+    } else {
       // make small, positive values that truncate to 0 when converted use the minimum millis
       // instead
       this.timeout = Math.max(1, timeUnit.toMillis(timeout));
+    }
     return this;
   }
 
@@ -168,15 +167,14 @@ public class BatchWriterConfig implements Writable {
    * <p>
    * <b>Default:</b> 3
    *
-   * @param maxWriteThreads
-   *          the maximum threads to use
-   * @throws IllegalArgumentException
-   *           if {@code maxWriteThreads} is non-positive
+   * @param maxWriteThreads the maximum threads to use
+   * @throws IllegalArgumentException if {@code maxWriteThreads} is non-positive
    * @return {@code this} to allow chaining of set methods
    */
   public BatchWriterConfig setMaxWriteThreads(int maxWriteThreads) {
-    if (maxWriteThreads <= 0)
+    if (maxWriteThreads <= 0) {
       throw new IllegalArgumentException("Max threads must be positive " + maxWriteThreads);
+    }
 
     this.maxWriteThreads = maxWriteThreads;
     return this;
@@ -187,12 +185,11 @@ public class BatchWriterConfig implements Writable {
   }
 
   public long getMaxLatency(TimeUnit timeUnit) {
-    return timeUnit.convert(maxLatency != null ? maxLatency : DEFAULT_MAX_LATENCY,
-        TimeUnit.MILLISECONDS);
+    return timeUnit.convert(maxLatency != null ? maxLatency : DEFAULT_MAX_LATENCY, MILLISECONDS);
   }
 
   public long getTimeout(TimeUnit timeUnit) {
-    return timeUnit.convert(timeout != null ? timeout : DEFAULT_TIMEOUT, TimeUnit.MILLISECONDS);
+    return timeUnit.convert(timeout != null ? timeout : DEFAULT_TIMEOUT, MILLISECONDS);
   }
 
   public int getMaxWriteThreads() {
@@ -212,8 +209,7 @@ public class BatchWriterConfig implements Writable {
    * the table's durability setting. If the durability is set to something other than the default,
    * it will override the durability setting of the table.
    *
-   * @param durability
-   *          the Durability to be used by the BatchWriter
+   * @param durability the Durability to be used by the BatchWriter
    * @since 1.7.0
    *
    */
@@ -227,22 +223,28 @@ public class BatchWriterConfig implements Writable {
   public void write(DataOutput out) throws IOException {
     // write this out in a human-readable way
     ArrayList<String> fields = new ArrayList<>();
-    if (maxMemory != null)
+    if (maxMemory != null) {
       addField(fields, "maxMemory", maxMemory);
-    if (maxLatency != null)
+    }
+    if (maxLatency != null) {
       addField(fields, "maxLatency", maxLatency);
-    if (maxWriteThreads != null)
+    }
+    if (maxWriteThreads != null) {
       addField(fields, "maxWriteThreads", maxWriteThreads);
-    if (timeout != null)
+    }
+    if (timeout != null) {
       addField(fields, "timeout", timeout);
-    if (durability != Durability.DEFAULT)
+    }
+    if (durability != Durability.DEFAULT) {
       addField(fields, "durability", durability);
+    }
     String output = StringUtils.join(",", fields);
 
     byte[] bytes = output.getBytes(UTF_8);
     byte[] len = String.format("%6s#", Integer.toString(bytes.length, 36)).getBytes(UTF_8);
-    if (len.length != 7)
+    if (len.length != 7) {
       throw new IllegalStateException("encoded length does not match expected value");
+    }
     out.write(len);
     out.write(bytes);
   }
@@ -258,8 +260,9 @@ public class BatchWriterConfig implements Writable {
     byte[] len = new byte[7];
     in.readFully(len);
     String strLen = new String(len, UTF_8);
-    if (!strLen.endsWith("#"))
+    if (!strLen.endsWith("#")) {
       throw new IllegalStateException("length was not encoded correctly");
+    }
     byte[] bytes = new byte[Integer
         .parseInt(strLen.substring(strLen.lastIndexOf(' ') + 1, strLen.length() - 1), 36)];
     in.readFully(bytes);
@@ -337,8 +340,9 @@ public class BatchWriterConfig implements Writable {
   }
 
   private static <T> T merge(T o1, T o2) {
-    if (o1 != null)
+    if (o1 != null) {
       return o1;
+    }
     return o2;
   }
 
@@ -346,8 +350,7 @@ public class BatchWriterConfig implements Writable {
    * Merge this BatchWriterConfig with another. If config is set in both, preference will be given
    * to this config.
    *
-   * @param other
-   *          Another BatchWriterConfig
+   * @param other Another BatchWriterConfig
    * @return Merged BatchWriterConfig
    * @since 2.0.0
    */
@@ -377,8 +380,8 @@ public class BatchWriterConfig implements Writable {
   public String toString() {
     StringBuilder sb = new StringBuilder(32);
     sb.append("[maxMemory=").append(getMaxMemory()).append(", maxLatency=")
-        .append(getMaxLatency(TimeUnit.MILLISECONDS)).append(", maxWriteThreads=")
-        .append(getMaxWriteThreads()).append(", timeout=").append(getTimeout(TimeUnit.MILLISECONDS))
+        .append(getMaxLatency(MILLISECONDS)).append(", maxWriteThreads=")
+        .append(getMaxWriteThreads()).append(", timeout=").append(getTimeout(MILLISECONDS))
         .append(", durability=").append(durability).append("]");
     return sb.toString();
   }

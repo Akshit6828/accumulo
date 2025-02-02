@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -25,31 +25,24 @@ import java.util.Arrays;
  */
 public class ColumnUpdate {
 
-  private byte[] columnFamily;
-  private byte[] columnQualifier;
-  private byte[] columnVisibility;
-  private long timestamp;
-  private boolean hasTimestamp;
-  private byte[] val;
-  private boolean deleted;
+  private final byte[] columnFamily;
+  private final byte[] columnQualifier;
+  private final byte[] columnVisibility;
+  private final long timestamp;
+  private final boolean hasTimestamp;
+  private final byte[] val;
+  private final boolean deleted;
 
   /**
    * Creates a new column update.
    *
-   * @param cf
-   *          column family
-   * @param cq
-   *          column qualifier
-   * @param cv
-   *          column visibility
-   * @param hasts
-   *          true if the update specifies a timestamp
-   * @param ts
-   *          timestamp
-   * @param deleted
-   *          delete marker
-   * @param val
-   *          cell value
+   * @param cf column family
+   * @param cq column qualifier
+   * @param cv column visibility
+   * @param hasts true if the update specifies a timestamp
+   * @param ts timestamp
+   * @param deleted delete marker
+   * @param val cell value
    */
   public ColumnUpdate(byte[] cf, byte[] cq, byte[] cv, boolean hasts, long ts, boolean deleted,
       byte[] val) {
@@ -134,8 +127,9 @@ public class ColumnUpdate {
 
   @Override
   public boolean equals(Object obj) {
-    if (!(obj instanceof ColumnUpdate))
+    if (!(obj instanceof ColumnUpdate)) {
       return false;
+    }
     ColumnUpdate upd = (ColumnUpdate) obj;
     return Arrays.equals(getColumnFamily(), upd.getColumnFamily())
         && Arrays.equals(getColumnQualifier(), upd.getColumnQualifier())

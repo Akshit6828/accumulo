@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -21,10 +21,11 @@ package org.apache.accumulo.server.problems;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
 import static org.easymock.EasyMock.verify;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Collection;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,8 +37,8 @@ import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iteratorsImpl.system.InterruptibleIterator;
 import org.easymock.EasyMock;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 public class ProblemReportingIteratorTest {
   private static final TableId TABLE_ID = TableId.of("table");
@@ -46,10 +47,10 @@ public class ProblemReportingIteratorTest {
   private InterruptibleIterator ii;
   private ProblemReportingIterator pri;
 
-  @Before
+  @BeforeEach
   public void setUp() {
     ii = EasyMock.createMock(InterruptibleIterator.class);
-    pri = new ProblemReportingIterator(null, TABLE_ID, RESOURCE, false, ii);
+    pri = new ProblemReportingIterator(TABLE_ID, RESOURCE, false, ii);
   }
 
   @Test
@@ -67,9 +68,9 @@ public class ProblemReportingIteratorTest {
     assertEquals(RESOURCE, pri.getResource());
   }
 
-  @Test(expected = UnsupportedOperationException.class)
+  @Test
   public void testInit() {
-    pri.init(null, null, null);
+    assertThrows(UnsupportedOperationException.class, () -> pri.init(null, null, null));
   }
 
   @Test

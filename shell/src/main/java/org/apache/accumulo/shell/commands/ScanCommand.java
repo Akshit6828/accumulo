@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -26,13 +26,13 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.accumulo.core.classloader.ClassLoaderUtil;
 import org.apache.accumulo.core.client.AccumuloException;
 import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.IteratorSetting;
 import org.apache.accumulo.core.client.SampleNotPresentException;
 import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.client.ScannerBase;
+import org.apache.accumulo.core.client.ScannerBase.ConsistencyLevel;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.sample.SamplerConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationTypeHelper;
@@ -43,8 +43,6 @@ import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.accumulo.core.security.Authorizations;
 import org.apache.accumulo.core.util.format.Formatter;
 import org.apache.accumulo.core.util.format.FormatterConfig;
-import org.apache.accumulo.core.util.interpret.DefaultScanInterpreter;
-import org.apache.accumulo.core.util.interpret.ScanInterpreter;
 import org.apache.accumulo.shell.Shell;
 import org.apache.accumulo.shell.Shell.Command;
 import org.apache.accumulo.shell.Shell.PrintFile;
@@ -58,9 +56,10 @@ import org.apache.hadoop.io.Text;
 
 public class ScanCommand extends Command {
 
-  private Option scanOptAuths, scanOptRow, scanOptColumns, disablePaginationOpt, showFewOpt,
-      formatterOpt, interpreterOpt, formatterInterpeterOpt, outputFileOpt;
+  private Option scanOptAuths, scanOptRow, scanOptColumns, disablePaginationOpt, outputFileOpt,
+      scanOptCf, scanOptCq;
 
+  protected Option showFewOpt;
   protected Option timestampOpt;
   protected Option profileOpt;
   private Option optStartRowExclusive;
@@ -70,6 +69,7 @@ public class ScanCommand extends Command {
   private Option sampleOpt;
   private Option contextOpt;
   private Option executionHintsOpt;
+  private Option scanServerOpt;
 
   protected void setupSampling(final String tableName, final CommandLine cl, final Shell shellState,
       ScannerBase scanner)
@@ -86,6 +86,15 @@ public class ScanCommand extends Command {
     }
   }
 
+  protected ConsistencyLevel getConsistency(CommandLine cl) {
+    if (cl.hasOption(scanServerOpt.getOpt())) {
+      String arg = cl.getOptionValue(scanServerOpt.getOpt());
+      return ConsistencyLevel.valueOf(arg.toUpperCase());
+    } else {
+      return ConsistencyLevel.IMMEDIATE;
+    }
+  }
+
   @Override
   public int execute(final String fullCommand, final CommandLine cl, final Shell shellState)
       throws Exception {
@@ -93,14 +102,12 @@ public class ScanCommand extends Command {
       final String tableName = OptUtil.getTableOpt(cl, shellState);
 
       final Class<? extends Formatter> formatter = getFormatter(cl, tableName, shellState);
-      final ScanInterpreter interpeter = getInterpreter(cl, tableName, shellState);
 
       String classLoaderContext = null;
       if (cl.hasOption(contextOpt.getOpt())) {
         classLoaderContext = cl.getOptionValue(contextOpt.getOpt());
       }
-      // handle first argument, if present, the authorizations list to
-      // scan with
+      // handle first argument, if present, the authorizations list to scan with
       final Authorizations auths = getAuths(cl, shellState);
       final Scanner scanner = shellState.getAccumuloClient().createScanner(tableName, auths);
       if (classLoaderContext != null) {
@@ -110,10 +117,11 @@ public class ScanCommand extends Command {
       addScanIterators(shellState, cl, scanner, tableName);
 
       // handle remaining optional arguments
-      scanner.setRange(getRange(cl, interpeter));
+      scanner.setRange(getRange(cl));
 
       // handle columns
-      fetchColumns(cl, scanner, interpeter);
+      fetchColumns(cl, scanner);
+      fetchColumsWithCFAndCQ(cl, scanner);
 
       // set timeout
       scanner.setTimeout(getTimeout(cl), TimeUnit.MILLISECONDS);
@@ -121,6 +129,12 @@ public class ScanCommand extends Command {
       setupSampling(tableName, cl, shellState, scanner);
 
       scanner.setExecutionHints(ShellUtil.parseMapOpt(cl, executionHintsOpt));
+
+      try {
+        scanner.setConsistencyLevel(getConsistency(cl));
+      } catch (IllegalArgumentException e) {
+        Shell.log.error("Consistency Level argument must be immediate or eventual", e);
+      }
 
       // output the records
 
@@ -134,7 +148,7 @@ public class ScanCommand extends Command {
         } catch (NumberFormatException nfe) {
           Shell.log.error("Arg must be an integer.", nfe);
         } catch (IllegalArgumentException iae) {
-          Shell.log.error("Arg must be greater than one.", iae);
+          Shell.log.error("Invalid length argument", iae);
         }
       }
       printRecords(cl, shellState, config, scanner, formatter, printFile);
@@ -214,79 +228,61 @@ public class ScanCommand extends Command {
     }
   }
 
-  protected ScanInterpreter getInterpreter(final CommandLine cl, final String tableName,
-      final Shell shellState) throws Exception {
-
-    Class<? extends ScanInterpreter> clazz = null;
-    try {
-      if (cl.hasOption(interpreterOpt.getOpt())) {
-        Shell.log
-            .warn("Scan Interpreter option is deprecated and will be removed in a future version.");
-
-        clazz = ClassLoaderUtil.loadClass(cl.getOptionValue(interpreterOpt.getOpt()),
-            ScanInterpreter.class);
-      } else if (cl.hasOption(formatterInterpeterOpt.getOpt())) {
-        Shell.log
-            .warn("Scan Interpreter option is deprecated and will be removed in a future version.");
-
-        clazz = ClassLoaderUtil.loadClass(cl.getOptionValue(formatterInterpeterOpt.getOpt()),
-            ScanInterpreter.class);
-      }
-    } catch (ClassNotFoundException e) {
-      Shell.log.error("Interpreter class could not be loaded.", e);
-    }
-
-    if (clazz == null)
-      clazz = InterpreterCommand.getCurrentInterpreter(tableName, shellState);
-
-    if (clazz == null)
-      clazz = DefaultScanInterpreter.class;
-
-    return clazz.getDeclaredConstructor().newInstance();
-  }
-
   protected Class<? extends Formatter> getFormatter(final CommandLine cl, final String tableName,
       final Shell shellState) throws IOException {
-
-    try {
-      if (cl.hasOption(formatterOpt.getOpt())) {
-        Shell.log.warn("Formatter option is deprecated and will be removed in a future version.");
-
-        return shellState.getClassLoader(cl, shellState)
-            .loadClass(cl.getOptionValue(formatterOpt.getOpt())).asSubclass(Formatter.class);
-      } else if (cl.hasOption(formatterInterpeterOpt.getOpt())) {
-        Shell.log.warn("Formatter option is deprecated and will be removed in a future version.");
-
-        return shellState.getClassLoader(cl, shellState)
-            .loadClass(cl.getOptionValue(formatterInterpeterOpt.getOpt()))
-            .asSubclass(Formatter.class);
-      }
-    } catch (Exception e) {
-      Shell.log.error("Formatter class could not be loaded.", e);
-    }
-
     return shellState.getFormatter(tableName);
   }
 
-  protected void fetchColumns(final CommandLine cl, final ScannerBase scanner,
-      final ScanInterpreter formatter) throws UnsupportedEncodingException {
+  protected void fetchColumns(final CommandLine cl, final ScannerBase scanner)
+      throws UnsupportedEncodingException {
+
+    if ((cl.hasOption(scanOptCf.getOpt()) || cl.hasOption(scanOptCq.getOpt()))
+        && cl.hasOption(scanOptColumns.getOpt())) {
+
+      String formattedString =
+          String.format("Option -%s is mutually exclusive with options -%s and -%s.",
+              scanOptColumns.getOpt(), scanOptCf.getOpt(), scanOptCq.getOpt());
+      throw new IllegalArgumentException(formattedString);
+    }
+
     if (cl.hasOption(scanOptColumns.getOpt())) {
       for (String a : cl.getOptionValue(scanOptColumns.getOpt()).split(",")) {
         final String[] sa = a.split(":", 2);
         if (sa.length == 1) {
-          scanner.fetchColumnFamily(
-              formatter.interpretColumnFamily(new Text(a.getBytes(Shell.CHARSET))));
+          scanner.fetchColumnFamily(new Text(a.getBytes(Shell.CHARSET)));
         } else {
-          scanner.fetchColumn(
-              formatter.interpretColumnFamily(new Text(sa[0].getBytes(Shell.CHARSET))),
-              formatter.interpretColumnQualifier(new Text(sa[1].getBytes(Shell.CHARSET))));
+          scanner.fetchColumn(new Text(sa[0].getBytes(Shell.CHARSET)),
+              new Text(sa[1].getBytes(Shell.CHARSET)));
         }
       }
     }
   }
 
-  protected Range getRange(final CommandLine cl, final ScanInterpreter formatter)
-      throws UnsupportedEncodingException {
+  private void fetchColumsWithCFAndCQ(CommandLine cl, Scanner scanner) {
+    String cf = "";
+    String cq = "";
+    if (cl.hasOption(scanOptCf.getOpt())) {
+      cf = cl.getOptionValue(scanOptCf.getOpt());
+    }
+    if (cl.hasOption(scanOptCq.getOpt())) {
+      cq = cl.getOptionValue(scanOptCq.getOpt());
+    }
+
+    if (cf.isEmpty() && !cq.isEmpty()) {
+      String formattedString = String.format("Option -%s is required when using -%s.",
+          scanOptCf.getOpt(), scanOptCq.getOpt());
+      throw new IllegalArgumentException(formattedString);
+    } else if (!cf.isEmpty() && cq.isEmpty()) {
+      scanner.fetchColumnFamily(new Text(cf.getBytes(Shell.CHARSET)));
+    } else if (!cf.isEmpty() && !cq.isEmpty()) {
+      scanner.fetchColumn(new Text(cf.getBytes(Shell.CHARSET)),
+          new Text(cq.getBytes(Shell.CHARSET)));
+
+    }
+
+  }
+
+  protected Range getRange(final CommandLine cl) throws UnsupportedEncodingException {
     if ((cl.hasOption(OptUtil.START_ROW_OPT) || cl.hasOption(OptUtil.END_ROW_OPT))
         && cl.hasOption(scanOptRow.getOpt())) {
       // did not see a way to make commons cli do this check... it has mutually exclusive options
@@ -296,15 +292,10 @@ public class ScanCommand extends Command {
     }
 
     if (cl.hasOption(scanOptRow.getOpt())) {
-      return new Range(formatter
-          .interpretRow(new Text(cl.getOptionValue(scanOptRow.getOpt()).getBytes(Shell.CHARSET))));
+      return new Range(new Text(cl.getOptionValue(scanOptRow.getOpt()).getBytes(Shell.CHARSET)));
     } else {
       Text startRow = OptUtil.getStartRow(cl);
-      if (startRow != null)
-        startRow = formatter.interpretBeginRow(startRow);
       Text endRow = OptUtil.getEndRow(cl);
-      if (endRow != null)
-        endRow = formatter.interpretEndRow(endRow);
       final boolean startInclusive = !cl.hasOption(optStartRowExclusive.getOpt());
       final boolean endInclusive = !cl.hasOption(optEndRowExclusive.getOpt());
       return new Range(startRow, startInclusive, endRow, endInclusive);
@@ -347,35 +338,37 @@ public class ScanCommand extends Command {
         "make end row exclusive (by default it's inclusive)");
     optEndRowExclusive.setArgName("end-exclusive");
     scanOptRow = new Option("r", "row", true, "row to scan");
-    scanOptColumns = new Option("c", "columns", true, "comma-separated columns");
+    scanOptColumns = new Option("c", "columns", true,
+        "comma-separated columns. This option is mutually exclusive with cf and cq");
+    scanOptCf = new Option("cf", "column-family", true, "column family to scan.");
+    scanOptCq = new Option("cq", "column-qualifier", true, "column qualifier to scan");
+
     timestampOpt = new Option("st", "show-timestamps", false, "display timestamps");
     disablePaginationOpt = new Option("np", "no-pagination", false, "disable pagination of output");
     showFewOpt = new Option("f", "show-few", true, "show only a specified number of characters");
-    formatterOpt =
-        new Option("fm", "formatter", true, "fully qualified name of the formatter class to use");
-    interpreterOpt = new Option("i", "interpreter", true,
-        "fully qualified name of the interpreter class to use");
-    formatterInterpeterOpt = new Option("fi", "fmt-interpreter", true,
-        "fully qualified name of a class that is a formatter and interpreter");
     timeoutOption = new Option(null, "timeout", true,
         "time before scan should fail if no data is returned. If no unit is"
-            + " given assumes seconds. Units d,h,m,s,and ms are supported. e.g. 30s" + " or 100ms");
+            + " given assumes seconds. Units d,h,m,s,and ms are supported. e.g. 30s or 100ms");
     outputFileOpt = new Option("o", "output", true, "local file to write the scan output to");
     sampleOpt = new Option(null, "sample", false, "Show sample");
     contextOpt = new Option("cc", "context", true, "name of the classloader context");
     executionHintsOpt = new Option(null, "execution-hints", true, "Execution hints map");
+    scanServerOpt =
+        new Option("cl", "consistency-level", true, "set consistency level (experimental)");
 
     scanOptAuths.setArgName("comma-separated-authorizations");
     scanOptRow.setArgName("row");
     scanOptColumns
         .setArgName("<columnfamily>[:<columnqualifier>]{,<columnfamily>[:<columnqualifier>]}");
+    scanOptCf.setArgName("column-family");
+    scanOptCq.setArgName("column-qualifier");
     showFewOpt.setRequired(false);
     showFewOpt.setArgName("int");
-    formatterOpt.setArgName("className");
     timeoutOption.setArgName("timeout");
     outputFileOpt.setArgName("file");
     contextOpt.setArgName("context");
     executionHintsOpt.setArgName("<key>=<value>{,<key>=<value>}");
+    scanServerOpt.setArgName("immediate|eventual");
 
     profileOpt = new Option("pn", "profile", true, "iterator profile name");
     profileOpt.setArgName("profile");
@@ -390,24 +383,24 @@ public class ScanCommand extends Command {
     o.addOption(optStartRowExclusive);
     o.addOption(optEndRowExclusive);
     o.addOption(scanOptColumns);
+    o.addOption(scanOptCf);
+    o.addOption(scanOptCq);
     o.addOption(timestampOpt);
     o.addOption(disablePaginationOpt);
     o.addOption(OptUtil.tableOpt("table to be scanned"));
-    o.addOption(showFewOpt);
-    o.addOption(formatterOpt);
-    o.addOption(interpreterOpt);
-    o.addOption(formatterInterpeterOpt);
     o.addOption(timeoutOption);
     if (Arrays.asList(ScanCommand.class.getName(), GrepCommand.class.getName(),
         EGrepCommand.class.getName()).contains(this.getClass().getName())) {
       // supported subclasses must handle the output file option properly
       // only add this option to commands which handle it correctly
       o.addOption(outputFileOpt);
+      o.addOption(showFewOpt);
     }
     o.addOption(profileOpt);
     o.addOption(sampleOpt);
     o.addOption(contextOpt);
     o.addOption(executionHintsOpt);
+    o.addOption(scanServerOpt);
 
     return o;
   }

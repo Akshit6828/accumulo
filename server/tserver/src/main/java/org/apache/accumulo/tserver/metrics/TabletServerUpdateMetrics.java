@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,66 +18,95 @@
  */
 package org.apache.accumulo.tserver.metrics;
 
-import org.apache.hadoop.metrics2.lib.MetricsRegistry;
-import org.apache.hadoop.metrics2.lib.MutableCounterLong;
-import org.apache.hadoop.metrics2.lib.MutableStat;
+import static org.apache.accumulo.core.metrics.Metric.UPDATE_CHECK;
+import static org.apache.accumulo.core.metrics.Metric.UPDATE_COMMIT;
+import static org.apache.accumulo.core.metrics.Metric.UPDATE_COMMIT_PREP;
+import static org.apache.accumulo.core.metrics.Metric.UPDATE_ERRORS;
+import static org.apache.accumulo.core.metrics.Metric.UPDATE_LOCK;
+import static org.apache.accumulo.core.metrics.Metric.UPDATE_MUTATION_ARRAY_SIZE;
+import static org.apache.accumulo.core.metrics.Metric.UPDATE_WALOG_WRITE;
 
-public class TabletServerUpdateMetrics extends TServerMetrics {
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
-  private final MutableCounterLong permissionErrorsCounter;
-  private final MutableCounterLong unknownTabletErrorsCounter;
-  private final MutableCounterLong constraintViolationsCounter;
+import org.apache.accumulo.core.metrics.MetricsProducer;
+import org.apache.accumulo.server.metrics.NoopMetrics;
 
-  private final MutableStat commitPrepStat;
-  private final MutableStat walogWriteTimeStat;
-  private final MutableStat commitTimeStat;
-  private final MutableStat mutationArraySizeStat;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.FunctionCounter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
-  public TabletServerUpdateMetrics() {
-    super("Updates");
+public class TabletServerUpdateMetrics implements MetricsProducer {
 
-    MetricsRegistry registry = super.getRegistry();
-    permissionErrorsCounter = registry.newCounter("permissionErrors", "Permission Errors", 0L);
-    unknownTabletErrorsCounter =
-        registry.newCounter("unknownTabletErrors", "Unknown Tablet Errors", 0L);
-    constraintViolationsCounter =
-        registry.newCounter("constraintViolations", "Table Constraint Violations", 0L);
-
-    commitPrepStat =
-        registry.newStat("commitPrep", "preparing to commit mutations", "Ops", "Time", true);
-    walogWriteTimeStat =
-        registry.newStat("waLogWriteTime", "writing mutations to WAL", "Ops", "Time", true);
-    commitTimeStat = registry.newStat("commitTime", "committing mutations", "Ops", "Time", true);
-    mutationArraySizeStat =
-        registry.newStat("mutationArraysSize", "mutation array", "ops", "Size", true);
-  }
+  private final AtomicLong permissionErrorsCount = new AtomicLong();
+  private final AtomicLong unknownTabletErrorsCount = new AtomicLong();
+  private final AtomicLong constraintViolationsCount = new AtomicLong();
+  private Timer commitPrepStat = NoopMetrics.useNoopTimer();
+  private Timer walogWriteTimeStat = NoopMetrics.useNoopTimer();
+  private Timer commitTimeStat = NoopMetrics.useNoopTimer();
+  private Timer checkTimeStat = NoopMetrics.useNoopTimer();
+  private Timer lockTimeStat = NoopMetrics.useNoopTimer();
+  private DistributionSummary mutationArraySizeStat = NoopMetrics.useNoopDistributionSummary();
 
   public void addPermissionErrors(long value) {
-    permissionErrorsCounter.incr(value);
+    permissionErrorsCount.addAndGet(value);
   }
 
   public void addUnknownTabletErrors(long value) {
-    unknownTabletErrorsCounter.incr(value);
-  }
-
-  public void addMutationArraySize(long value) {
-    mutationArraySizeStat.add(value);
-  }
-
-  public void addCommitPrep(long value) {
-    commitPrepStat.add(value);
+    unknownTabletErrorsCount.addAndGet(value);
   }
 
   public void addConstraintViolations(long value) {
-    constraintViolationsCounter.incr(value);
+    constraintViolationsCount.addAndGet(value);
+  }
+
+  public void addCommitPrep(long value) {
+    commitPrepStat.record(value, TimeUnit.MILLISECONDS);
   }
 
   public void addWalogWriteTime(long value) {
-    walogWriteTimeStat.add(value);
+    walogWriteTimeStat.record(value, TimeUnit.MILLISECONDS);
   }
 
   public void addCommitTime(long value) {
-    commitTimeStat.add(value);
+    commitTimeStat.record(value, TimeUnit.MILLISECONDS);
   }
 
+  public void addMutationArraySize(long value) {
+    mutationArraySizeStat.record(value);
+  }
+
+  public void addCheckTime(long value, TimeUnit unit) {
+    checkTimeStat.record(value, unit);
+  }
+
+  public void addLockTime(long value, TimeUnit unit) {
+    lockTimeStat.record(value, unit);
+  }
+
+  @Override
+  public void registerMetrics(MeterRegistry registry) {
+    FunctionCounter.builder(UPDATE_ERRORS.getName(), permissionErrorsCount, AtomicLong::get)
+        .tags("type", "permission").description(UPDATE_ERRORS.getDescription()).register(registry);
+    FunctionCounter.builder(UPDATE_ERRORS.getName(), unknownTabletErrorsCount, AtomicLong::get)
+        .tags("type", "unknown.tablet").description(UPDATE_ERRORS.getDescription())
+        .register(registry);
+    FunctionCounter.builder(UPDATE_ERRORS.getName(), constraintViolationsCount, AtomicLong::get)
+        .tags("type", "constraint.violation").description(UPDATE_ERRORS.getDescription())
+        .register(registry);
+    commitPrepStat = Timer.builder(UPDATE_COMMIT_PREP.getName())
+        .description(UPDATE_COMMIT_PREP.getDescription()).register(registry);
+    walogWriteTimeStat = Timer.builder(UPDATE_WALOG_WRITE.getName())
+        .description(UPDATE_WALOG_WRITE.getDescription()).register(registry);
+    commitTimeStat = Timer.builder(UPDATE_COMMIT.getName())
+        .description(UPDATE_COMMIT.getDescription()).register(registry);
+    mutationArraySizeStat = DistributionSummary.builder(UPDATE_MUTATION_ARRAY_SIZE.getName())
+        .description(UPDATE_MUTATION_ARRAY_SIZE.getDescription()).register(registry);
+    checkTimeStat = Timer.builder(UPDATE_CHECK.getName()).description(UPDATE_CHECK.getDescription())
+        .register(registry);
+    lockTimeStat = Timer.builder(UPDATE_LOCK.getName()).description(UPDATE_LOCK.getDescription())
+        .register(registry);
+
+  }
 }

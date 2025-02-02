@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -19,6 +19,7 @@
 package org.apache.accumulo.core.client.rfile;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static java.util.Objects.requireNonNull;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -26,7 +27,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Objects;
+import java.util.stream.Stream;
 
 import org.apache.accumulo.core.client.rfile.RFile.WriterFSOptions;
 import org.apache.accumulo.core.client.rfile.RFile.WriterOptions;
@@ -35,17 +36,19 @@ import org.apache.accumulo.core.client.summary.SummarizerConfiguration;
 import org.apache.accumulo.core.conf.AccumuloConfiguration;
 import org.apache.accumulo.core.conf.ConfigurationCopy;
 import org.apache.accumulo.core.conf.DefaultConfiguration;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory;
-import org.apache.accumulo.core.crypto.CryptoServiceFactory.ClassloaderType;
+import org.apache.accumulo.core.crypto.CryptoFactoryLoader;
+import org.apache.accumulo.core.data.LoadPlan;
 import org.apache.accumulo.core.file.FileOperations;
+import org.apache.accumulo.core.metadata.UnreferencedTabletFile;
+import org.apache.accumulo.core.metadata.ValidationUtil;
 import org.apache.accumulo.core.sample.impl.SamplerConfigurationImpl;
+import org.apache.accumulo.core.spi.crypto.CryptoEnvironment;
 import org.apache.accumulo.core.spi.crypto.CryptoService;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterables;
 
 class RFileWriterBuilder implements RFile.OutputArguments, RFile.WriterFSOptions {
 
@@ -71,6 +74,7 @@ class RFileWriterBuilder implements RFile.OutputArguments, RFile.WriterFSOptions
   private int visCacheSize = 1000;
   private Map<String,String> samplerProps = Collections.emptyMap();
   private Map<String,String> summarizerProps = Collections.emptyMap();
+  private LoadPlan.SplitResolver splitResolver;
 
   private void checkDisjoint(Map<String,String> props, Map<String,String> derivedProps,
       String kind) {
@@ -80,7 +84,7 @@ class RFileWriterBuilder implements RFile.OutputArguments, RFile.WriterFSOptions
 
   @Override
   public WriterOptions withSampler(SamplerConfiguration samplerConf) {
-    Objects.requireNonNull(samplerConf);
+    requireNonNull(samplerConf);
     Map<String,String> tmp = new SamplerConfigurationImpl(samplerConf).toTablePropertiesMap();
     checkDisjoint(tableConfig, tmp, "sampler");
     this.samplerProps = tmp;
@@ -98,10 +102,15 @@ class RFileWriterBuilder implements RFile.OutputArguments, RFile.WriterFSOptions
     userProps.putAll(samplerProps);
 
     if (!userProps.isEmpty()) {
-      acuconf = new ConfigurationCopy(Iterables.concat(acuconf, userProps.entrySet()));
+      acuconf =
+          new ConfigurationCopy(Stream.concat(acuconf.stream(), userProps.entrySet().stream()));
     }
 
-    CryptoService cs = CryptoServiceFactory.newInstance(acuconf, ClassloaderType.JAVA);
+    CryptoService cs =
+        CryptoFactoryLoader.getServiceForClient(CryptoEnvironment.Scope.TABLE, tableConfig);
+
+    var loadPlanCollector =
+        splitResolver == null ? new LoadPlanCollector() : new LoadPlanCollector(splitResolver);
 
     if (out.getOutputStream() != null) {
       FSDataOutputStream fsdo;
@@ -113,42 +122,40 @@ class RFileWriterBuilder implements RFile.OutputArguments, RFile.WriterFSOptions
       return new RFileWriter(
           fileops.newWriterBuilder().forOutputStream(".rf", fsdo, out.getConf(), cs)
               .withTableConfiguration(acuconf).withStartDisabled().build(),
-          visCacheSize);
+          visCacheSize, loadPlanCollector);
     } else {
       return new RFileWriter(fileops.newWriterBuilder()
-          .forFile(out.path.toString(), out.getFileSystem(), out.getConf(), cs)
-          .withTableConfiguration(acuconf).withStartDisabled().build(), visCacheSize);
+          .forFile(UnreferencedTabletFile.of(out.getFileSystem(out.path), out.path),
+              out.getFileSystem(out.path), out.getConf(), cs)
+          .withTableConfiguration(acuconf).withStartDisabled().build(), visCacheSize,
+          loadPlanCollector);
     }
   }
 
   @Override
   public WriterOptions withFileSystem(FileSystem fs) {
-    Objects.requireNonNull(fs);
+    requireNonNull(fs);
     out.fs = fs;
     return this;
   }
 
   @Override
   public WriterFSOptions to(String filename) {
-    Objects.requireNonNull(filename);
-    if (!filename.endsWith(".rf")) {
-      throw new IllegalArgumentException(
-          "Provided filename (" + filename + ") does not end with '.rf'");
-    }
+    ValidationUtil.validateRFileName(filename);
     this.out = new OutputArgs(filename);
     return this;
   }
 
   @Override
   public WriterOptions to(OutputStream out) {
-    Objects.requireNonNull(out);
+    requireNonNull(out);
     this.out = new OutputArgs(out);
     return this;
   }
 
   @Override
   public WriterOptions withTableProperties(Iterable<Entry<String,String>> tableConfig) {
-    Objects.requireNonNull(tableConfig);
+    requireNonNull(tableConfig);
     HashMap<String,String> cfg = new HashMap<>();
     for (Entry<String,String> entry : tableConfig) {
       cfg.put(entry.getKey(), entry.getValue());
@@ -162,7 +169,7 @@ class RFileWriterBuilder implements RFile.OutputArguments, RFile.WriterFSOptions
 
   @Override
   public WriterOptions withTableProperties(Map<String,String> tableConfig) {
-    Objects.requireNonNull(tableConfig);
+    requireNonNull(tableConfig);
     return withTableProperties(tableConfig.entrySet());
   }
 
@@ -174,8 +181,14 @@ class RFileWriterBuilder implements RFile.OutputArguments, RFile.WriterFSOptions
   }
 
   @Override
+  public WriterOptions withSplitResolver(LoadPlan.SplitResolver splitResolver) {
+    this.splitResolver = requireNonNull(splitResolver);
+    return this;
+  }
+
+  @Override
   public WriterOptions withSummarizers(SummarizerConfiguration... summarizerConf) {
-    Objects.requireNonNull(summarizerConf);
+    requireNonNull(summarizerConf);
     Map<String,String> tmp = SummarizerConfiguration.toTableProperties(summarizerConf);
     checkDisjoint(tableConfig, tmp, "summarizer");
     this.summarizerProps = tmp;

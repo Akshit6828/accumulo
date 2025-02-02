@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -71,8 +71,9 @@ public class SummariesCommand extends TableOperation {
 
     boolean addEmpty = false;
     for (Summary summary : summaries) {
-      if (addEmpty)
+      if (addEmpty) {
         lines.add("");
+      }
       addEmpty = true;
       lines.add(String.format(" Summarizer         : %s", summary.getSummarizerConfiguration()));
       lines.add(String.format(" File Statistics    : %s", summary.getFileStatistics()));
@@ -109,7 +110,7 @@ public class SummariesCommand extends TableOperation {
     final Options opts = super.getOptions();
     disablePaginationOpt = new Option("np", "no-pagination", false, "disable pagination of output");
     summarySelectionOpt = new Option("sr", "select-regex", true,
-        "regex to" + " select summaries. Matches against class name and options used to"
+        "regex to select summaries. Matches against class name and options used to"
             + " generate summaries.");
     opts.addOption(disablePaginationOpt);
     opts.addOption(summarySelectionOpt);

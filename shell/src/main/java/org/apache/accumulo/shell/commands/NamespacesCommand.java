@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -47,13 +47,15 @@ public class NamespacesCommand extends Command {
 
     Iterator<String> it = Iterators.transform(namespaces.entrySet().iterator(), entry -> {
       String name = entry.getKey();
-      if (Namespace.DEFAULT.name().equals(name))
+      if (Namespace.DEFAULT.name().equals(name)) {
         name = DEFAULT_NAMESPACE_DISPLAY_NAME;
+      }
       String id = entry.getValue();
-      if (cl.hasOption(namespaceIdOption.getOpt()))
+      if (cl.hasOption(namespaceIdOption.getOpt())) {
         return String.format(TablesCommand.NAME_AND_ID_FORMAT, name, id);
-      else
+      } else {
         return name;
+      }
     });
 
     shellState.printLines(it, !cl.hasOption(disablePaginationOpt.getOpt()));

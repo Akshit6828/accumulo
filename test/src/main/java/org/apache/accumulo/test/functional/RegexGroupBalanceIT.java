@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,6 +18,7 @@
  */
 package org.apache.accumulo.test.functional;
 
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -31,11 +32,12 @@ import org.apache.accumulo.core.client.AccumuloClient;
 import org.apache.accumulo.core.client.Scanner;
 import org.apache.accumulo.core.client.TableNotFoundException;
 import org.apache.accumulo.core.client.admin.NewTableConfiguration;
+import org.apache.accumulo.core.client.admin.TabletAvailability;
 import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.TableId;
 import org.apache.accumulo.core.data.Value;
-import org.apache.accumulo.core.metadata.MetadataTable;
+import org.apache.accumulo.core.metadata.AccumuloTable;
 import org.apache.accumulo.core.metadata.TServerInstance;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection;
 import org.apache.accumulo.core.metadata.schema.MetadataSchema.TabletsSection.CurrentLocationColumnFamily;
@@ -44,7 +46,7 @@ import org.apache.accumulo.core.spi.balancer.RegexGroupBalancer;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloConfigImpl;
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.apache.hadoop.io.Text;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
@@ -52,13 +54,13 @@ import com.google.common.collect.Table;
 public class RegexGroupBalanceIT extends ConfigurableMacBase {
 
   @Override
-  public void beforeClusterStart(MiniAccumuloConfigImpl cfg) {
-    cfg.setNumTservers(4);
+  protected Duration defaultTimeout() {
+    return Duration.ofMinutes(2);
   }
 
   @Override
-  protected int defaultTimeoutSeconds() {
-    return 2 * 60;
+  public void beforeClusterStart(MiniAccumuloConfigImpl cfg) {
+    cfg.getClusterServerConfiguration().setNumDefaultTabletServers(4);
   }
 
   @Test
@@ -87,8 +89,8 @@ public class RegexGroupBalanceIT extends ConfigurableMacBase {
       props.put(RegexGroupBalancer.WAIT_TIME_PROPERTY, "50ms");
       props.put(Property.TABLE_LOAD_BALANCER.getKey(), RegexGroupBalancer.class.getName());
 
-      client.tableOperations().create(tablename,
-          new NewTableConfiguration().setProperties(props).withSplits(splits));
+      client.tableOperations().create(tablename, new NewTableConfiguration().setProperties(props)
+          .withSplits(splits).withInitialTabletAvailability(TabletAvailability.HOSTED));
 
       while (true) {
         Thread.sleep(250);
@@ -179,7 +181,8 @@ public class RegexGroupBalanceIT extends ConfigurableMacBase {
 
   private Table<String,String,MutableInt> getCounts(AccumuloClient client, String tablename)
       throws TableNotFoundException {
-    try (Scanner s = client.createScanner(MetadataTable.NAME, Authorizations.EMPTY)) {
+    try (Scanner s =
+        client.createScanner(AccumuloTable.METADATA.tableName(), Authorizations.EMPTY)) {
       s.fetchColumnFamily(CurrentLocationColumnFamily.NAME);
       TableId tableId = TableId.of(client.tableOperations().tableIdMap().get(tablename));
       s.setRange(TabletsSection.getRange(tableId));

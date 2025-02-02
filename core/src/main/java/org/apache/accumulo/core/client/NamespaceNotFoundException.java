@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -29,15 +29,12 @@ public class NamespaceNotFoundException extends Exception {
    */
   private static final long serialVersionUID = 1L;
 
-  private String namespace;
+  private final String namespace;
 
   /**
-   * @param namespaceId
-   *          the internal id of the namespace that was sought
-   * @param namespaceName
-   *          the visible name of the namespace that was sought
-   * @param description
-   *          the specific reason why it failed
+   * @param namespaceId the internal id of the namespace that was sought
+   * @param namespaceName the visible name of the namespace that was sought
+   * @param description the specific reason why it failed
    */
   public NamespaceNotFoundException(String namespaceId, String namespaceName, String description) {
     super(
@@ -49,14 +46,10 @@ public class NamespaceNotFoundException extends Exception {
   }
 
   /**
-   * @param namespaceId
-   *          the internal id of the namespace that was sought
-   * @param namespaceName
-   *          the visible name of the namespace that was sought
-   * @param description
-   *          the specific reason why it failed
-   * @param cause
-   *          the exception that caused this failure
+   * @param namespaceId the internal id of the namespace that was sought
+   * @param namespaceName the visible name of the namespace that was sought
+   * @param description the specific reason why it failed
+   * @param cause the exception that caused this failure
    */
   public NamespaceNotFoundException(String namespaceId, String namespaceName, String description,
       Throwable cause) {
@@ -65,8 +58,7 @@ public class NamespaceNotFoundException extends Exception {
   }
 
   /**
-   * @param e
-   *          constructs an exception from a thrift exception
+   * @param e constructs an exception from a thrift exception
    */
   public NamespaceNotFoundException(ThriftTableOperationException e) {
     this(e.getTableId(), e.getTableName(), e.getDescription(), e);

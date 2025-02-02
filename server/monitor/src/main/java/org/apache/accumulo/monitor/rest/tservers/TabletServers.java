@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -44,8 +44,7 @@ public class TabletServers {
   /**
    * Adds bad and dead servers to the list
    *
-   * @param info
-   *          Manager information to get bad and dead server information
+   * @param info Manager information to get bad and dead server information
    */
   public void addBadTabletServer(ManagerInformation info) {
     badServers = info.badTabletServers.badTabletServer;
@@ -55,8 +54,7 @@ public class TabletServers {
   /**
    * Adds new tservers to the list
    *
-   * @param tablet
-   *          New tserver
+   * @param tablet New tserver
    */
   public void addTablet(TabletServer tablet) {
     servers.add(tablet.server);

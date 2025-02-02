@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -54,8 +54,9 @@ public class PasswdCommand extends Command {
     } // user canceled
 
     if (!shellState.getAccumuloClient().securityOperations().authenticateUser(currentUser,
-        new PasswordToken(oldPassword)))
+        new PasswordToken(oldPassword))) {
       throw new AccumuloSecurityException(user, SecurityErrorCode.BAD_CREDENTIALS);
+    }
 
     password = shellState.readMaskedLine("Enter new password for '" + user + "': ", '*');
     if (password == null) {

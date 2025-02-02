@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -57,8 +57,9 @@ public abstract class BusiestTracker {
       // only get the count once to ensure consistency in the case of multiple threads
       long count = extractCount(tablet);
 
-      if (count == 0)
+      if (count == 0) {
         continue;
+      }
 
       counts.put(extent, count);
 
@@ -69,8 +70,9 @@ public abstract class BusiestTracker {
       long delta = (lastCount > count) ? count : count - lastCount;
 
       // handle case where tablet had no activity
-      if (delta > 0)
+      if (delta > 0) {
         tabletsWithDelta.add(new ComparablePair<>(delta, extent));
+      }
     }
 
     lastCounts = counts;
@@ -91,7 +93,7 @@ public abstract class BusiestTracker {
     return new BusiestTracker(numBusiestTabletsToLog) {
       @Override
       protected long extractCount(Tablet tablet) {
-        return tablet.totalQueries();
+        return tablet.totalQueriesResults();
       }
     };
   }

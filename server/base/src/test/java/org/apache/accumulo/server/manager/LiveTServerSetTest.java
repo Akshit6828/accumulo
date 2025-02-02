@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,20 +18,22 @@
  */
 package org.apache.accumulo.server.manager;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.accumulo.core.Constants;
 import org.apache.accumulo.core.metadata.TServerInstance;
-import org.apache.accumulo.core.util.HostAndPort;
 import org.apache.accumulo.server.ServerContext;
 import org.apache.accumulo.server.manager.LiveTServerSet.Listener;
 import org.apache.accumulo.server.manager.LiveTServerSet.TServerConnection;
 import org.apache.accumulo.server.manager.LiveTServerSet.TServerInfo;
 import org.easymock.EasyMock;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+
+import com.google.common.net.HostAndPort;
 
 public class LiveTServerSetTest {
 
@@ -40,8 +42,9 @@ public class LiveTServerSetTest {
     Map<String,TServerInfo> servers = new HashMap<>();
     TServerConnection mockConn = EasyMock.createMock(TServerConnection.class);
 
-    TServerInfo server1 = new TServerInfo(
-        new TServerInstance(HostAndPort.fromParts("localhost", 1234), "5555"), mockConn);
+    TServerInfo server1 =
+        new TServerInfo(new TServerInstance(HostAndPort.fromParts("localhost", 1234), "5555"),
+            mockConn, Constants.DEFAULT_RESOURCE_GROUP_NAME);
     servers.put("server1", server1);
 
     LiveTServerSet tservers = new LiveTServerSet(EasyMock.createMock(ServerContext.class),

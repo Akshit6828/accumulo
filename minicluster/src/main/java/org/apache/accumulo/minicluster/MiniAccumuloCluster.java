@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -24,10 +24,7 @@ import java.util.Properties;
 import java.util.Set;
 
 import org.apache.accumulo.core.client.AccumuloClient;
-import org.apache.accumulo.core.client.AccumuloException;
-import org.apache.accumulo.core.client.AccumuloSecurityException;
 import org.apache.accumulo.core.client.security.tokens.AuthenticationToken;
-import org.apache.accumulo.core.client.security.tokens.PasswordToken;
 import org.apache.accumulo.core.clientImpl.ClientInfoImpl;
 import org.apache.accumulo.core.util.Pair;
 import org.apache.accumulo.miniclusterImpl.MiniAccumuloClusterImpl;
@@ -52,20 +49,17 @@ public class MiniAccumuloCluster implements AutoCloseable {
 
   /**
    *
-   * @param dir
-   *          An empty or nonexistent temp directory that Accumulo and Zookeeper can store data in.
-   *          Creating the directory is left to the user. Java 7, Guava, and Junit provide methods
-   *          for creating temporary directories.
-   * @param rootPassword
-   *          Initial root password for instance.
+   * @param dir An empty or nonexistent temp directory that Accumulo and Zookeeper can store data
+   *        in. Creating the directory is left to the user. Java 7, Guava, and Junit provide methods
+   *        for creating temporary directories.
+   * @param rootPassword Initial root password for instance.
    */
   public MiniAccumuloCluster(File dir, String rootPassword) throws IOException {
     this(new MiniAccumuloConfigImpl(dir, rootPassword));
   }
 
   /**
-   * @param config
-   *          initial configuration
+   * @param config initial configuration
    */
   public MiniAccumuloCluster(MiniAccumuloConfig config) throws IOException {
     this(config.getImpl());
@@ -130,19 +124,6 @@ public class MiniAccumuloCluster implements AutoCloseable {
   }
 
   /**
-   * Utility method to get a connector to the MAC.
-   *
-   * @since 1.6.0
-   * @deprecated since 2.0.0, replaced by {@link #createAccumuloClient(String, AuthenticationToken)}
-   */
-  @Deprecated(since = "2.0.0")
-  public org.apache.accumulo.core.client.Connector getConnector(String user, String passwd)
-      throws AccumuloException, AccumuloSecurityException {
-    return org.apache.accumulo.core.client.Connector
-        .from(impl.createAccumuloClient(user, new PasswordToken(passwd)));
-  }
-
-  /**
    * Utility method to create an {@link AccumuloClient} with connection to the MAC. The
    * AccumuloClient object should be closed by user
    *
@@ -153,16 +134,7 @@ public class MiniAccumuloCluster implements AutoCloseable {
   }
 
   /**
-   * @since 1.6.0
-   * @deprecated since 2.0.0, replaced by {@link #getClientProperties()}
-   */
-  @Deprecated(since = "2.0.0")
-  public org.apache.accumulo.core.client.ClientConfiguration getClientConfig() {
-    return impl.getClientConfig();
-  }
-
-  /**
-   * @return Connection properties for cluster
+   * @return A copy of the connection properties for the cluster
    * @since 2.0.0
    */
   public Properties getClientProperties() {
@@ -172,8 +144,7 @@ public class MiniAccumuloCluster implements AutoCloseable {
   /**
    * Construct client {@link Properties} using a {@link MiniAccumuloCluster} directory
    *
-   * @param directory
-   *          MiniAccumuloCluster directory
+   * @param directory MiniAccumuloCluster directory
    * @return {@link Properties} for that directory
    * @since 2.0.0
    */

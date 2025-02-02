@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -23,17 +23,102 @@ import java.util.Collections;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.apache.accumulo.core.conf.Property;
 import org.apache.accumulo.core.spi.fs.VolumeChooserEnvironment.Scope;
 import org.apache.accumulo.core.volume.Volume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * A {@link RandomVolumeChooser} that limits its choices from a given set of options to the subset
- * of those options preferred for a particular table. Defaults to selecting from all of the options
- * presented. Can be customized via the table property table.custom.volume.preferred, which should
- * contain a comma separated list of {@link Volume} URIs. Note that both the property name and the
- * format of its value are specific to this particular implementation.
+ * A {@link RandomVolumeChooser} that selects preferred volumes to use from the provided volume
+ * options. Preferred Volumes are set on either the per-table, per-scope, or default configuration
+ * level. Configuration details are overridden based on the top-down "Default","Site","System"
+ * scopes.
+ * <p>
+ * Defaults to selecting a volume at random from the provided volume options.
+ *
+ * <p>
+ * Property Details:
+ * <p>
+ * Preferred volumes can be set on a per-table basis via the custom property
+ * {@code volume.preferred}.
+ *
+ * <p>
+ * This property should contain a comma separated list of {@link Volume} URIs. Since this is a
+ * custom property, it can be accessed under the prefix {@code table.custom}.<br>
+ *
+ * The {@code volume.preferred} property can be set at various configuration levels depending on the
+ * scope. Note: Both the property name and the format of its value are specific to this particular
+ * implementation.
+ * <table border="1">
+ * <caption>Scope Property Lookups and Defaults locations</caption>
+ * <tr>
+ * <th>Scope</th>
+ * <th>Property Value Lookup</th>
+ * <th>Default Property Lookup</th>
+ * </tr>
+ * <tr>
+ * <td>{@code Scope.DEFAULT}</td>
+ * <td>{@code general.custom.volume.preferred.default}</td>
+ * <td>Throws RuntimeException if not set</td>
+ * </tr>
+ * <tr>
+ * <td>{@code Scope.INIT}</td>
+ * <td>{@code general.custom.volume.preferred.init}</td>
+ * <td>{@code general.custom.volume.preferred.default}</td>
+ * </tr>
+ * <tr>
+ * <td>{@code Scope.LOGGER}</td>
+ * <td>{@code general.custom.volume.preferred.logger}</td>
+ * <td>{@code general.custom.volume.preferred.default}</td>
+ * </tr>
+ * <tr>
+ * <td>{@code Scope.TABLE}</td>
+ * <td>{@code table.custom.volume.preferred}</td>
+ * <td>{@code general.custom.volume.preferred.default}</td>
+ * </tr>
+ * </table>
+ * <br>
+ * <p>
+ * Examples of expected usage:
+ * <ul>
+ * <li>Separate metadata table and write ahead logs from general data location.
+ *
+ * <pre>
+ * <code>
+ * // Set list of volumes
+ * instance.volumes=hdfs://namenode_A/accumulo,hdfs://namenode_B/general
+ * // Enable the preferred volume chooser
+ * general.volume.chooser=org.apache.accumulo.core.spi.fs.PreferredVolumeChooser
+ * // Set default preferred volume
+ * general.custom.volume.preferred.default=hdfs://namenode_B/general
+ * // Set write-ahead log preferred volume
+ * general.custom.volume.preferred.logger=hdfs://namenode_A/accumulo
+ * // Initialize and start accumulo
+ * // Once accumulo is up, open the shell and configure the metadata table to use a preferred volume
+ * config -t accumulo.metadata -s table.custom.volume.preferred=hdfs://namenode_A/accumulo
+ * </code>
+ * </pre>
+ *
+ * </li>
+ * <li>Allow general data to use all volumes, but limit a specific table to a preferred volume
+ *
+ * <pre>
+ * <code>
+ * // Set list of volumes
+ * instance.volumes=hdfs://namenode/accumulo,hdfs://namenode/accumulo_select
+ * // Enable the preferred volume chooser
+ * general.volume.chooser=org.apache.accumulo.core.spi.fs.PreferredVolumeChooser
+ * // Set default preferred volumes
+ * general.custom.volume.preferred.default=hdfs://namenode/accumulo,hdfs://namenode/accumulo_select
+ * // Initialize and start accumulo
+ * // Once accumulo is up, open the shell and configure the metadata table to use a preferred volume
+ * config -t accumulo.metadata -s table.custom.volume.preferred=hdfs://namenode/accumulo_select
+ * </code>
+ * </pre>
+ *
+ * </li>
+ * </ul>
  *
  * @since 2.1.0
  */
@@ -58,6 +143,14 @@ public class PreferredVolumeChooser extends RandomVolumeChooser {
     return choice;
   }
 
+  /**
+   *
+   * Returns the subset of volumes that match the defined preferred volumes value
+   *
+   * @param env the server environment provided by the calling framework
+   * @param options the subset of volumes to choose from
+   * @return an array of preferred volumes that are a subset of {@link Property#INSTANCE_VOLUMES}
+   */
   @Override
   public Set<String> choosable(VolumeChooserEnvironment env, Set<String> options) {
     return getPreferredVolumes(env, options);
@@ -75,7 +168,7 @@ public class PreferredVolumeChooser extends RandomVolumeChooser {
       Set<String> options) {
     log.trace("Looking up property {} + for Table id: {}", TABLE_CUSTOM_SUFFIX, env.getTable());
 
-    String preferredVolumes = env.getServiceEnv().getConfiguration(env.getTable().get())
+    String preferredVolumes = env.getServiceEnv().getConfiguration(env.getTable().orElseThrow())
         .getTableCustom(TABLE_CUSTOM_SUFFIX);
 
     // fall back to global default scope, so setting only one default is necessary, rather than a
@@ -89,7 +182,7 @@ public class PreferredVolumeChooser extends RandomVolumeChooser {
     if (preferredVolumes == null || preferredVolumes.isEmpty()) {
       String msg = "Property " + TABLE_CUSTOM_SUFFIX + " or " + DEFAULT_SCOPED_PREFERRED_VOLUMES
           + " must be a subset of " + options + " to use the " + getClass().getSimpleName();
-      throw new RuntimeException(msg);
+      throw new IllegalArgumentException(msg);
     }
 
     return parsePreferred(TABLE_CUSTOM_SUFFIX, preferredVolumes, options);
@@ -115,7 +208,7 @@ public class PreferredVolumeChooser extends RandomVolumeChooser {
       if (preferredVolumes == null || preferredVolumes.isEmpty()) {
         String msg = "Property " + property + " or " + DEFAULT_SCOPED_PREFERRED_VOLUMES
             + " must be a subset of " + options + " to use the " + getClass().getSimpleName();
-        throw new RuntimeException(msg);
+        throw new IllegalArgumentException(msg);
       }
 
       property = DEFAULT_SCOPED_PREFERRED_VOLUMES;
@@ -133,13 +226,13 @@ public class PreferredVolumeChooser extends RandomVolumeChooser {
     if (preferred.isEmpty()) {
       String msg = "No volumes could be parsed from '" + property + "', which had a value of '"
           + preferredVolumes + "'";
-      throw new RuntimeException(msg);
+      throw new IllegalArgumentException(msg);
     }
     // preferred volumes should also exist in the original options (typically, from
     // instance.volumes)
     if (Collections.disjoint(preferred, options)) {
       String msg = "Some volumes in " + preferred + " are not valid volumes from " + options;
-      throw new RuntimeException(msg);
+      throw new IllegalArgumentException(msg);
     }
 
     return preferred;

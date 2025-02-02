@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -41,6 +41,10 @@ public class Bulk {
     private Tablet tablet;
     private Collection<FileInfo> files;
 
+    // Gson requires a default constructor when JDK Unsafe usage is disabled
+    @SuppressWarnings("unused")
+    private Mapping() {}
+
     public Mapping(KeyExtent tablet, Files files) {
       this.tablet = toTablet(tablet);
       this.files = files.files.values();
@@ -66,6 +70,10 @@ public class Bulk {
 
     private byte[] endRow;
     private byte[] prevEndRow;
+
+    // Gson requires a default constructor when JDK Unsafe usage is disabled
+    @SuppressWarnings("unused")
+    private Tablet() {}
 
     public Tablet(Text endRow, Text prevEndRow) {
       this.endRow = endRow == null ? null : TextUtil.getBytes(endRow);
@@ -100,9 +108,13 @@ public class Bulk {
    * WARNING : do not change this class, its used for serialization to Json
    */
   public static class FileInfo {
-    final String name;
-    final long estSize;
-    final long estEntries;
+    String name;
+    long estSize;
+    long estEntries;
+
+    // Gson requires a default constructor when JDK Unsafe usage is disabled
+    @SuppressWarnings("unused")
+    private FileInfo() {}
 
     public FileInfo(String fileName, long estFileSize, long estNumEntries) {
       this.name = fileName;
@@ -138,10 +150,12 @@ public class Bulk {
 
     @Override
     public boolean equals(Object o) {
-      if (o == this)
+      if (o == this) {
         return true;
-      if (!(o instanceof FileInfo))
+      }
+      if (!(o instanceof FileInfo)) {
         return false;
+      }
       FileInfo other = (FileInfo) o;
       return this.name.equals(other.name) && this.estSize == other.estSize
           && this.estEntries == other.estEntries;
@@ -154,7 +168,7 @@ public class Bulk {
   }
 
   public static class Files implements Iterable<FileInfo> {
-    Map<String,FileInfo> files = new HashMap<>();
+    final Map<String,FileInfo> files = new HashMap<>();
 
     public Files(Collection<FileInfo> files) {
       files.forEach(this::add);
@@ -201,10 +215,12 @@ public class Bulk {
 
     @Override
     public boolean equals(Object o) {
-      if (o == this)
+      if (o == this) {
         return true;
-      if (!(o instanceof Files))
+      }
+      if (!(o instanceof Files)) {
         return false;
+      }
       Files other = (Files) o;
       return this.files.equals(other.files);
     }

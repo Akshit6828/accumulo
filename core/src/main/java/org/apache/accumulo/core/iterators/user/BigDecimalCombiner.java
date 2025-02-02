@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -63,8 +63,9 @@ public abstract class BigDecimalCombiner extends TypedValueCombiner<BigDecimal> 
   public static class BigDecimalSummingCombiner extends BigDecimalCombiner {
     @Override
     public BigDecimal typedReduce(Key key, Iterator<BigDecimal> iter) {
-      if (!iter.hasNext())
+      if (!iter.hasNext()) {
         return null;
+      }
       BigDecimal sum = iter.next();
       while (iter.hasNext()) {
         sum = sum.add(iter.next());
@@ -76,8 +77,9 @@ public abstract class BigDecimalCombiner extends TypedValueCombiner<BigDecimal> 
   public static class BigDecimalMaxCombiner extends BigDecimalCombiner {
     @Override
     public BigDecimal typedReduce(Key key, Iterator<BigDecimal> iter) {
-      if (!iter.hasNext())
+      if (!iter.hasNext()) {
         return null;
+      }
       BigDecimal max = iter.next();
       while (iter.hasNext()) {
         max = max.max(iter.next());
@@ -89,8 +91,9 @@ public abstract class BigDecimalCombiner extends TypedValueCombiner<BigDecimal> 
   public static class BigDecimalMinCombiner extends BigDecimalCombiner {
     @Override
     public BigDecimal typedReduce(Key key, Iterator<BigDecimal> iter) {
-      if (!iter.hasNext())
+      if (!iter.hasNext()) {
         return null;
+      }
       BigDecimal min = iter.next();
       while (iter.hasNext()) {
         min = min.min(iter.next());

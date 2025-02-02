@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -89,19 +89,17 @@ public class ClassSize {
   /**
    * Aligns a number to 8.
    *
-   * @param num
-   *          number to align to 8
+   * @param num number to align to 8
    * @return smallest number &gt;= input that is a multiple of 8
    */
   public static int align(int num) {
-    return (int) (align((long) num));
+    return (int) align((long) num);
   }
 
   /**
    * Aligns a number to 8.
    *
-   * @param num
-   *          number to align to 8
+   * @param num number to align to 8
    * @return smallest number &gt;= input that is a multiple of 8
    */
   public static long align(long num) {

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,18 +18,16 @@
  */
 package org.apache.accumulo.core.data;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
-import org.apache.accumulo.core.metadata.MetadataTable;
-import org.apache.accumulo.core.metadata.RootTable;
-import org.apache.accumulo.core.replication.ReplicationTable;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TestName;
+import org.apache.accumulo.core.WithTestNames;
+import org.apache.accumulo.core.metadata.AccumuloTable;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,12 +36,9 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 /**
  * Tests the Table ID class, mainly the internal cache.
  */
-public class TableIdTest {
+public class TableIdTest extends WithTestNames {
 
   private static final Logger LOG = LoggerFactory.getLogger(TableIdTest.class);
-
-  @Rule
-  public TestName name = new TestName();
 
   private static long cacheCount() {
     // guava cache size() is approximate, and can include garbage-collected entries
@@ -53,12 +48,12 @@ public class TableIdTest {
 
   @Test
   public void testCacheNoDuplicates() {
-    // the next two lines just preloads the built-ins, since they now exist in a separate class from
-    // TableId, and aren't preloaded when the TableId class is referenced
-    assertNotSame(RootTable.ID, MetadataTable.ID);
-    assertNotSame(RootTable.ID, ReplicationTable.ID);
 
-    String tableString = "table-" + name.getMethodName();
+    // the next line just preloads the built-ins, since they now exist in a separate class from
+    // TableId, and aren't preloaded when the TableId class is referenced
+    assertNotSame(AccumuloTable.ROOT.tableId(), AccumuloTable.METADATA.tableId());
+
+    String tableString = "table-" + testName();
     long initialSize = cacheCount();
     TableId table1 = TableId.of(tableString);
     assertEquals(initialSize + 1, cacheCount());
@@ -66,11 +61,9 @@ public class TableIdTest {
 
     // ensure duplicates are not created
     TableId builtInTableId = TableId.of("!0");
-    assertSame(MetadataTable.ID, builtInTableId);
+    assertSame(AccumuloTable.METADATA.tableId(), builtInTableId);
     builtInTableId = TableId.of("+r");
-    assertSame(RootTable.ID, builtInTableId);
-    builtInTableId = TableId.of("+rep");
-    assertSame(ReplicationTable.ID, builtInTableId);
+    assertSame(AccumuloTable.ROOT.tableId(), builtInTableId);
     table1 = TableId.of(tableString);
     assertEquals(initialSize + 1, cacheCount());
     assertEquals(tableString, table1.canonical());
@@ -80,7 +73,8 @@ public class TableIdTest {
     assertSame(table1, table2);
   }
 
-  @Test(timeout = 30_000)
+  @Test
+  @Timeout(30)
   public void testCacheIncreasesAndDecreasesAfterGC() {
     long initialSize = cacheCount();
     assertTrue(initialSize < 20); // verify initial amount is reasonably low
@@ -88,7 +82,7 @@ public class TableIdTest {
     LOG.info(TableId.cache.asMap().toString());
 
     // add one and check increase
-    String tableString = "table-" + name.getMethodName();
+    String tableString = "table-" + testName();
     TableId table1 = TableId.of(tableString);
     assertEquals(initialSize + 1, cacheCount());
     assertEquals(tableString, table1.canonical());
@@ -97,7 +91,7 @@ public class TableIdTest {
     long preGCSize = 0;
     int i = 0;
     while ((preGCSize = cacheCount()) < 100) {
-      TableId.of(new String("table" + i++));
+      TableId.of(("table" + i++));
     }
     LOG.info("Entries before System.gc(): {}", preGCSize);
     assertEquals(100, preGCSize);

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *   https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -76,8 +76,9 @@ public class AccumuloRowInputFormat extends InputFormat<Text,PeekingIterator<Ent
 
       @Override
       public boolean nextKeyValue() {
-        if (!rowIterator.hasNext())
+        if (!rowIterator.hasNext()) {
           return false;
+        }
         currentV = new PeekingIterator<>(rowIterator.next());
         numKeysRead = rowIterator.getKVCount();
         currentKey = currentV.peek().getKey();
@@ -92,9 +93,8 @@ public class AccumuloRowInputFormat extends InputFormat<Text,PeekingIterator<Ent
    * the specified ranges.
    *
    * @return the splits from the tables based on the ranges.
-   * @throws java.io.IOException
-   *           if a table set on the job doesn't exist or an error occurs initializing the tablet
-   *           locator
+   * @throws java.io.IOException if a table set on the job doesn't exist or an error occurs
+   *         initializing the tablet locator
    */
   @Override
   public List<InputSplit> getSplits(JobContext context) throws IOException {
